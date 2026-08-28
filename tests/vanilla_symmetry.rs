@@ -80,6 +80,28 @@ mod tests {
         )
     }
 
+    fn contains_jump_next(stmts: &[mary::ast::Stmt]) -> bool {
+        use mary::ast::{Stmt, SwitchCase};
+
+        stmts.iter().any(|stmt| match stmt {
+            Stmt::JumpNext => true,
+            Stmt::If(_, body) | Stmt::DoWhile(_, body) => contains_jump_next(body),
+            Stmt::IfElse(_, then_body, else_body) => {
+                contains_jump_next(then_body) || contains_jump_next(else_body)
+            }
+            Stmt::For(elements) => contains_jump_next(&elements.3),
+            Stmt::Switch(_, cases, _, _) => cases.iter().any(|case| match case {
+                SwitchCase::Case(_, body)
+                | SwitchCase::Fallthrough(_, body)
+                | SwitchCase::Default(body)
+                | SwitchCase::DefaultFallthrough(body)
+                | SwitchCase::ImplicitDefault(body)
+                | SwitchCase::DeadJump(body) => contains_jump_next(body),
+            }),
+            _ => false,
+        })
+    }
+
     fn recompile_scripts(which_rom: &str, which_lib: &str) -> Result<(), TestFailure> {
         use mary::{
             bytecode::{decode_script, encode_script},
@@ -119,6 +141,7 @@ mod tests {
 
         let mut results: Vec<FailType> = vec![];
         let mut low_level_ids = vec![];
+        let mut jump_next_ids = vec![];
 
         for i in 0..encoded_scripts.len() {
             let to_decode = encoded_scripts[i];
@@ -140,6 +163,10 @@ mod tests {
                 {
                     println!("structured failure {}: {err}", i + 1);
                 }
+            }
+
+            if contains_jump_next(&decompiled) {
+                jump_next_ids.push(i + 1);
             }
 
             // A decompilation is only successful if its printed source can be
@@ -185,12 +212,13 @@ mod tests {
 
         let success_count = results.iter().filter(|r| matches!(r, FailType::Ok)).count();
 
-        if success_count == scripts.len() && low_level_ids.is_empty() {
+        if success_count == scripts.len() && low_level_ids.is_empty() && jump_next_ids.is_empty() {
             println!(
-                "100% ({}/{}) strict source round-trip success; low-level IR scripts: {:?}",
+                "100% ({}/{}) strict source round-trip success; low-level IR scripts: {:?}; jump-next scripts: {:?}",
                 success_count,
                 scripts.len(),
-                low_level_ids
+                low_level_ids,
+                jump_next_ids
             );
             return Ok(());
         }
@@ -199,6 +227,13 @@ mod tests {
             println!(
                 "high-level structuring incomplete; low-level IR scripts: {:?}",
                 low_level_ids
+            );
+        }
+
+        if !jump_next_ids.is_empty() {
+            println!(
+                "high-level structuring incomplete; jump-next scripts: {:?}",
+                jump_next_ids
             );
         }
 

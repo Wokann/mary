@@ -708,7 +708,17 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
             _ => unreachable!("should have been checked at the head match"),
         };
 
-        self.push_stmt(Stmt::If(expr, stmts));
+        // A jump at the end of the true branch to the immediately following
+        // false label is the bytecode shape produced by an explicit empty
+        // `else`.  Raising it here keeps the source fully structured while
+        // preserving the otherwise redundant jump during recompilation.
+        if matches!(stmts.last(), Some(Stmt::JumpNext)) {
+            let mut then_stmts = stmts;
+            then_stmts.pop();
+            self.push_stmt(Stmt::IfElse(expr, then_stmts, vec![]));
+        } else {
+            self.push_stmt(Stmt::If(expr, stmts));
+        }
     }
 
     fn apply_if_else(&mut self, has_then_block: bool, has_else_block: bool) {
