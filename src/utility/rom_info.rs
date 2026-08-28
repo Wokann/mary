@@ -2,8 +2,14 @@ use std::io;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScriptTableEntry<'a> {
-    Empty { id: usize },
-    Script { id: usize, data: &'a [u8] },
+    Empty {
+        id: usize,
+    },
+    Script {
+        id: usize,
+        data: &'a [u8],
+        backing: &'a [u8],
+    },
 }
 
 impl ScriptTableEntry<'_> {
@@ -81,6 +87,7 @@ pub fn get_script_table(rom: &[u8]) -> io::Result<Vec<ScriptTableEntry<'_>>> {
         result.push(ScriptTableEntry::Script {
             id: i,
             data: &riff_unbound[0..riff_len],
+            backing: riff_unbound,
         });
     }
 

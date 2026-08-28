@@ -301,8 +301,8 @@ fn main_error() -> Result<(), Error> {
                         .find(|entry| entry.id() == script_id)
                         .ok_or(Error::CliError("Script ID is outside the pointer table"))?;
                     match entry {
-                        rom_info::ScriptTableEntry::Script { data, .. } => {
-                            bytecode::decode_script(&mut &data[..])?
+                        rom_info::ScriptTableEntry::Script { data, backing, .. } => {
+                            bytecode::decode_script_with_backing(data, backing)?
                         }
                         rom_info::ScriptTableEntry::Empty { .. } => {
                             print_empty_script_slot(
@@ -428,8 +428,8 @@ fn decompile_all_scripts(
                 &script_name,
                 &library_path_for_include,
             )?,
-            rom_info::ScriptTableEntry::Script { data, .. } => {
-                let script = bytecode::decode_script(&mut &data[..])?;
+            rom_info::ScriptTableEntry::Script { data, backing, .. } => {
+                let script = bytecode::decode_script_with_backing(data, backing)?;
                 let stmts = match decompile_script(&script, &library_scope) {
                     Ok(stmts) => stmts,
                     Err(error) => {

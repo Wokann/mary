@@ -191,9 +191,24 @@ fn decode_jump_chunk(data: &[u8]) -> Result<DecodedJumpChunk, DecodeError> {
         }
     }
 
+    // Offsets are relative to the byte immediately following ent_count, not
+    // merely documentation of the physical order of the tables.
+    let jump_pool = data.get(4..).ok_or_else(|| {
+        DecodeError::IoError(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "truncated JUMP chunk",
+        ))
+    })?;
     let mut case_tables = vec![];
 
-    for _ in 0..ent_count {
+    for off in offs {
+        let table_data = jump_pool.get(off..).ok_or_else(|| {
+            DecodeError::IoError(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "JUMP table offset is outside the chunk",
+            ))
+        })?;
+        let read = &mut &table_data[..];
         let entries = read.read_u32()? as usize;
         let default = read.read_u32()? as usize;
 
@@ -401,24 +416,38 @@ fn read_str(data: &[u8]) -> &[u8] {
     &data[0..end_off]
 }
 
-fn decode_string_chunk(strings_data: &[u8]) -> Result<Vec<StrValue>, DecodeError> {
+fn decode_string_chunk(
+    strings_data: &[u8],
+    strings_backing: &[u8],
+) -> Result<Vec<StrValue>, DecodeError> {
+    if strings_data.len() < 4 {
+        return Err(DecodeError::BadStrChunk);
+    }
     let string_count = (&strings_data[0..4]).read_u32()? as usize;
 
-    let pool_offset = 4 + 4 * string_count;
+    let pool_offset = 4usize
+        .checked_add(
+            4usize
+                .checked_mul(string_count)
+                .ok_or(DecodeError::BadStrChunk)?,
+        )
+        .ok_or(DecodeError::BadStrChunk)?;
 
     if pool_offset > strings_data.len() {
         return Err(DecodeError::BadStrChunk);
     }
 
     let string_offsets = &strings_data[4..pool_offset];
-    let string_pool = &strings_data[pool_offset..];
+    let string_pool = strings_backing
+        .get(pool_offset..)
+        .ok_or(DecodeError::BadStrChunk)?;
 
     let mut string_table = vec![];
 
     for i in 0..string_count {
         let offset = (&(string_offsets[i * 4..])).read_u32()? as usize;
 
-        if offset > strings_data.len() {
+        if offset >= string_pool.len() {
             return Err(DecodeError::BadStrChunk);
         }
 
@@ -428,10 +457,75 @@ fn decode_string_chunk(strings_data: &[u8]) -> Result<Vec<StrValue>, DecodeError
     Ok(string_table)
 }
 
+#[cfg(test)]
+mod chunk_tests {
+    use super::*;
+
+    #[test]
+    fn str_entries_are_resolved_through_the_offset_table() {
+        let data = [
+            2, 0, 0, 0, // count
+            2, 0, 0, 0, // id 0 -> pool + 2 ("A")
+            0, 0, 0, 0, // id 1 -> pool + 0 ("B")
+            b'B', 0, b'A', 0,
+        ];
+
+        assert_eq!(
+            decode_string_chunk(&data, &data).unwrap(),
+            vec![b"A".to_vec(), b"B".to_vec()]
+        );
+    }
+
+    #[test]
+    fn str_offsets_may_target_relocated_text_beyond_the_declared_chunk() {
+        let declared = [
+            1, 0, 0, 0, // count
+            8, 0, 0, 0, // id 0 -> pool + 8
+        ];
+        let mut backing = declared.to_vec();
+        backing.extend(b"old\0pad\0new\0");
+
+        assert_eq!(
+            decode_string_chunk(&declared, &backing).unwrap(),
+            vec![b"new".to_vec()]
+        );
+    }
+
+    #[test]
+    fn jump_entries_are_resolved_through_the_offset_table() {
+        let mut data = vec![
+            2, 0, 0, 0, // count
+            24, 0, 0, 0, // switch 0 -> second physical table
+            8, 0, 0, 0, // switch 1 -> first physical table
+        ];
+        // jump_pool + 8: one explicit case (10 -> code offset 100)
+        data.extend([1, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
+        data.extend([10, 0, 0, 0, 100, 0, 0, 0]);
+        // jump_pool + 24: default -> code offset 200
+        data.extend([0, 0, 0, 0, 200, 0, 0, 0]);
+
+        let decoded = decode_jump_chunk(&data).unwrap();
+        assert!(matches!(
+            decoded.case_tables[0].0[0],
+            (CaseEnum::Default, 200)
+        ));
+        assert!(matches!(
+            decoded.case_tables[1].0[0],
+            (CaseEnum::Val(10), 100)
+        ));
+    }
+}
+
+#[derive(Debug)]
+struct RiffChunk {
+    data: Vec<u8>,
+    body_offset: usize,
+}
+
 fn read_riff_chunks<R: io::Read>(
     read: &mut R,
     riff_size: usize,
-) -> Result<HashMap<String, Vec<u8>>, DecodeError> {
+) -> Result<HashMap<String, RiffChunk>, DecodeError> {
     let mut chunks = HashMap::new();
     let mut offset = 12usize;
 
@@ -443,7 +537,13 @@ fn read_riff_chunks<R: io::Read>(
         read.read(&mut chunk_data)?;
 
         let chunk_name = std::str::from_utf8(&chunk_name)?.to_string();
-        chunks.insert(chunk_name, chunk_data);
+        chunks.insert(
+            chunk_name,
+            RiffChunk {
+                data: chunk_data,
+                body_offset: offset + 8,
+            },
+        );
 
         offset = offset + chunk_size + 8
     }
@@ -451,7 +551,10 @@ fn read_riff_chunks<R: io::Read>(
     Ok(chunks)
 }
 
-pub fn decode_script<R: io::Read>(read: &mut R) -> Result<Script, DecodeError> {
+fn decode_script_impl<R: io::Read>(
+    read: &mut R,
+    external_backing: Option<&[u8]>,
+) -> Result<Script, DecodeError> {
     /*
      * Step 1: Decode RIFF header.
      */
@@ -477,7 +580,7 @@ pub fn decode_script<R: io::Read>(read: &mut R) -> Result<Script, DecodeError> {
      */
 
     let code_data = match chunks.get("CODE") {
-        Some(code_data) => decode_code_chunk(code_data)?,
+        Some(code_chunk) => decode_code_chunk(&code_chunk.data)?,
         None => return Err(DecodeError::MissingCodeChunk),
     };
 
@@ -492,7 +595,7 @@ pub fn decode_script<R: io::Read>(read: &mut R) -> Result<Script, DecodeError> {
     /* Step 3.2: Decode JUMP chunk, if any. */
 
     let jumps = match chunks.get("JUMP") {
-        Some(data) => decode_jump_chunk(data)?,
+        Some(chunk) => decode_jump_chunk(&chunk.data)?,
         None => DecodedJumpChunk::default(),
     };
 
@@ -505,11 +608,30 @@ pub fn decode_script<R: io::Read>(read: &mut R) -> Result<Script, DecodeError> {
     /* Step 5: Get string table */
 
     let strings = match chunks.get("STR ") {
-        Some(data) => decode_string_chunk(data)?,
+        Some(chunk) => {
+            let backing = external_backing
+                .and_then(|all| all.get(chunk.body_offset..))
+                .unwrap_or(&chunk.data);
+            decode_string_chunk(&chunk.data, backing)?
+        }
         None => vec![],
     };
 
     /* DONE */
 
     Ok(Script::new(instructions, strings))
+}
+
+pub fn decode_script<R: io::Read>(read: &mut R) -> Result<Script, DecodeError> {
+    decode_script_impl(read, None)
+}
+
+/// Decode a RIFF body while allowing STR offsets to address bytes beyond the
+/// declared RIFF/STR lengths. Some modified ROMs relocate strings this way,
+/// matching the game's unchecked `string_pool + offset` lookup.
+pub fn decode_script_with_backing(
+    riff: &[u8],
+    backing_from_riff_start: &[u8],
+) -> Result<Script, DecodeError> {
+    decode_script_impl(&mut &riff[..], Some(backing_from_riff_start))
 }

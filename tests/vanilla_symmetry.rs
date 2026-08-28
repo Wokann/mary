@@ -66,7 +66,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 rom_info::ScriptTableEntry::Empty { .. } => None,
-                rom_info::ScriptTableEntry::Script { id, data } => Some((*id, *data)),
+                rom_info::ScriptTableEntry::Script { id, data, .. } => Some((*id, *data)),
             })
             .collect();
 
@@ -186,7 +186,7 @@ mod tests {
             .into_iter()
             .filter_map(|entry| match entry {
                 ScriptTableEntry::Empty { .. } => None,
-                ScriptTableEntry::Script { id, data } => Some((id, data)),
+                ScriptTableEntry::Script { id, data, .. } => Some((id, data)),
             })
             .collect();
 

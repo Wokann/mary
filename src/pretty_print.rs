@@ -475,17 +475,15 @@ impl<'a> PrettyStringLit<'a> {
         while at < self.0.len() {
             if let Some(charmap) = self.1 {
                 if let Some((count, text)) = charmap.decode_one(&self.0[at..]) {
-                    let named_escape = charmap.is_named_escape(text);
-                    if split_before_next_text && !named_escape && !fragment.is_empty() {
+                    if split_before_next_text && !fragment.is_empty() {
                         fragments.push(std::mem::take(&mut fragment));
                     }
-                    if named_escape {
+                    if charmap.is_named_escape(text) {
                         fragment.push_str(text);
-                        split_before_next_text = true;
                     } else {
                         fragment.push_str(&Self::escaped_text(text));
-                        split_before_next_text = false;
                     }
+                    split_before_next_text = text == "\\n" || text == "\\p";
                     at += count;
                     continue;
                 }
@@ -564,7 +562,7 @@ mod string_lit_tests {
 
     #[test]
     fn message_constants_split_after_escape_runs_and_align_fragments() {
-        let map = Charmap::parse("41=A\n42=B\n0D=\\r\n0A=\\n\n05={END}\n").unwrap();
+        let map = Charmap::parse("41=A\n42=B\n0D=\\r\n0A=\\n\n05={Press}\n").unwrap();
         let stmts = vec![
             Stmt::Consts(vec![(
                 "MESSAGE_0".into(),
@@ -575,7 +573,24 @@ mod string_lit_tests {
 
         assert_eq!(
             PrettyStmts::with_charmap(&stmts, 1, &map).to_string(),
-            "    const MESSAGE_0 =\n        \"A\\r\\n\"\n        \"B{END}\"\n    const MESSAGE_1 =\n        \"B{END}\""
+            "    const MESSAGE_0 =\n        \"A\\r\\n\"\n        \"B{Press}\"\n    const MESSAGE_1 =\n        \"B{Press}\""
+        );
+    }
+
+    #[test]
+    fn only_line_feed_and_page_control_split_generated_lines() {
+        let map = Charmap::parse("41=A\n42=B\n05={END}\n09=\\t\n0A=\\n\n0B=\\l\n0C=\\p\n0D=\\r\n")
+            .unwrap();
+        let stmts = vec![Stmt::Consts(vec![(
+            "MESSAGE_0".into(),
+            Expr::Str(vec![
+                0x41, 0x09, 0x42, 0x05, 0x0B, 0x42, 0x0D, 0x41, 0x0A, 0x42, 0x0C, 0x41,
+            ]),
+        )])];
+
+        assert_eq!(
+            PrettyStmts::with_charmap(&stmts, 1, &map).to_string(),
+            "    const MESSAGE_0 =\n        \"A\\tB{END}\\lB\\rA\\n\"\n        \"B\\p\"\n        \"A\""
         );
     }
 }

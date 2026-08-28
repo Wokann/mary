@@ -1,258 +1,274 @@
 # mary
 
-`mary` is a script compiler and decompiler for Harvest Moon: Friends of Mineral Town and Harvest Moon: More Friends of Mineral Town for the GBA.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-All vanilla scripts now complete a strict source round trip: bytecode is decoded, decompiled to editable text, parsed again, compiled, encoded, and compared byte-for-byte with the original. This covers 100% of both games: 1328/1328 FoMT scripts and 1415/1415 MFoMT scripts.
+`mary` is a script compiler and decompiler for the US and Japanese GBA releases of *Harvest Moon: Friends of Mineral Town* (FoMT) and *Harvest Moon: More Friends of Mineral Town* (MFoMT).
 
-All 2743 vanilla scripts are emitted as structured source. None of the FoMT or MFoMT corpus currently requires the instruction-level `ir` fallback.
+```text
+RIFF bytecode in ROM
+        ↓ decompile
+Editable structured source (UTF-8)
+        ↓ compile
+Byte-exact RIFF/HEX
+```
 
-The easiest way to get started would be, I think, to simply decompile a bunch of vanilla scripts to see what they are like, and perhaps modify and recompile them and see what they do in-game.
+All 5,486 valid vanilla scripts from the four supported ROMs pass the strict source round trip: decode, structured decompile, print source, parse source, compile, encode, and compare byte-for-byte with the original RIFF. None currently requires low-level `ir` or retains `jump next`.
 
-If you are looking for my old attempt at writing this in C++, see [StanHash/mary_old][mary_old].
+| Version | Valid scripts | Structured source | Byte-exact round trip |
+| --- | ---: | ---: | ---: |
+| FoMT US | 1,328 | 1,328/1,328 | 1,328/1,328 |
+| MFoMT US | 1,415 | 1,415/1,415 | 1,415/1,415 |
+| FoMT JP | 1,328 | 1,328/1,328 | 1,328/1,328 |
+| MFoMT JP | 1,415 | 1,415/1,415 | 1,415/1,415 |
 
-[mary_old]: https://github.com/StanHash/mary_old
-
-## Usage
-
-There are two modes of operation when using `mary`: script compilation (convert your own scripts to bytecode), and script decompilation (extract existing bytecode in the ROM as a text)
-
-### Script compilation
-
-    mary compile INPUT -o OUTPUT
-
-The input is a file written in a custom script syntax. The output is a fragment of C that defines the data objects for the scripts defined in the source file.
-
-Other options:
-
-    # output to stdout
-    mary compile INPUT
-
-    # output to binary file instead of C (in that mode, only one script can be defined)
-    mary compile INPUT -o OUTPUT --binary
-
-    # output with a textual representation of the compiled scripts' intermediate representation (for debugging)
-    mary compile INPUT --print-ir
-
-    # compile using a cpp as a preprocessor. (mary can also take input from stdin)
-    cpp INPUT | mary compile -o OUTPUT
-
-Run `mary compile --help` for option details.
-
-### Script decompilation
-
-    mary decompile ROM LIBRARY -o OUTPUT --script-id ID
-
-The rom is one of "Harvest Moon - Friends of Mineral Town (USA)" or "Harvest Moon - More Friends of Mineral Town (USA)". Support for other regional variants is not planned yet.
-
-The "library" is a script that defines which functions and procedures are available to scripts. This can by any script, but the decompiler only cares for the function and procedures it defines. Working libraries for FoMT and MFoMT are available in the goodies subdirectory. See details below.
-
-An alternative command syntax allows decompiling from an arbitrary binary rather than one of the two known ROMs:
-
-    mary decompile BINARY LIBRARY -o OUTPUT [--offset OFFSET]
-
-Other options:
-
-    # output to stdout
-    mary decompile BINARY LIBRARY
-
-    # output with a textual representation of the decoded scripts' intermediate representation (for debugging)
-    mary decompile ROM LIBRARY -o OUTPUT --script-id ID --print-ir
-
-Run `mary decomile --help` for option details.
+> This 100% figure describes the four tested vanilla corpora. Arbitrary handwritten programs must still use structures supported by the VM and pass compiler validation.
 
 ## Build
 
-Install Rust development tools if you haven't already.
+Install the Rust toolchain, then run:
 
-    cargo build --release
+```console
+cargo build --release
+```
 
-You will find the mary executable into the target/release directory.
+The release executable is written to `target/release/mary.exe`.
 
-## About event scripts
+## Command-line usage
 
-In Harvest Moon: (More) Friends of Mineral Town, most interactions and cutscenes are described using event scripts (or simply "scripts"). It is not yet well known how we can configure how scripts are triggered, but with `mary` we can at least modify their actual behavior fairly extensively.
+### Decompile every script
 
-In the ROMs, scripts are represented as bytecode. This bytecode is interpreted by the game engine which provides specific interfaces (procedures and functions) for scripts to interract with the game. This bytecode is not very convenient to read or modify as is, so specific tooling is desired.
+```console
+mary decompile ROM LIBRARY --all --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
+```
 
-A large table of pointers to this bytecode is located within the ROM, one entry per script. "script IDs" are indices into this table. The first entry of this table (script ID of 0) is a null pointer and we ignore it.
+Example:
 
-Event script pointer table location in each game:
+```console
+mary decompile rom/fomtjp.gba goodies/lib_fomt.txt --all --charmap charmap_jp.txt -o decompiled_text/fomt_jp
+```
 
-- FoMT: address 0x080F89D4 (offset 0x0F89D4)
-- MFoMT: address 0x081014BC (offset 0x1014BC)
+`--all` writes one file per pointer-table slot, named `EventScript_0000.mary`, `EventScript_0001.mary`, and so on. Null pointers become explicit placeholder files, so later script IDs never shift.
 
-There are 1328 scripts in FoMT (IDs 1 through 1328) and 1415 scripts in MFoMT (IDs 1 through 1415).
+### Decompile one script
 
-The script interpreter is a stack-based virtual machine. Usually, stack-based instruction sets map well to higher level constructions, and this is no exception.
+```console
+mary decompile ROM LIBRARY --script-id ID --charmap charmap_jp.txt -o OUTPUT.mary
+```
 
-## `mary` specific scripting concepts
+An arbitrary RIFF offset can also be decoded:
 
-### Function & Procedure libraries
+```console
+mary decompile BINARY LIBRARY --offset OFFSET --charmap charmap_jp.txt -o OUTPUT.mary
+```
 
-Internally, the virtual machine only offers the script to invoke native code through IDs. In order for `mary` to be able to compile or decompile scripts, we need to assign a "shape" to each callable ID. A "shape" defines whether a callable is a function and a procedure, as well as what parameters they take.
+`--script-id` and `--offset` are mutually exclusive.
 
-By writing a program analyzing the bytecode corpus of both games, I have managed to build near-complete callable libraries for both games, which I completed through manual reverse-engineering. Some callables are unreferenced, and therefore couldn't be shaped by my program. (I haven't bothered doing it manually yet either)
+### Compile source
 
-These libraries are available as the following files:
+Generate C data definitions:
 
-- FoMT: [goodies/lib_fomt.txt]
-- MFoMT: [goodies/lib_mfomt.txt]
+```console
+mary compile INPUT.mary --charmap charmap_jp.txt -o OUTPUT.c
+```
 
-Note that the FoMT uses MFoMT names, which embed MFoMT IDs. This is done for parity between the libraries, but does mean that there's a mismatch between the names used by `mary` scripts and the internal IDs they correspond to. (`Func106` maps to ID 0x106 in MFoMT but ID 0x103 in FoMT)
+Generate one binary RIFF directly:
 
-[goodies/lib_fomt.txt]: goodies/lib_fomt.txt
-[goodies/lib_mfomt.txt]: goodies/lib_mfomt.txt
+```console
+mary compile INPUT.mary --binary --charmap charmap_jp.txt -o OUTPUT.riff
+```
 
-### Typing
+Binary mode accepts exactly one script. The `#include` line in generated source identifies its callable library; `mary` is not itself a C preprocessor. Expand the include before compiling a standalone extracted file, for example:
 
-Native callable parameters have types. For now those types basically boil down to either being `string` or not. `string`-type parameters are used by the decompiler to know where to place references to string constants.
+```console
+cpp INPUT.mary | mary compile --binary --charmap charmap_jp.txt -o OUTPUT.riff
+```
 
-Non-`string` types can be assigned to parameters as well, but for now the purpose of doing so is at best only informative to the reader. (`mary` itself doesn't care) There may be plans in the future to use these types for producing improved decompilations.
+Use `mary compile --help` and `mary decompile --help` for all options.
 
-### Constants
+## Character map
 
-Constants don't have any correspondance in the compiled bytecode. They are evaluated at compile time and any reference to a constant is substitued with its value.
+All ordinary text—including US English and Japanese Shift-JIS text—is converted through the replaceable UTF-8 `charmap_jp.txt` file.
 
-## Example script
+```text
+HEX=text or control token
+```
 
-    // Script 1 of MFoMT
-    // (same as FoMT except for slightly offset native callable ids)
+Examples:
 
-    // see goodies/lib_[m]fomt.txt for a full list of known callable shapes
-    func 0x106 Func106()
-    func 0x117 Func117(idx)
-    proc 0x105 Proc105(string_slot, animal_kind, idx)
-    proc 0x01F Proc01F()
-    proc 0x022 Proc022(message : string)
-    proc 0x021 Proc021()
-    proc 0x011 Proc011(arg_0, arg_1, arg_1)
+```text
+05={Press}
+0A=\n
+0D=\r
+0C=\p
+8140=　
+FF21={Player}
+FF22={Horse}
+```
 
-    const CONST_36 = 0x36
+Rules:
 
-    script 1 EventScript_1
-    {
-        const MESSAGE = "\xFF%is \r\nprengant!\x05"
+- The left side is a byte sequence in file order. `8140` means bytes `81 40`; it is never endian-swapped. Numeric ROM pointers and RIFF fields remain little-endian integers.
+- Encoding and decoding use longest matching. Multi-byte entries such as `FF21={Player}` stay intact.
+- Control names, byte prefixes, and lengths come exclusively from the loaded map. The parser does not hardcode byte prefixes such as `FF` as controls.
+- If several byte sequences map to the same text, the first entry is the canonical encoding for handwritten source. Ambiguous original bytes are printed as `\xNN` so round trips cannot silently select another encoding.
+- Unmapped bytes are also printed as `\xNN`. This syntax bypasses the map and writes one raw byte.
+- `\"` and `\\` are source-level escapes required to place a quote or backslash inside a string. Their ROM bytes still come from the map.
+- `HEX=` reserves an unassigned code point and is skipped when the map is loaded. This differs from an entry such as `20= `, whose mapped text is an actual space.
 
-        var animal_id = Func106()
-        var var_1 = CONST_36 + animal_id
+Blank lines and full-line comments beginning with `#` are allowed:
 
-        if Func117(animal_id)
-        {
-            // cow
-            Proc105(0, 1, animal_id)
-        }
-        else
-        {
-            // sheep
-            Proc105(0, 2, animal_id)
-        }
+```text
+# Message controls
+0C=\p
+```
 
-        Proc01F()
-        Proc022(MESSAGE)
-        Proc021()
-        Proc011(var_1, 1, 0)
-    }
+Inline comments are not supported. `23=#` remains a valid mapping because the line does not begin with `#`.
+
+## Generated text layout
+
+Every string constant starts on the line after `=`. To match the game's display behavior, generated source splits after `\n` or `\p` and keeps fragments aligned. `\r` only returns the game's horizontal cursor to the start of the line and does not cause a layout break by itself; neither does `{Press}` or any other control:
+
+```c
+const MESSAGE_12 =
+    "あんたも男なんだから、\r\n"
+    "気前がいいところをみせてよ。{Press}"
+const MESSAGE_13 =
+    "わ…わかったよ。{Press}"
+```
+
+This uses C-style adjacent string concatenation. Physical line breaks and indentation outside the quotes add no ROM bytes; the compiler merges the fragments into one string.
+
+## RIFF, CODE, JUMP, and STR
+
+Each script is a `RIFF`/`SCR ` container that normally holds a `CODE` chunk, an optional `JUMP` chunk, and a `STR ` chunk. Lengths, counts, offsets, and instruction operands are read as little-endian integers.
+
+- `CODE`: data is bounded by the chunk length and its internal code length is validated. Branch targets are byte offsets within CODE.
+- `JUMP`: the decoder reads the switch-table count and each table offset, then resolves every case/default table through that offset. It does not assume tables are physically contiguous in ID order.
+- `STR `: the decoder reads the string count and offset table. Every text ID resolves as “string-pool start + that ID's offset”; physical appearance order is not guessed.
+
+Some modified ROMs may retain the original STR/RIFF declared lengths, place text beyond the RIFF, and point STR offsets at that relocated text. ROM-mode decompilation keeps a backing view from the current RIFF to the remainder of the ROM, so these external strings remain addressable; CODE and JUMP stay bounded by their own chunk lengths.
+
+Compilation produces a standard self-contained RIFF: strings are written consecutively in text-ID order, and the STR offsets and chunk lengths are rebuilt. A modified ROM that uses external strings can therefore be decoded and normalized, but its rebuilt RIFF is not guaranteed to reproduce the modified ROM's unusual physical layout byte-for-byte. The four vanilla ROMs continue to pass strict byte-exact round-trip tests.
+
+## ROM pointer tables
+
+| Version | ROM address | File offset | Slots |
+| --- | ---: | ---: | --- |
+| FoMT US | `0x080F89D4` | `0x0F89D4` | null ID 0, then 1,328 scripts |
+| MFoMT US | `0x081014BC` | `0x1014BC` | null ID 0, then 1,415 scripts |
+| FoMT JP | `0x080F8230` | `0x0F8230` | null ID 0, then 1,328 scripts |
+| MFoMT JP | `0x0810145C` | `0x10145C` | null ID 0, then 1,415 scripts |
+
+Table length is determined from pointer validity and RIFF data, not by dropping null entries. Empty slots are retained.
+
+## Callable libraries
+
+The VM invokes native game code by numeric ID. `mary` needs a callable “shape” for each ID: whether it is a value-returning `func` or a `proc`, plus its parameters.
+
+- [FoMT library](goodies/lib_fomt.txt)
+- [MFoMT library](goodies/lib_mfomt.txt)
+
+FoMT uses MFoMT-oriented names for easier comparison, so digits in a name do not necessarily equal the FoMT ROM ID. The declaration in the selected library is authoritative.
 
 ## Script syntax
 
-    // line comment
+The language uses C-like structured syntax, but it is not full C. It represents only semantics that the stack VM can encode losslessly.
 
-    /*
-    multiline
-    comment
-    */
+### Top-level declarations
 
-### Toplevel constructs
+```c
+func 0x106 Func106()
+proc 0x022 TalkMessage(message : string)
+const NAME = VALUE
 
-    func ID NAME(PARAM, ...) // defines a native function.
-    proc ID NAME(PARAM, ...) // procs are functions that do not return a value.
+script 19 EventScript_19
+{
+    // body
+}
+```
 
-    const NAME = VALUE // defines a constant. Constants must be evaluatable at compile-time
+### Values and calls
 
-    script ID NAME { ... } // defines a script
+```c
+const MESSAGE_0 =
+    "First line\r\n"
+    "Second line\p"
+    "Next page{Press}"
 
-### Script body constructs
+var value = Func106()
+var other
+other = value + 1
+TalkMessage(MESSAGE_0)
+```
 
-    // define a constant, same rules as toplevel constants
-    const NAME = VALUE, ...
+Top-level and local constants are compile-time only and add no VM instructions.
 
-    // define a variable
-    var NAME, ...
-    var NAME = VALUE, ...
+### Control flow
 
-    // assign to a variable
-    NAME = VALUE
+```c
+if condition
+{
+    Proc001()
+}
+else
+{
+    Proc002()
+}
 
-    // preserve an assignment whose result remains on the VM stack
-    nodisc NAME = VALUE
+for var i = 0; i < 10; i++
+{
+    Proc003(i)
+}
 
-    // evaluate and explicitly discard a non-call expression
-    discard EXPR
+do
+{
+    i++
+} while i < 10
 
-    // call a function or procedure
-    NAME(ARG, ...)
-
-    // conditional. Braces are mandatory
-    if EXPR { ... }
-    if EXPR { ... } else { ... }
-
-    // for loop. Braces are mandatory
-    for var i = 0; i < 10; i++ { ... }
-
-    // do-while loop. Braces are mandatory
-    do { ... } while EXPR
-
-    // switch statement
-    switch EXPR
+switch value
+{
+    case 1
     {
-        case VALUE, ... { ... }
-        case VALUE, ... fallthrough { ... }
-        dead { ... } // preserve a layout-only jump with no case values
-        ...
-        default { ... } // optional
-        default implicit { ... } // default body without a bytecode case marker
+        Proc004()
+        break
     }
-
-    // switch whose final case jump also serves as its tail jump
-    switch compact EXPR { ... }
-
-    // leave the innermost switch from a nested branch
-    break
-
-    // preserve a byte-observable jump to the immediately following statement
-    jump next
-
-When control flow cannot be represented by the structured constructs without changing the bytecode, the decompiler uses an instruction-level block instead:
-
-    ir
+    case 2 fallthrough
     {
-        String("an editable string table entry")
-        PushInt(1)
-        Label(0)
-        Jmp(0)
-        Exit()
+        Proc005()
     }
+    default
+    {
+        Proc006()
+    }
+}
+```
 
-The IR contains decoded instructions, labels, operands, and string-table entries rather than an opaque raw-byte escape hatch. It therefore remains inspectable and editable while preserving exact recompilation.
+Lossless VM-specific constructs include `nodisc`, `discard`, `switch compact`, `default implicit`, `dead`, and `jump next`. If a future valid script cannot be structured without changing its bytecode, an editable instruction block remains available:
 
-## Structured decompilation coverage
+```c
+ir
+{
+    PushInt(1)
+    Label(0)
+    Jmp(0)
+    Exit()
+}
+```
 
-| Game | Structured source | Explicit low-level IR | Strict byte-exact source round trip |
-| --- | ---: | --- | ---: |
-| FoMT (US) | 1328/1328 | none | 1328/1328 |
-| MFoMT (US) | 1415/1415 | none | 1415/1415 |
+The four current vanilla corpora need no `ir` fallback.
 
-## TODO
+## Verification
 
-- Extend the structured control-flow corpus with synthetic deeply nested combinations
-- Better error checking (function/procedure call parameter count coherence)
-- Better error reporting (locations...)
-- Constant evaluations need to be completed (should be easy)
+Run ordinary tests with:
 
-## See also
+```console
+cargo test
+```
 
-- **[StanHash/FOMT-DOC][FOMT-DOC]**: My docs on FoMT event scripts (and more).
-- **[StanHash/fomt][fomt]**: My attempt at/fork of the FoMT decompilation.
+The complete ROM suite uses the `test_with_roms` feature and environment variables pointing to all four ROMs and both callable libraries. Its success criterion is byte-for-byte equality for every regenerated RIFF—not merely successful parsing.
 
-[FOMT-DOC]: https://github.com/StanHash/FOMT-DOC
-[fomt]: https://github.com/StanHash/fomt
+## Related projects
+
+- [StanHash/mary_old](https://github.com/StanHash/mary_old) — earlier C++ implementation.
+- [StanHash/FOMT-DOC](https://github.com/StanHash/FOMT-DOC) — FoMT event-script research.
+- [StanHash/fomt](https://github.com/StanHash/fomt) — FoMT decompilation project.

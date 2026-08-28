@@ -48,8 +48,11 @@ impl Charmap {
                     value: hex.into(),
                 });
             }
+            // TBL files commonly keep unused code points as `HEX=` slots.
+            // They do not describe a character and therefore take no part in
+            // either decoding or encoding.
             if text.is_empty() {
-                return Err(CharmapError::EmptyText { line });
+                continue;
             }
             let text = text.to_owned();
 
@@ -178,6 +181,16 @@ mod tests {
         assert_eq!(map.encode_text("A　").unwrap(), vec![0x41, 0x81, 0x40]);
         assert_eq!(map.decode_one(&[0x81, 0x40]), Some((2, "　")));
         assert_eq!(map.decode_one(&[0xFA, 0x41]), None);
+    }
+
+    #[test]
+    fn skips_unassigned_slots_but_keeps_whitespace_mappings() {
+        let map = Charmap::parse("41=A\n42=\n20= \n").unwrap();
+
+        assert_eq!(map.decode_one(&[0x41]), Some((1, "A")));
+        assert_eq!(map.decode_one(&[0x42]), None);
+        assert_eq!(map.decode_one(&[0x20]), Some((1, " ")));
+        assert_eq!(map.encode_text("A ").unwrap(), vec![0x41, 0x20]);
     }
 
     #[test]
