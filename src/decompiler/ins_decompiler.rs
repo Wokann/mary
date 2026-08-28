@@ -1146,6 +1146,27 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     self.append_switch_case(previous_switch_id, switch_case, None);
                 }
 
+                // Consecutive value labels can be represented as a single
+                // multi-value case. A value/default boundary cannot, so an
+                // otherwise empty preceding label is an explicit empty
+                // fallthrough case and must be reduced before the new marker.
+                let empty_incompatible_case = match self.back().last() {
+                    Some(DecompileToken::Case(previous_id, previous_case))
+                        if *previous_id == switch_id
+                            && !matches!(
+                                (previous_case, case_enum),
+                                (CaseEnum::Val(_), CaseEnum::Val(_))
+                            ) =>
+                    {
+                        Some(*previous_id)
+                    }
+                    _ => None,
+                };
+                if let Some(previous_switch_id) = empty_incompatible_case {
+                    let switch_case = self.reduce_switch_case(false, true);
+                    self.append_switch_case(previous_switch_id, switch_case, None);
+                }
+
                 let token = DecompileToken::Case(switch_id, case_enum);
 
                 self.state.stack.push(token);

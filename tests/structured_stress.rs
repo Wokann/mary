@@ -35,34 +35,38 @@ fn assert_source_round_trip(name: &str, body: &str) {
     let source = format!("{DECLARATIONS}\nscript 1 Stress\n{{\n{body}\n}}\n");
     let mut parsed = compiler::parse_string(&source)
         .unwrap_or_else(|err| panic!("{name}: initial source failed: {err}"));
-    let original = parsed.scripts.remove(0).2;
-    let original_bytes = encode_script(&original);
+    let mut current = parsed.scripts.remove(0).2;
+    let original_bytes = encode_script(&current);
+    let mut scope = parsed.const_scope;
 
-    let decompiled =
-        decompile_script_structured(&original, &parsed.const_scope).unwrap_or_else(|err| {
+    for round in 1..=3 {
+        let decompiled = decompile_script_structured(&current, &scope).unwrap_or_else(|err| {
             panic!(
-                "{name}: structured decompilation failed: {err}\n{}",
+                "{name} round {round}: structured decompilation failed: {err}\n{}",
                 err.state_at_error()
             )
         });
-    assert!(
-        !contains_low_level(&decompiled),
-        "{name}: decompilation retained IR or jump-next"
-    );
+        assert!(
+            !contains_low_level(&decompiled),
+            "{name} round {round}: decompilation retained IR or jump-next"
+        );
 
-    let rebuilt_source = format!(
-        "{DECLARATIONS}\nscript 1 Stress\n{{\n{}\n}}\n",
-        PrettyStmts::with_indent(&decompiled, 1)
-    );
-    let mut reparsed = compiler::parse_string(&rebuilt_source).unwrap_or_else(|err| {
-        panic!("{name}: decompiled text failed to parse: {err}\n{rebuilt_source}")
-    });
-    let rebuilt_bytes = encode_script(&reparsed.scripts.remove(0).2);
+        let rebuilt_source = format!(
+            "{DECLARATIONS}\nscript 1 Stress\n{{\n{}\n}}\n",
+            PrettyStmts::with_indent(&decompiled, 1)
+        );
+        let mut reparsed = compiler::parse_string(&rebuilt_source).unwrap_or_else(|err| {
+            panic!("{name} round {round}: decompiled text failed to parse: {err}\n{rebuilt_source}")
+        });
+        current = reparsed.scripts.remove(0).2;
+        scope = reparsed.const_scope;
+        let rebuilt_bytes = encode_script(&current);
 
-    assert_eq!(
-        original_bytes, rebuilt_bytes,
-        "{name}: byte mismatch after source round trip\n{rebuilt_source}"
-    );
+        assert_eq!(
+            original_bytes, rebuilt_bytes,
+            "{name} round {round}: byte mismatch after source round trip\n{rebuilt_source}"
+        );
+    }
 }
 
 #[test]
@@ -272,4 +276,185 @@ fn generated_eight_level_switch_nesting() {
     }
 
     assert_source_round_trip("generated_eight_level_switch_nesting", &body);
+}
+
+#[test]
+fn compact_switch_with_layout_cases() {
+    assert_source_round_trip(
+        "compact_switch_with_layout_cases",
+        r#"
+    var value = 2
+    switch compact value
+    {
+        dead { Mark(90) }
+        case 1 fallthrough { Mark(1) }
+        case 2 { Mark(2) }
+        default implicit { Mark(3) }
+    }
+"#,
+    );
+}
+
+#[test]
+fn default_fallthrough_before_nested_case() {
+    assert_source_round_trip(
+        "default_fallthrough_before_nested_case",
+        r#"
+    var value = 4
+    switch value
+    {
+        default fallthrough
+        {
+            Mark(40)
+        }
+        case 4
+        {
+            switch compact value
+            {
+                case 4 { Mark(41) }
+                default { Mark(42) }
+            }
+        }
+    }
+"#,
+    );
+}
+
+#[test]
+fn exits_across_nested_control_flow() {
+    assert_source_round_trip(
+        "exits_across_nested_control_flow",
+        r#"
+    var value = 1
+    switch value
+    {
+        case 1
+        {
+            if Probe(value)
+            {
+                do
+                {
+                    if Probe(9) { exit } else { Mark(9) }
+                } while Probe(8)
+            }
+            else
+            {
+                exit
+            }
+        }
+        default { exit }
+    }
+"#,
+    );
+}
+
+#[test]
+fn empty_control_flow_bodies() {
+    assert_source_round_trip(
+        "empty_control_flow_bodies",
+        r#"
+    var value = 0
+    if Probe(value) { } else { }
+    do { } while Probe(value)
+    for var i = 0; i < 1; i++ { }
+    switch value
+    {
+        case 0 { }
+        case 1 fallthrough { }
+        default { }
+    }
+"#,
+    );
+}
+
+#[test]
+fn deep_else_if_chain_with_switches() {
+    assert_source_round_trip(
+        "deep_else_if_chain_with_switches",
+        r#"
+    var value = 3
+    if Probe(value) == 0
+    {
+        Mark(0)
+    }
+    else if Probe(value) == 1
+    {
+        switch value { case 1 { Mark(1) } default { Mark(10) } }
+    }
+    else if Probe(value) == 2
+    {
+        do { Mark(2) } while Probe(20)
+    }
+    else if Probe(value) == 3
+    {
+        for var i = 0; i < 2; i++ { Mark(i) }
+    }
+    else
+    {
+        Mark(4)
+    }
+"#,
+    );
+}
+
+#[test]
+fn switch_break_from_inside_loop() {
+    assert_source_round_trip(
+        "switch_break_from_inside_loop",
+        r#"
+    var value = 1, i = 0
+    switch value
+    {
+        case 1
+        {
+            do
+            {
+                if Probe(i)
+                {
+                    break
+                }
+                i++
+            } while i < 3
+            Mark(1)
+        }
+        default { Mark(2) }
+    }
+"#,
+    );
+}
+
+fn wrap_control(kind: &str, depth: usize, inner: &str) -> String {
+    match kind {
+        "if_else" => format!(
+            "if Probe(value)\n{{\n{inner}\n}}\nelse\n{{\n    Mark({})\n}}",
+            1000 + depth
+        ),
+        "do_while" => format!("do\n{{\n{inner}\n}} while Probe(value)"),
+        "for" => format!(
+            "for var i{depth} = 0; i{depth} < 2; i{depth}++\n{{\n{inner}\n}}"
+        ),
+        "switch" => format!(
+            "switch value\n{{\n    case 0\n    {{\n{inner}\n    }}\n    default {{ Mark({}) }}\n}}",
+            1100 + depth
+        ),
+        "switch_compact" => format!(
+            "switch compact value\n{{\n    case 0\n    {{\n{inner}\n    }}\n    default {{ Mark({}) }}\n}}",
+            1200 + depth
+        ),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn generated_pairwise_control_flow_matrix() {
+    let kinds = ["if_else", "do_while", "for", "switch", "switch_compact"];
+
+    for (outer_index, outer) in kinds.iter().enumerate() {
+        for (inner_index, inner) in kinds.iter().enumerate() {
+            let leaf = format!("Mark({})", 1300 + outer_index * kinds.len() + inner_index);
+            let nested = wrap_control(inner, 1, &leaf);
+            let body = format!("var value = 0\n{}", wrap_control(outer, 0, &nested));
+            assert_source_round_trip(&format!("pairwise_{outer}_{inner}"), &body);
+        }
+    }
 }
