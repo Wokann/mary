@@ -2,7 +2,9 @@
 
 `mary` is a script compiler and decompiler for Harvest Moon: Friends of Mineral Town and Harvest Moon: More Friends of Mineral Town for the GBA.
 
-It is able to decompile most vanilla scripts and recompile them into the exact same bytecode: as of this writing, 97.59% (1296/1328) or FoMT scripts and 98.44% (1393/1415) of MFoMT scripts can be decompiled, and all of them are exact matches once recompiled. One of the end goals of this project is to reach 100%.
+All vanilla scripts now complete a strict source round trip: bytecode is decoded, decompiled to editable text, parsed again, compiled, encoded, and compared byte-for-byte with the original. This covers 100% of both games: 1328/1328 FoMT scripts and 1415/1415 MFoMT scripts.
+
+The decompiler emits structured source where it can do so losslessly. The remaining 25 FoMT and 15 MFoMT scripts contain control flow that the structurer cannot yet express; these are emitted as explicit instruction-level `ir` blocks. They are editable and lossless, and are not counted as structured decompilation successes.
 
 The easiest way to get started would be, I think, to simply decompile a bunch of vanilla scripts to see what they are like, and perhaps modify and recompile them and see what they do in-game.
 
@@ -181,6 +183,12 @@ Constants don't have any correspondance in the compiled bytecode. They are evalu
     // assign to a variable
     NAME = VALUE
 
+    // preserve an assignment whose result remains on the VM stack
+    nodisc NAME = VALUE
+
+    // evaluate and explicitly discard a non-call expression
+    discard EXPR
+
     // call a function or procedure
     NAME(ARG, ...)
 
@@ -198,26 +206,37 @@ Constants don't have any correspondance in the compiled bytecode. They are evalu
     switch EXPR
     {
         case VALUE, ... { ... }
+        dead { ... } // preserve a layout-only jump with no case values
         ...
         default { ... } // optional
     }
 
-Note that the switch statement syntax may change by 1.0.0, in order to allow constructs that are needed for matching the last few scripts.
+When control flow cannot be represented by the structured constructs without changing the bytecode, the decompiler uses an instruction-level block instead:
 
-## Broken decompiled scripts
+    ir
+    {
+        String("an editable string table entry")
+        PushInt(1)
+        Label(0)
+        Jmp(0)
+        Exit()
+    }
 
-| Which game | Broken due to bugged lead assignment | Broken due to incomplete switch decompilation logic |
-| ---------- | --- | ---
-| FoMT (US) | 106, 143, 409, 410, 411, 532, 879 | 356, 403, 540, 571, 610, 614, 617, 620, 623, 625, 629, 632, 635, 638, 640, 644, 647, 650, 653, 855, 858, 861, 1008, 1013, 1031
-| MFoMT (US) | 114, 151, 418, 419, 420, 541, 947 | 359, 365, 412, 433, 549, 580, 726, 1075, 1078, 1083, 1086, 1095, 1098, 1101, 1113
+The IR contains decoded instructions, labels, operands, and string-table entries rather than an opaque raw-byte escape hatch. It therefore remains inspectable and editable while preserving exact recompilation.
+
+## Structured decompilation coverage
+
+| Game | Structured source | Explicit low-level IR | Strict byte-exact source round trip |
+| --- | ---: | --- | ---: |
+| FoMT (US) | 1303/1328 | 356, 403, 540, 571, 610, 614, 617, 620, 623, 625, 629, 632, 635, 638, 640, 644, 647, 650, 653, 855, 858, 861, 1008, 1013, 1031 | 1328/1328 |
+| MFoMT (US) | 1400/1415 | 359, 365, 412, 433, 549, 580, 726, 1075, 1078, 1083, 1086, 1095, 1098, 1101, 1113 | 1415/1415 |
 
 ## TODO
 
-- More automated tests
+- Continue lifting the remaining `ir` scripts into structured source without sacrificing losslessness
 - Better error checking (function/procedure call parameter count coherence)
 - Better error reporting (locations...)
 - Constant evaluations need to be completed (should be easy)
-- Rethink switch decompilation. Most of the failed decompilations are results of weird switch constructs that I don't handle well currently.
 
 ## See also
 

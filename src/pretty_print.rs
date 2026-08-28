@@ -1,6 +1,6 @@
 use std::{fmt, slice};
 
-use crate::ast::{Expr, Invoke, Stmt, SwitchCase};
+use crate::ast::{Expr, Invoke, IrArg, Stmt, SwitchCase};
 
 #[derive(Debug, PartialEq, PartialOrd)]
 enum Precedence {
@@ -235,9 +235,26 @@ impl<'a> fmt::Display for PrettyStmts<'a> {
                     write!(f, " {pretty_expr}")?;
                 }
 
+                Stmt::AssignNoDisc(assign_operation, var_name, expr) => {
+                    write!(f, "{indent_string}nodisc {var_name} {assign_operation}")?;
+
+                    let pretty_expr = PrettyExpr::new(expr);
+                    write!(f, " {pretty_expr}")?;
+                }
+
                 Stmt::Expr(expr) => {
                     let pretty_expr = PrettyExpr::new(expr);
-                    write!(f, "{indent_string}{pretty_expr}")?;
+                    match expr {
+                        Expr::PostIncrement(_)
+                        | Expr::PreIncrement(_)
+                        | Expr::PostDecrement(_)
+                        | Expr::PreDecrement(_) => {
+                            write!(f, "{indent_string}{pretty_expr}")?;
+                        }
+                        _ => {
+                            write!(f, "{indent_string}discard {pretty_expr}")?;
+                        }
+                    }
                 }
 
                 Stmt::Call(invoke) => {
@@ -325,10 +342,15 @@ impl<'a> fmt::Display for PrettyStmts<'a> {
                     write!(f, "{indent_string}}} while {pretty_expr}")?;
                 }
 
-                Stmt::Switch(expr, switch_cases, _) => {
+                Stmt::Switch(expr, switch_cases, _, layout) => {
                     let pretty_expr = PrettyExpr::new(expr);
 
-                    writeln!(f, "{indent_string}switch {pretty_expr}")?;
+                    let layout_marker = if *layout == crate::ast::SwitchLayout::Compact {
+                        " compact"
+                    } else {
+                        ""
+                    };
+                    writeln!(f, "{indent_string}switch{layout_marker} {pretty_expr}")?;
                     writeln!(f, "{indent_string}{{")?;
 
                     for switch_case in switch_cases {
@@ -336,6 +358,25 @@ impl<'a> fmt::Display for PrettyStmts<'a> {
                         writeln!(f)?;
                     }
 
+                    write!(f, "{indent_string}}}")?;
+                }
+
+                Stmt::Ir(items) => {
+                    writeln!(f, "{indent_string}ir")?;
+                    writeln!(f, "{indent_string}{{")?;
+                    for item in items {
+                        write!(f, "{indent_string}    {}(", item.name)?;
+                        for (index, arg) in item.args.iter().enumerate() {
+                            if index != 0 {
+                                write!(f, ", ")?;
+                            }
+                            match arg {
+                                IrArg::Int(value) => write!(f, "{value}")?,
+                                IrArg::Str(value) => PrettyStringLit::new(value).fmt(f)?,
+                            }
+                        }
+                        writeln!(f, ")")?;
+                    }
                     write!(f, "{indent_string}}}")?;
                 }
 
@@ -432,6 +473,18 @@ pub(crate) fn fmt_switch_case(
 
             let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
             writeln!(f, "{pretty_body}")?;
+
+            write!(f, "{indent_string}}}")?;
+        }
+
+        SwitchCase::DeadJump(stmts) => {
+            writeln!(f, "{indent_string}dead")?;
+            writeln!(f, "{indent_string}{{")?;
+
+            if !stmts.is_empty() {
+                let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
+                writeln!(f, "{pretty_body}")?;
+            }
 
             write!(f, "{indent_string}}}")?;
         }

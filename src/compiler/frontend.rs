@@ -11,8 +11,9 @@ pub fn parse_string(code_string: &str) -> Result<ParseContext, ScriptError> {
 
     for tok in l {
         match tok {
-            Ok((_, tok, _)) => match p.parse(tok) {
+            Ok((start, tok, _)) => match p.parse(tok) {
                 Ok(()) => {}
+                Err(ScriptError::SyntaxError) => return Err(ScriptError::SyntaxErrorAt(start)),
                 Err(err) => return Err(err.into()),
             },
 

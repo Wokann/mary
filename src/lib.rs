@@ -4,5 +4,6 @@ pub mod compiler;
 pub mod const_scope;
 pub mod decompiler;
 pub mod ir;
+pub mod low_level;
 pub mod pretty_print;
 pub mod utility;

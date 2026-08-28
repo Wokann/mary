@@ -1,7 +1,9 @@
 use pomelo::pomelo;
 
 use super::{compile_script, ScriptError};
-use crate::ast::{AssignOperation, ConstVal, Expr, Invoke, Stmt, SwitchCase};
+use crate::ast::{
+    AssignOperation, ConstVal, Expr, Invoke, IrArg, IrItem, Stmt, SwitchCase, SwitchLayout,
+};
 use crate::const_scope::ConstScope;
 use crate::ir::{CallId, IntValue, Script, SwitchId, ValueType};
 
@@ -27,6 +29,10 @@ pomelo! {
     %include { use super::*; }
 
     %extra_argument ParseContext;
+    // Decompiled vanilla scripts can contain very deep nested control flow.
+    // Use the heap-backed unlimited parser stack instead of rejecting valid
+    // generated source at the default fixed depth.
+    %stack_size 0;
 
     // token types
 
@@ -145,15 +151,36 @@ pomelo! {
     stmt ::= KwVar initializers(i) { Stmt::Vars(i) };
     stmt ::= KwConst const_initializers(i) { Stmt::Consts(i) };
     stmt ::= assignment(a) { Stmt::Assign(a.0, a.1, a.2) };
+    stmt ::= KwNoDisc assignment(a) { Stmt::AssignNoDisc(a.0, a.1, a.2) };
     stmt ::= call(i) { Stmt::Call(i) }
     stmt ::= KwIf expr(e) stmt_block(b) { Stmt::If(e, b) };
     stmt ::= KwIf expr(e) stmt_block(b1) else_if_chain(b2) { Stmt::IfElse(e, b1, b2) };
     stmt ::= KwDo stmt_block(b) KwWhile expr(e) { Stmt::DoWhile(e, b) };
     stmt ::= KwFor stmt(h) Semicolon expr(e) Semicolon stmt(t) stmt_block(b) { Stmt::For(Box::new((e, h, t, b))) };
-    stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0)) };
+    stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0), SwitchLayout::Standard) };
+    stmt ::= KwSwitch KwCompact expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0), SwitchLayout::Compact) };
     stmt ::= KwExit { Stmt::Exit };
+    stmt ::= KwDiscard expr(e) { Stmt::Expr(e) };
     stmt ::= preincr(e) { Stmt::Expr(e) };
     stmt ::= postincr(e) { Stmt::Expr(e) };
+    stmt ::= KwIr LCurly ir_items(items) RCurly { Stmt::Ir(items) };
+
+    %type ir_items Vec<IrItem>;
+    ir_items ::= { Vec::new() };
+    ir_items ::= ir_items(mut items) ir_item(item) { items.push(item); items };
+
+    %type ir_item IrItem;
+    ir_item ::= Name(name) LParen RParen { IrItem::new(name, Vec::new()) };
+    ir_item ::= Name(name) LParen ir_args(args) RParen { IrItem::new(name, args) };
+
+    %type ir_args Vec<IrArg>;
+    ir_args ::= ir_arg(arg) { vec![arg] };
+    ir_args ::= ir_args(mut args) Comma ir_arg(arg) { args.push(arg); args };
+
+    %type ir_arg IrArg;
+    ir_arg ::= Integer(value) { IrArg::Int(value) };
+    ir_arg ::= Minus Integer(value) { IrArg::Int(-value) };
+    ir_arg ::= StringLit(value) { IrArg::Str(value) };
 
     %type initializers Vec<(String, Option<Expr>)>;
     initializers ::= initializers(mut v) Comma initializer(i) { v.push(i); v };
@@ -182,6 +209,7 @@ pomelo! {
     %type case SwitchCase;
     case ::= KwCase args(a) stmt_block(b) { SwitchCase::Case(a, b) };
     case ::= KwDefault stmt_block(b) { SwitchCase::Default(b) };
+    case ::= KwDead stmt_block(b) { SwitchCase::DeadJump(b) };
 
     /* =============== */
     /* = Expressions = */

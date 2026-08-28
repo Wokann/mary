@@ -16,6 +16,18 @@ pub fn decompile_script<'a>(
     script: &'a Script,
     const_scope: &ConstScope,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
+    match decompile_script_structured(script, const_scope) {
+        Ok(stmts) => Ok(stmts),
+        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
+    }
+}
+
+/// Decompile without the lossless instruction-level fallback.  This is useful
+/// for measuring and improving actual high-level structuring coverage.
+pub fn decompile_script_structured<'a>(
+    script: &'a Script,
+    const_scope: &ConstScope,
+) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
     let mut known_callables = HashMap::new();
 
     let callable_map = const_scope.callable_map();
@@ -26,9 +38,10 @@ pub fn decompile_script<'a>(
 
     let mut stmts = decompile_instructions(&script.instructions, &known_callables)?;
 
-    match decorator::decorate_stmts_with_strings(&mut stmts, &script.strings, const_scope) {
-        Ok(()) => {}
-        Err(err) => return Err(DecompileErrorExtra(err, stmts.into())),
+    if let Err(err) =
+        decorator::decorate_stmts_with_strings(&mut stmts, &script.strings, const_scope)
+    {
+        return Err(DecompileErrorExtra(err, DecompileState::new(&[])));
     }
 
     // TODO: decorate

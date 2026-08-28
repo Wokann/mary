@@ -19,6 +19,7 @@ impl SwitchAllocator {
             match switch_case {
                 SwitchCase::Case(_, stmts) => self.visit_stmts(stmts),
                 SwitchCase::Default(stmts) => self.visit_stmts(stmts),
+                SwitchCase::DeadJump(stmts) => self.visit_stmts(stmts),
             }
         }
     }
@@ -40,15 +41,18 @@ impl SwitchAllocator {
 
             Stmt::DoWhile(_, stmts) => self.visit_stmts(stmts),
 
-            Stmt::Switch(_, switch_cases, switch_id) => {
+            Stmt::Switch(_, switch_cases, switch_id, _) => {
                 /* IMPORTANT FOR MATCHING: depth-first */
                 self.visit_switch_cases(switch_cases);
                 *switch_id = self.new_switch();
             }
 
+            Stmt::Ir(_) => {}
+
             Stmt::Vars(_)
             | Stmt::Consts(_)
             | Stmt::Assign(_, _, _)
+            | Stmt::AssignNoDisc(_, _, _)
             | Stmt::Expr(_)
             | Stmt::Call(_)
             | Stmt::Exit => {}

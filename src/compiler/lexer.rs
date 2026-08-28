@@ -40,11 +40,16 @@ lexer! {
         "do"      = Token::KwDo,
         "while"   = Token::KwWhile,
         "switch"  = Token::KwSwitch,
+        "compact" = Token::KwCompact,
         "case"    = Token::KwCase,
         "default" = Token::KwDefault,
+        "dead"    = Token::KwDead,
+        "discard" = Token::KwDiscard,
+        "nodisc"  = Token::KwNoDisc,
         "exit"    = Token::KwExit,
         "string"  = Token::KwString,
         "integer" = Token::KwInteger,
+        "ir"      = Token::KwIr,
 
         /* punctuation */
         "(" = Token::LParen,

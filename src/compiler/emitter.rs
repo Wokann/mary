@@ -346,6 +346,19 @@ impl Emit {
         self.ins(Ins::Discard);
     }
 
+    fn assign_no_disc(&mut self, scope: &BlockScope, id: VarId, expr: Expr, op: AssignOperation) {
+        self.ins(Ins::PushInt(id.0 as IntValue));
+        self.expr(scope, expr);
+        self.ins(match op {
+            AssignOperation::None => Ins::Assign,
+            AssignOperation::Add => Ins::AssignAdd,
+            AssignOperation::Sub => Ins::AssignSub,
+            AssignOperation::Mul => Ins::AssignMul,
+            AssignOperation::Div => Ins::AssignDiv,
+            AssignOperation::Mod => Ins::AssignMod,
+        });
+    }
+
     fn stmt(&mut self, scope: &mut BlockScope, stmt: Stmt) {
         use CompileError::{
             CannotAssignToNonVar, ExpectedConstantIntGotStr, FailedConstantEvaluation,
@@ -381,6 +394,18 @@ impl Emit {
                 if let Some(name_ref) = scope.lookup_name(&name) {
                     if let NameRef::Var(id) = name_ref {
                         self.assign(scope, id, expr, op);
+                    } else {
+                        self.errors.push(CannotAssignToNonVar(name));
+                    }
+                } else {
+                    self.errors.push(NameNotDeclared(name));
+                }
+            }
+
+            Stmt::AssignNoDisc(op, name, expr) => {
+                if let Some(name_ref) = scope.lookup_name(&name) {
+                    if let NameRef::Var(id) = name_ref {
+                        self.assign_no_disc(scope, id, expr, op);
                     } else {
                         self.errors.push(CannotAssignToNonVar(name));
                     }
@@ -480,7 +505,7 @@ impl Emit {
                 self.ins(Ins::Bne(loop_lab))
             }
 
-            Stmt::Switch(expr, cases, switch_id) => {
+            Stmt::Switch(expr, cases, switch_id, layout) => {
                 let switch_lab = self.new_label();
                 let next_lab = self.new_label();
                 // let switch_id = self.new_switch();
@@ -533,14 +558,28 @@ impl Emit {
                                 self.ins(Ins::Jmp(next_lab));
                             }
                         }
+
+                        SwitchCase::DeadJump(stmts) => {
+                            // This is a layout instruction recovered from the
+                            // original bytecode, not a semantic case. Keeping
+                            // the body empty makes that fact explicit.
+                            if !stmts.is_empty() {
+                                self.errors.push(CompileError::NonEmptyDeadJump);
+                            }
+                            self.ins(Ins::Jmp(next_lab));
+                        }
                     }
                 }
 
-                self.ins(Ins::Jmp(next_lab)); // dead, but needed to produce matching code
+                if layout == crate::ast::SwitchLayout::Standard {
+                    self.ins(Ins::Jmp(next_lab)); // dead, but needed to produce matching code
+                }
                 self.ins(Ins::Label(switch_lab));
                 self.ins(Ins::Switch(switch_id));
                 self.ins(Ins::Label(next_lab));
             }
+
+            Stmt::Ir(_) => self.errors.push(CompileError::MisplacedIrBlock),
 
             Stmt::Exit => self.ins(Ins::Exit),
         }
@@ -564,6 +603,15 @@ impl Emit {
 }
 
 pub fn compile_script(stmts: Vec<Stmt>, const_scope: &ConstScope) -> Result<Script, CompileErrors> {
+    if matches!(&stmts[..], [Stmt::Ir(_)]) {
+        let items = match stmts.into_iter().next().unwrap() {
+            Stmt::Ir(items) => items,
+            _ => unreachable!(),
+        };
+        return crate::low_level::items_to_script(items)
+            .map_err(|error| CompileErrors(vec![error]));
+    }
+
     let mut stmts = stmts;
 
     allocate_switch_ids(&mut stmts);

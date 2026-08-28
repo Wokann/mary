@@ -128,7 +128,7 @@ impl<'a> StringDecorateVisitor<'a> {
                 Ok(())
             }
 
-            Stmt::Assign(_, _, expr) => self.visit_expr(expr),
+            Stmt::Assign(_, _, expr) | Stmt::AssignNoDisc(_, _, expr) => self.visit_expr(expr),
             Stmt::Expr(expr) => self.visit_expr(expr),
 
             Stmt::Call(invoke) => self.visit_invoke(invoke),
@@ -156,7 +156,7 @@ impl<'a> StringDecorateVisitor<'a> {
                 self.visit_stmts(stmts)
             }
 
-            Stmt::Switch(expr, switch_cases, _) => {
+            Stmt::Switch(expr, switch_cases, _, _) => {
                 self.visit_expr(expr)?;
 
                 for switch_case in switch_cases {
@@ -165,6 +165,8 @@ impl<'a> StringDecorateVisitor<'a> {
 
                 Ok(())
             }
+
+            Stmt::Ir(_) => Ok(()),
 
             Stmt::Exit => Ok(()),
         }

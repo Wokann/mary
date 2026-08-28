@@ -4,6 +4,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
+    #[error("a switch dead block must be empty")]
+    NonEmptyDeadJump,
+    #[error("invalid low-level IR: {0}")]
+    InvalidIr(String),
+    #[error("an ir block must be the only statement in a script")]
+    MisplacedIrBlock,
     #[error("Cannot redeclare '{0}' in this scope")]
     NameAlreadyDeclared(String),
 
@@ -56,6 +62,9 @@ pub enum ScriptError {
 
     #[error("Syntax error")]
     SyntaxError,
+
+    #[error("Syntax error at {0:?}")]
+    SyntaxErrorAt(lexgen_util::Loc),
 
     #[error("Fatal syntax error")]
     ParseFail,

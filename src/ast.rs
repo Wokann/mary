@@ -3,6 +3,27 @@ use std::fmt;
 use crate::ir::{CallId, IntValue, StrValue, SwitchId, VarId};
 
 #[derive(Debug, PartialEq)]
+pub enum IrArg {
+    Int(IntValue),
+    Str(StrValue),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct IrItem {
+    pub name: String,
+    pub args: Vec<IrArg>,
+}
+
+impl IrItem {
+    pub fn new(name: impl Into<String>, args: Vec<IrArg>) -> Self {
+        Self {
+            name: name.into(),
+            args,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Invoke {
     pub func: String,
     pub args: Vec<Expr>,
@@ -69,20 +90,38 @@ pub enum Stmt {
     Vars(Vec<(String, Option<Expr>)>),
     Consts(Vec<(String, Expr)>),
     Assign(AssignOperation, String, Expr),
+    /// Assignment whose result is intentionally left on the VM stack rather
+    /// than followed by Discard. This distinction is observable in bytecode.
+    AssignNoDisc(AssignOperation, String, Expr),
     Expr(Expr),
     Call(Invoke),
     If(Expr, Vec<Stmt>),
     IfElse(Expr, Vec<Stmt>, Vec<Stmt>),
     For(Box<(Expr, Stmt, Stmt, Vec<Stmt>)>),
     DoWhile(Expr, Vec<Stmt>),
-    Switch(Expr, Vec<SwitchCase>, SwitchId),
+    Switch(Expr, Vec<SwitchCase>, SwitchId, SwitchLayout),
+    /// Complete decoded VM instructions and string table. This is the honest
+    /// fallback when control flow cannot yet be raised to structured source.
+    Ir(Vec<IrItem>),
     Exit,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwitchLayout {
+    /// The compiler's usual layout includes a dead jump after all case bodies.
+    Standard,
+    /// The final case jump doubles as the switch tail jump.
+    Compact,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum SwitchCase {
     Case(Vec<Expr>, Vec<Stmt>),
     Default(Vec<Stmt>),
+    /// An explicit unreachable jump in a switch case sequence. Some vanilla
+    /// scripts contain this layout instruction even though it has no case
+    /// value. It must remain visible in source for byte-exact round-tripping.
+    DeadJump(Vec<Stmt>),
 }
 
 impl SwitchCase {
@@ -90,6 +129,7 @@ impl SwitchCase {
         match self {
             SwitchCase::Case(_, stmts) => stmts,
             SwitchCase::Default(stmts) => stmts,
+            SwitchCase::DeadJump(stmts) => stmts,
         }
     }
 
@@ -97,6 +137,7 @@ impl SwitchCase {
         match self {
             SwitchCase::Case(_, stmts) => stmts,
             SwitchCase::Default(stmts) => stmts,
+            SwitchCase::DeadJump(stmts) => stmts,
         }
     }
 }

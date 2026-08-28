@@ -2,7 +2,7 @@
 mod tests {
     use std::{env, fs, io};
 
-    use mary::compiler::{self, error::CompileErrors, ScriptError};
+    use mary::compiler::{self, ScriptError};
     use thiserror::Error;
 
     #[derive(Debug, Error)]
@@ -67,22 +67,36 @@ mod tests {
         reencode_scripts(which_rom)
     }
 
+    fn render_decompiled_source(
+        library: &str,
+        script_id: usize,
+        stmts: &[mary::ast::Stmt],
+    ) -> String {
+        use mary::pretty_print::PrettyStmts;
+
+        format!(
+            "{library}\n\nscript {script_id} EventScript_{script_id}\n{{\n{}\n}}\n",
+            PrettyStmts::with_indent(stmts, 1)
+        )
+    }
+
     fn recompile_scripts(which_rom: &str, which_lib: &str) -> Result<(), TestFailure> {
         use mary::{
             bytecode::{decode_script, encode_script},
-            compiler::compile_script,
             decompiler::decompile_script,
-            decompiler::DecompileErrorExtra,
             utility::rom_info::get_all_scripts,
         };
 
         #[derive(Debug)]
-        enum FailType<'a> {
+        enum FailType {
             Ok,
-
-            DecompileError(DecompileErrorExtra<'a>),
-            RecompileError(CompileErrors),
-            OutputMismatch(Vec<u8>),
+            DecompileError(String),
+            SourceParseError(String),
+            OutputMismatch {
+                first_diff: Option<usize>,
+                original_len: usize,
+                reencoded_len: usize,
+            },
         }
 
         let rom = fs::read(env::var(which_rom)?)?;
@@ -103,7 +117,8 @@ mod tests {
             scripts.push(decoded);
         }
 
-        let mut results = vec![];
+        let mut results: Vec<FailType> = vec![];
+        let mut low_level_ids = vec![];
 
         for i in 0..encoded_scripts.len() {
             let to_decode = encoded_scripts[i];
@@ -113,16 +128,35 @@ mod tests {
                 Ok(decompiled) => decompiled,
 
                 Err(err) => {
-                    results.push(FailType::DecompileError(err));
+                    results.push(FailType::DecompileError(format!("{err}")));
                     continue;
                 }
             };
 
-            let recompiled = match compile_script(decompiled, &lib_scope) {
-                Ok(script) => script,
+            if matches!(&decompiled[..], [mary::ast::Stmt::Ir(_)]) {
+                low_level_ids.push(i + 1);
+                if let Err(err) =
+                    mary::decompiler::decompile_script_structured(&scripts[i], &lib_scope)
+                {
+                    println!("structured failure {}: {err}", i + 1);
+                }
+            }
 
+            // A decompilation is only successful if its printed source can be
+            // parsed and compiled again. Compiling the in-memory AST directly
+            // would hide pretty-printer/parser information loss.
+            let source = render_decompiled_source(&lib_text, i + 1, &decompiled);
+            let recompiled = match compiler::parse_string(&source) {
+                Ok(mut parsed) if parsed.scripts.len() == 1 => parsed.scripts.remove(0).2,
+                Ok(parsed) => {
+                    results.push(FailType::SourceParseError(format!(
+                        "expected exactly one script after parsing, got {}",
+                        parsed.scripts.len()
+                    )));
+                    continue;
+                }
                 Err(err) => {
-                    results.push(FailType::RecompileError(err));
+                    results.push(FailType::SourceParseError(format!("{err}")));
                     continue;
                 }
             };
@@ -130,7 +164,19 @@ mod tests {
             let reencoded = encode_script(&recompiled);
 
             if !(to_decode == reencoded) {
-                results.push(FailType::OutputMismatch(reencoded));
+                let first_diff = to_decode
+                    .iter()
+                    .zip(&reencoded)
+                    .position(|(original, rebuilt)| original != rebuilt)
+                    .or_else(|| {
+                        (to_decode.len() != reencoded.len())
+                            .then_some(to_decode.len().min(reencoded.len()))
+                    });
+                results.push(FailType::OutputMismatch {
+                    first_diff,
+                    original_len: to_decode.len(),
+                    reencoded_len: reencoded.len(),
+                });
                 continue;
             }
 
@@ -140,57 +186,88 @@ mod tests {
         let success_count = results.iter().filter(|r| matches!(r, FailType::Ok)).count();
 
         if success_count == scripts.len() {
+            println!(
+                "100% ({}/{}) strict source round-trip success; low-level IR scripts: {:?}",
+                success_count,
+                scripts.len(),
+                low_level_ids
+            );
             return Ok(());
         }
 
-        let mut first = true;
-
         for i in 0..results.len() {
-            let dump_this = first;
-            let dump_message = if dump_this { " (dumped)" } else { "" };
-
             match &results[i] {
                 FailType::Ok => continue,
 
                 FailType::DecompileError(err) => {
-                    if dump_this {
-                        let error_message = format!("{err}\n{0}", err.state_at_error());
-                        fs::write(format!("decompile_error_{0}.txt", i + 1), error_message)?;
-                    }
-
-                    println!("Script {0} decompile error: {err}{dump_message}", i + 1)
+                    println!("Script {0} decompile error: {err}", i + 1)
                 }
 
-                FailType::RecompileError(compile_errors) => {
-                    if dump_this {
-                        let error_message = format!("{compile_errors}");
-                        fs::write(format!("decompile_error_{0}.txt", i + 1), error_message)?;
-                    }
-
-                    println!("Script {0} recompile error{dump_message}", i + 1)
+                FailType::SourceParseError(err) => {
+                    println!("Script {0} source parse/compile error: {err}", i + 1)
                 }
 
-                FailType::OutputMismatch(bad_output) => {
-                    if dump_this {
-                        fs::write(format!("input_{0}.dmp", i + 1), encoded_scripts[i])?;
-                        fs::write(format!("output_{0}.dmp", i + 1), bad_output)?;
-                    }
-
-                    println!("Script {0} output mismatch{dump_message}", i + 1)
+                FailType::OutputMismatch {
+                    first_diff,
+                    original_len,
+                    reencoded_len,
+                } => {
+                    println!(
+                        "Script {} output mismatch: first byte {:?}, original length {}, rebuilt length {}",
+                        i + 1,
+                        first_diff,
+                        original_len,
+                        reencoded_len
+                    )
                 }
             }
-
-            first = first && !dump_this;
         }
+
+        let ids = |predicate: &dyn Fn(&FailType) -> bool| {
+            results
+                .iter()
+                .enumerate()
+                .filter_map(|(index, result)| predicate(result).then_some(index + 1))
+                .collect::<Vec<_>>()
+        };
+
+        let decompile_errors = results
+            .iter()
+            .filter(|r| matches!(r, FailType::DecompileError(_)))
+            .count();
+        let source_errors = results
+            .iter()
+            .filter(|r| matches!(r, FailType::SourceParseError(_)))
+            .count();
+        let mismatches = results
+            .iter()
+            .filter(|r| matches!(r, FailType::OutputMismatch { .. }))
+            .count();
+
+        println!(
+            "decompile error IDs: {:?}",
+            ids(&|r| matches!(r, FailType::DecompileError(_)))
+        );
+        println!(
+            "source parse/compile error IDs: {:?}",
+            ids(&|r| matches!(r, FailType::SourceParseError(_)))
+        );
+        println!(
+            "byte mismatch IDs: {:?}",
+            ids(&|r| matches!(r, FailType::OutputMismatch { .. }))
+        );
 
         let success_rate_of_10000 = success_count * 10000 / scripts.len();
 
         println!(
-            "{0}.{1}% ({2}/{3}) decompilation success",
+            "{0}.{1}% ({2}/{3}) strict source round-trip success; decompile errors: {4}, source parse/compile errors: {5}, byte mismatches: {6}",
             success_rate_of_10000 / 100,
             success_rate_of_10000 % 100,
             success_count,
-            scripts.len()
+            scripts.len(),
+            decompile_errors,
+            source_errors,
+            mismatches
         );
 
         Err(TestFailure::DecompileFailure)

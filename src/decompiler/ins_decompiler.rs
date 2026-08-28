@@ -7,7 +7,7 @@ use super::DecompileToken;
 
 use crate::ir::SwitchId;
 use crate::{
-    ast::{AssignOperation, Expr, Invoke, Stmt, SwitchCase},
+    ast::{AssignOperation, Expr, Invoke, Stmt, SwitchCase, SwitchLayout},
     ir::{CallId, CallableShape, CaseEnum, Ins, JumpId, VarId},
 };
 
@@ -394,14 +394,15 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                 Ok(())
             }
 
-            /* weird case where there are jumps located in the middle of case blocks?
-             * I will for now translate this as an empty case block */
+            /* Some vanilla scripts contain an unreachable jump in the middle
+             * of the case sequence. Preserve it explicitly; an empty Case
+             * silently loses the distinction when source is printed. */
             [.., SwitchCases(_, _)] => match &self.state.input[1..] {
                 /* TODO: in case of jump -> jump, need to check if those map to the same target */
                 [Ins::Case(_, _), ..] | [Ins::Jmp(_), ..] => match self.state.stack.last_mut() {
                     Some(SwitchCases(_, switch_cases)) => {
                         self.state.input = &self.state.input[1..];
-                        switch_cases.push((SwitchCase::Case(vec![], vec![]), jump_id));
+                        switch_cases.push((SwitchCase::DeadJump(vec![]), jump_id));
                         Ok(())
                     }
 
@@ -524,7 +525,36 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     }
                 }
 
-                self.apply_switch(break_ids.len());
+                self.apply_switch(break_ids.len(), SwitchLayout::Standard);
+                Ok(())
+            }
+
+            /* Compact switch: the final case break also serves as the tail
+             * jump, so there is no additional JMP:e before LABEL:k. */
+            [.., check_expr, Jump(jump_k), SwitchCases(sc_switch_id, switch_cases), Label(label_k)]
+                if *jump_k == *label_k
+                    && self.check_match_case_breaks(switch_cases, past_switch_jump_id)
+                    && *sc_switch_id == switch_id
+                    && self.is_expr(check_expr) =>
+            {
+                let break_ids: Vec<_> = switch_cases
+                    .iter()
+                    .filter_map(|(_, break_id)| *break_id)
+                    .collect();
+
+                if self.state.input.len() < 2 + break_ids.len() {
+                    return Err(DecompileError::UnexpectedLookahead);
+                }
+
+                for (i, break_id) in break_ids.iter().enumerate() {
+                    let ins_idx = 2 + break_ids.len() - i - 1;
+                    match self.state.input[ins_idx] {
+                        Ins::Label(label_id) if label_id == *break_id => {}
+                        _ => return Err(DecompileError::UnexpectedLookahead),
+                    }
+                }
+
+                self.apply_switch(break_ids.len(), SwitchLayout::Compact);
                 Ok(())
             }
 
@@ -741,13 +771,15 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         self.push_stmt(Stmt::DoWhile(expr, stmts));
     }
 
-    fn apply_switch(&mut self, num_case_labels: usize) {
+    fn apply_switch(&mut self, num_case_labels: usize, layout: SwitchLayout) {
         /* expr JMP:k cases:s,e JMP:e LABEL:k | SWITCH:s LABEL:e... */
 
         self.state.input = &self.state.input[2 + num_case_labels..]; // consume SWITCH:s LABEL:e
 
         self.state.stack.pop(); // discard LABEL:k
-        self.state.stack.pop(); // discard JMP:e
+        if layout == SwitchLayout::Standard {
+            self.state.stack.pop(); // discard JMP:e
+        }
         let switch_cases = self.state.stack.pop().unwrap();
         self.state.stack.pop(); // discard JMP:k
         let expr = self.pop_expr();
@@ -760,7 +792,7 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
             _ => unreachable!(),
         };
 
-        self.push_stmt(Stmt::Switch(expr, cases, SwitchId(0)));
+        self.push_stmt(Stmt::Switch(expr, cases, SwitchId(0), layout));
     }
 
     fn reduce_switch_case(&mut self) -> SwitchCase {
@@ -1051,39 +1083,60 @@ pub(crate) fn decompile_instructions<'a>(
     let mut result_state = ins_decompiler.state;
 
     match &result_state.stack[..] {
-        [DecompileToken::Stmts(_)] => match result_state.stack.remove(0) {
-            DecompileToken::Stmts(mut stmts) => {
-                /* add variable declarations */
-
-                let num_vars = match ins_decompiler.variables.keys().max() {
-                    Some(var_id) => var_id.0 + 1,
-                    None => 0,
+        [DecompileToken::Stmts(_)]
+        | [DecompileToken::AssignExpr(_, _, _), DecompileToken::Stmts(_)] => {
+            if matches!(
+                result_state.stack.first(),
+                Some(DecompileToken::AssignExpr(_, _, _))
+            ) {
+                let assignment = result_state.stack.remove(0);
+                let mut stmts = match result_state.stack.remove(0) {
+                    DecompileToken::Stmts(stmts) => stmts,
+                    _ => unreachable!(),
                 };
-
-                // let mut keys: Vec<&VarId> = ins_decompiler.variables.keys().collect();
-                // keys.sort();
-
-                if num_vars > 0 {
-                    let mut vars = vec![];
-
-                    for var_id in 0..num_vars {
-                        let var_id = &VarId(var_id);
-
-                        if ins_decompiler.variables.contains_key(var_id) {
-                            vars.push((ins_decompiler.variables[var_id].clone(), None));
-                        } else {
-                            vars.push((format!("unused_{0}", var_id.0), None));
-                        }
-                    }
-
-                    stmts.insert(0, Stmt::Vars(vars));
-                }
-
-                Ok(stmts)
+                let (var_id, op, expr) = match assignment {
+                    DecompileToken::AssignExpr(var_id, op, expr) => (var_id, op, expr),
+                    _ => unreachable!(),
+                };
+                let var_name = ins_decompiler.variables[&var_id].clone();
+                stmts.insert(0, Stmt::AssignNoDisc(op, var_name, expr));
+                result_state.stack.push(DecompileToken::Stmts(stmts));
             }
 
-            _ => unreachable!(),
-        },
+            match result_state.stack.remove(0) {
+                DecompileToken::Stmts(mut stmts) => {
+                    /* add variable declarations */
+
+                    let num_vars = match ins_decompiler.variables.keys().max() {
+                        Some(var_id) => var_id.0 + 1,
+                        None => 0,
+                    };
+
+                    // let mut keys: Vec<&VarId> = ins_decompiler.variables.keys().collect();
+                    // keys.sort();
+
+                    if num_vars > 0 {
+                        let mut vars = vec![];
+
+                        for var_id in 0..num_vars {
+                            let var_id = &VarId(var_id);
+
+                            if ins_decompiler.variables.contains_key(var_id) {
+                                vars.push((ins_decompiler.variables[var_id].clone(), None));
+                            } else {
+                                vars.push((format!("unused_{0}", var_id.0), None));
+                            }
+                        }
+
+                        stmts.insert(0, Stmt::Vars(vars));
+                    }
+
+                    Ok(stmts)
+                }
+
+                _ => unreachable!(),
+            }
+        }
 
         /* empty script */
         [] => Ok(vec![]),
