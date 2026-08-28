@@ -518,6 +518,11 @@ impl<'a> PrettyStringLit<'a> {
         }
         fragments
     }
+
+    /// Escaped source fragments split at charmap-defined line/page controls.
+    pub fn source_fragments(&self) -> Vec<String> {
+        self.fragments()
+    }
 }
 
 impl<'a> fmt::Display for PrettyStringLit<'a> {

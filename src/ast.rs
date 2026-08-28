@@ -155,7 +155,7 @@ impl SwitchCase {
 
 // TODO: do we need ConstVal? can't we have ConstRef?
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConstVal {
     Int(IntValue),
     Str(StrValue),

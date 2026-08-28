@@ -33,7 +33,37 @@ cargo build --release
 
 正式版程序位于 `target/release/mary.exe`。
 
+## Mary-C 工作流
+
+Mary-C 是新的 C 形标准前端。文件使用 `.mary.c` 和 `.mary.h` 后缀，编辑器可以直接提供 C 语法高亮，同时后缀也明确表示其中的 `mary_` 扩展必须交给本编译器。完整语法见 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.md)（[English](docs/MARY_C_LANGUAGE.en.md)）。
+
+以 FoMT 日版为例，批量反编译全部脚本：
+
+```console
+mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
+```
+
+输出目录包含每个非空脚本的 `.mary.c`，以及本地 `mary_callables.mary.h`、`mary_scripts.mary.h`。`.mary.sym` 只供反编译命名使用，不会被复制或 include；空指针槽仍以 `NULL` 保留在生成的脚本表中。
+
+每个生成脚本都会显式选择 ROM 目标：
+
+```c
+#define MARY_FOMT_JP
+#include "mary_callables.mary.h"
+#include "mary_scripts.mary.h"
+```
+
+因此，只要把单独脚本与两个头文件放在一起，就可以独立回编：
+
+```console
+mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt --binary -o EventScript_0867.riff
+```
+
+可用目标为 `MARY_FOMT_US`、`MARY_MFOMT_US`、`MARY_FOMT_JP` 和 `MARY_MFOMT_JP`。callable 表和 script 表只写一次公共槽位，只有实际差异的位置才在表内部使用条件分支。
+
 ## 命令行用法
+
+以下命令说明为兼容保留的原始 DSL；Mary-C 请使用上一节的流程。
 
 ### 解包全部脚本
 

@@ -36,6 +36,23 @@ pub enum CompileError {
     #[error("Cannot evaluate call to '{0}': procedures do not yield results")]
     ProcNotFunction(String),
 
+    #[error("Call to '{name}' has {actual} arguments, but its declaration requires {expected}")]
+    WrongArgumentCount {
+        name: String,
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error(
+        "Argument {index} of '{name}' has type {actual}, but the declaration requires {expected}"
+    )]
+    ArgumentTypeMismatch {
+        name: String,
+        index: usize,
+        expected: &'static str,
+        actual: &'static str,
+    },
+
     #[error("Multiple 'default' blocks in switch")]
     MultipleDefaults,
 }

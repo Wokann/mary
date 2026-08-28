@@ -33,7 +33,37 @@ cargo build --release
 
 The release executable is written to `target/release/mary.exe`.
 
+## Mary-C workflow
+
+Mary-C is the canonical C-shaped frontend. Files use `.mary.c` and `.mary.h`, so editors provide C highlighting while the names still make it clear that Mary extensions require this compiler. See the [Mary-C language reference](docs/MARY_C_LANGUAGE.en.md) ([中文](docs/MARY_C_LANGUAGE.md)).
+
+Decompile all scripts from a Japanese FoMT ROM:
+
+```console
+mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
+```
+
+The output directory contains one `.mary.c` per non-null script plus local `mary_callables.mary.h` and `mary_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null pointer slots remain `NULL` in the generated script table.
+
+Each generated source explicitly selects its ROM target:
+
+```c
+#define MARY_FOMT_JP
+#include "mary_callables.mary.h"
+#include "mary_scripts.mary.h"
+```
+
+This makes an extracted script independently compilable after copying it together with the two headers:
+
+```console
+mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt --binary -o EventScript_0867.riff
+```
+
+Available targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. The callable and script tables keep common slots once and use conditional branches only where a target differs.
+
 ## Command-line usage
+
+The commands below describe the original DSL, which remains supported for compatibility.
 
 ### Decompile every script
 

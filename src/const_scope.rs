@@ -5,7 +5,7 @@ use crate::{
     ir::{CallId, CallableShape, ValueType},
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ConstScope {
     constants: HashMap<String, ConstVal>,
     callables: HashMap<String, (CallId, CallableShape)>,
@@ -36,7 +36,8 @@ impl ConstScope {
         *self.user_types.entry(name).or_insert(would_be_next)
     }
 
-    pub(crate) fn callable_map(&self) -> &HashMap<String, (CallId, CallableShape)> {
+    /// Callable declarations, exposed for table migration and diagnostics.
+    pub fn callable_map(&self) -> &HashMap<String, (CallId, CallableShape)> {
         &self.callables
     }
 }

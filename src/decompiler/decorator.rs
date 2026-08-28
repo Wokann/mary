@@ -189,12 +189,23 @@ pub(super) fn decorate_stmts_with_strings(
     stmts: &mut Vec<Stmt>,
     strings: &[StrValue],
     const_scope: &ConstScope,
+    script_name: Option<&str>,
+    text_names: Option<&[Option<String>]>,
 ) -> Result<(), DecompileError> {
     let mut string_constants = vec![];
     let mut string_constant_stmts = vec![];
 
     for (i, string) in strings.iter().enumerate() {
-        let name = format!("MESSAGE_{i}");
+        let name = text_names
+            .and_then(|names| names.get(i))
+            .cloned()
+            .flatten()
+            .unwrap_or_else(|| {
+                script_name.map_or_else(
+                    || format!("MESSAGE_{i}"),
+                    |script_name| format!("gText_{script_name}_{i:03}"),
+                )
+            });
 
         string_constants.push(name.clone());
         string_constant_stmts.push(Stmt::Consts(vec![(name, Expr::Str(string.clone()))]));

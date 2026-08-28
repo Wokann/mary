@@ -22,11 +22,48 @@ pub fn decompile_script<'a>(
     }
 }
 
+pub fn decompile_script_named<'a>(
+    script: &'a Script,
+    const_scope: &ConstScope,
+    script_name: &str,
+) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
+    match decompile_script_structured_inner(script, const_scope, Some(script_name), None) {
+        Ok(stmts) => Ok(stmts),
+        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
+    }
+}
+
+pub fn decompile_script_with_text_names<'a>(
+    script: &'a Script,
+    const_scope: &ConstScope,
+    script_name: &str,
+    text_names: &[Option<String>],
+) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
+    match decompile_script_structured_inner(
+        script,
+        const_scope,
+        Some(script_name),
+        Some(text_names),
+    ) {
+        Ok(stmts) => Ok(stmts),
+        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
+    }
+}
+
 /// Decompile without the lossless instruction-level fallback.  This is useful
 /// for measuring and improving actual high-level structuring coverage.
 pub fn decompile_script_structured<'a>(
     script: &'a Script,
     const_scope: &ConstScope,
+) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
+    decompile_script_structured_inner(script, const_scope, None, None)
+}
+
+fn decompile_script_structured_inner<'a>(
+    script: &'a Script,
+    const_scope: &ConstScope,
+    script_name: Option<&str>,
+    text_names: Option<&[Option<String>]>,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
     let mut known_callables = HashMap::new();
 
@@ -38,9 +75,13 @@ pub fn decompile_script_structured<'a>(
 
     let mut stmts = decompile_instructions(&script.instructions, &known_callables)?;
 
-    if let Err(err) =
-        decorator::decorate_stmts_with_strings(&mut stmts, &script.strings, const_scope)
-    {
+    if let Err(err) = decorator::decorate_stmts_with_strings(
+        &mut stmts,
+        &script.strings,
+        const_scope,
+        script_name,
+        text_names,
+    ) {
         return Err(DecompileErrorExtra(err, DecompileState::new(&[])));
     }
 
