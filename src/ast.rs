@@ -174,15 +174,15 @@ pub enum NameRef<'a> {
 }
 
 pub trait ConstAccess {
-    fn lookup_const(&self, name: &str) -> Option<ConstRef>;
+    fn lookup_const(&self, name: &str) -> Option<ConstRef<'_>>;
 }
 
 pub trait NameAccess {
-    fn lookup_name(&self, name: &str) -> Option<NameRef>;
+    fn lookup_name(&self, name: &str) -> Option<NameRef<'_>>;
 }
 
 impl<N: NameAccess> ConstAccess for N {
-    fn lookup_const(&self, name: &str) -> Option<ConstRef> {
+    fn lookup_const(&self, name: &str) -> Option<ConstRef<'_>> {
         match self.lookup_name(name) {
             Some(NameRef::Const(ConstVal::Int(i))) => Some(ConstRef::Int(*i)),
             Some(NameRef::Const(ConstVal::Str(s))) => Some(ConstRef::Str(s)),

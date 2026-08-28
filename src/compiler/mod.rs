@@ -14,4 +14,4 @@ pub use emitter::compile_script;
 
 pub use error::ScriptError;
 
-pub use frontend::parse_string;
+pub use frontend::{parse_string, parse_string_with_charmap};

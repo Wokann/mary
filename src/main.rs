@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::{self, stdin, stdout, BufWriter, Write},
     path::PathBuf,
+    sync::Arc,
 };
 
 use clap::{Parser, Subcommand};
@@ -10,6 +11,7 @@ use thiserror::Error;
 use mary::{
     ast::Stmt,
     bytecode::{self, DecodeError},
+    charmap::{Charmap, CharmapError},
     compiler::ScriptError,
     decompiler::DecompileError,
     ir::{IntValue, Script},
@@ -35,6 +37,9 @@ enum Error {
 
     #[error("CLI Error: {0}")]
     CliError(&'static str),
+
+    #[error("Character map error: {0}")]
+    CharmapError(#[from] CharmapError),
 }
 
 #[derive(Subcommand)]
@@ -54,6 +59,10 @@ enum Command {
         /// Print compiled IR as comment in output
         #[arg(long)]
         print_ir: bool,
+
+        /// Byte-to-Unicode map used for localized string literals
+        #[arg(long)]
+        charmap: Option<PathBuf>,
     },
 
     Decompile {
@@ -78,7 +87,23 @@ enum Command {
         /// Print decoded IR as comment in output
         #[arg(long)]
         print_ir: bool,
+
+        /// Byte-to-Unicode map used for localized string literals
+        #[arg(long)]
+        charmap: Option<PathBuf>,
+
+        /// Decompile every pointer-table slot into the output directory
+        #[arg(long)]
+        all: bool,
     },
+}
+
+fn load_charmap(path: Option<PathBuf>) -> Result<Option<Arc<Charmap>>, Error> {
+    path.map(|path| {
+        let source = fs::read_to_string(path)?;
+        Ok(Arc::new(Charmap::parse(&source)?))
+    })
+    .transpose()
 }
 
 #[derive(Parser)]
@@ -169,6 +194,7 @@ fn main_error() -> Result<(), Error> {
             output,
             print_ir,
             binary,
+            charmap,
         } => {
             use mary::bytecode::encode_script;
             use mary::compiler::parse_string;
@@ -181,7 +207,11 @@ fn main_error() -> Result<(), Error> {
             // TODO: locations
             // TODO: func params and invoke args coherence
 
-            let parse_result = parse_string(&code)?;
+            let charmap = load_charmap(charmap)?;
+            let parse_result = match charmap {
+                Some(charmap) => mary::compiler::parse_string_with_charmap(&code, charmap)?,
+                None => parse_string(&code)?,
+            };
 
             if binary {
                 if parse_result.scripts.len() != 1 {
@@ -229,22 +259,61 @@ fn main_error() -> Result<(), Error> {
             script_id,
             offset,
             print_ir,
+            charmap,
+            all,
         } => {
             use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
 
             let rom = fs::read(input_binary)?;
+            let charmap = load_charmap(charmap)?;
+
+            if all {
+                if script_id.is_some() || offset.is_some() {
+                    return Err(Error::CliError(
+                        "--all cannot be combined with --script-id or --offset",
+                    ));
+                }
+                let output_dir = output.ok_or(Error::CliError(
+                    "--all requires --output to name an output directory",
+                ))?;
+                decompile_all_scripts(
+                    &rom,
+                    &input_library,
+                    &output_dir,
+                    charmap.as_deref(),
+                    print_ir,
+                )?;
+                return Ok(());
+            }
 
             let event_script_id;
             let event_script_name;
 
             let script = match (script_id, offset) {
                 (Some(script_id), None) => {
-                    let script_data = rom_info::get_all_scripts(&rom)?;
+                    let script_table = rom_info::get_script_table(&rom)?;
 
                     event_script_id = script_id;
                     event_script_name = format!("EventScript_{script_id}");
 
-                    bytecode::decode_script(&mut &script_data[script_id - 1][..])?
+                    let entry = script_table
+                        .iter()
+                        .find(|entry| entry.id() == script_id)
+                        .ok_or(Error::CliError("Script ID is outside the pointer table"))?;
+                    match entry {
+                        rom_info::ScriptTableEntry::Script { data, .. } => {
+                            bytecode::decode_script(&mut &data[..])?
+                        }
+                        rom_info::ScriptTableEntry::Empty { .. } => {
+                            print_empty_script_slot(
+                                output,
+                                event_script_id,
+                                &event_script_name,
+                                &input_library.to_string_lossy(),
+                            )?;
+                            return Ok(());
+                        }
+                    }
                 }
 
                 (None, Some(offset)) => {
@@ -303,6 +372,7 @@ fn main_error() -> Result<(), Error> {
                         stmts,
                         &library_path_for_include,
                         print_ir.then(|| &script),
+                        charmap.as_deref(),
                     )?;
 
                     buf_write.flush()?;
@@ -319,12 +389,111 @@ fn main_error() -> Result<(), Error> {
                         stmts,
                         &library_path_for_include,
                         print_ir.then(|| &script),
+                        charmap.as_deref(),
                     )?;
 
                     Ok(())
                 }
             }
         }
+    }
+}
+
+fn decompile_all_scripts(
+    rom: &[u8],
+    input_library: &PathBuf,
+    output_dir: &PathBuf,
+    charmap: Option<&Charmap>,
+    print_ir: bool,
+) -> Result<(), Error> {
+    use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
+
+    let library_code = fs::read_to_string(input_library)?;
+    let library_scope = match parse_string(&library_code) {
+        Ok(parse_result) => parse_result.const_scope,
+        Err(err) => return Err(Error::LibScriptError(err)),
+    };
+    let library_path_for_include = input_library.to_string_lossy();
+    fs::create_dir_all(output_dir)?;
+
+    for entry in rom_info::get_script_table(rom)? {
+        let script_id = entry.id();
+        let script_name = format!("EventScript_{script_id}");
+        let output_path = output_dir.join(format!("EventScript_{script_id:04}.mary"));
+
+        match entry {
+            rom_info::ScriptTableEntry::Empty { .. } => print_empty_script_slot(
+                Some(output_path),
+                script_id,
+                &script_name,
+                &library_path_for_include,
+            )?,
+            rom_info::ScriptTableEntry::Script { data, .. } => {
+                let script = bytecode::decode_script(&mut &data[..])?;
+                let stmts = match decompile_script(&script, &library_scope) {
+                    Ok(stmts) => stmts,
+                    Err(error) => {
+                        eprintln!("script {script_id}: {}", error.state_at_error());
+                        return Err(Error::DecompileFailed(DecompileError::from(error)));
+                    }
+                };
+                let output = File::create(output_path)?;
+                let mut writer = BufWriter::new(output);
+                print_decompiled_script(
+                    &mut writer,
+                    script_id,
+                    script_name,
+                    stmts,
+                    &library_path_for_include,
+                    print_ir.then_some(&script),
+                    charmap,
+                )?;
+                writer.flush()?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn print_empty_script_slot(
+    output: Option<PathBuf>,
+    script_id: usize,
+    script_name: &str,
+    library_path_for_include: &str,
+) -> io::Result<()> {
+    fn write_placeholder<W: Write>(
+        w: &mut W,
+        script_id: usize,
+        script_name: &str,
+        library_path_for_include: &str,
+    ) -> io::Result<()> {
+        writeln!(w, "#include \"{library_path_for_include}\"")?;
+        writeln!(w)?;
+        writeln!(
+            w,
+            "// Empty script pointer-table slot; no RIFF body exists."
+        )?;
+        writeln!(w, "// script {script_id} {script_name}")
+    }
+
+    match output {
+        Some(path) => {
+            let mut writer = BufWriter::new(File::create(path)?);
+            write_placeholder(
+                &mut writer,
+                script_id,
+                script_name,
+                library_path_for_include,
+            )?;
+            writer.flush()
+        }
+        None => write_placeholder(
+            &mut stdout().lock(),
+            script_id,
+            script_name,
+            library_path_for_include,
+        ),
     }
 }
 
@@ -335,6 +504,7 @@ fn print_decompiled_script<W: io::Write>(
     stmts: Vec<Stmt>,
     library_path_for_include: &str,
     print_ir: Option<&Script>,
+    charmap: Option<&Charmap>,
 ) -> io::Result<()> {
     writeln!(w, "#include \"{0}\"", library_path_for_include)?;
     writeln!(w)?;
@@ -343,7 +513,10 @@ fn print_decompiled_script<W: io::Write>(
 
     writeln!(w, "{{")?;
 
-    let pretty_stmts = PrettyStmts::with_indent(&stmts, 1);
+    let pretty_stmts = match charmap {
+        Some(charmap) => PrettyStmts::with_charmap(&stmts, 1, charmap),
+        None => PrettyStmts::with_indent(&stmts, 1),
+    };
     writeln!(w, "{pretty_stmts}")?;
 
     writeln!(w, "}}")?;

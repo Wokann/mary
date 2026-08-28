@@ -1,15 +1,39 @@
 use crate::compiler::{ParseContext, ScriptError};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+use crate::charmap::Charmap;
 
 pub fn parse_string(code_string: &str) -> Result<ParseContext, ScriptError> {
+    parse_string_inner(code_string, None)
+}
+
+pub fn parse_string_with_charmap(
+    code_string: &str,
+    charmap: Arc<Charmap>,
+) -> Result<ParseContext, ScriptError> {
+    parse_string_inner(code_string, Some(charmap))
+}
+
+fn parse_string_inner(
+    code_string: &str,
+    charmap: Option<Arc<Charmap>>,
+) -> Result<ParseContext, ScriptError> {
     use lexgen_util::LexerErrorKind;
 
     use crate::compiler::Lexer;
     use crate::compiler::Parser;
 
-    let l = Lexer::new(code_string);
+    let charmap_error = Rc::new(RefCell::new(None));
+    let mut l = match charmap {
+        Some(charmap) => Lexer::new_with_state(
+            code_string,
+            crate::compiler::lexer::LexerState::with_charmap(charmap, Rc::clone(&charmap_error)),
+        ),
+        None => Lexer::new(code_string),
+    };
     let mut p = Parser::new(ParseContext::new());
 
-    for tok in l {
+    while let Some(tok) = l.next() {
         match tok {
             Ok((start, tok, _)) => match p.parse(tok) {
                 Ok(()) => {}
@@ -22,6 +46,10 @@ pub fn parse_string(code_string: &str) -> Result<ParseContext, ScriptError> {
                 LexerErrorKind::Custom(_) => unimplemented!(),
             },
         }
+    }
+
+    if let Some(err) = charmap_error.borrow_mut().take() {
+        return Err(err.into());
     }
 
     match p.end_of_input() {

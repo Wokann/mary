@@ -75,7 +75,7 @@ impl<'a> BlockScope<'a> {
 }
 
 impl<'a> NameAccess for BlockScope<'a> {
-    fn lookup_name(&self, name: &str) -> Option<NameRef> {
+    fn lookup_name(&self, name: &str) -> Option<NameRef<'_>> {
         if let Some(nv) = self.names.get(name) {
             Some(nv.into())
         } else {

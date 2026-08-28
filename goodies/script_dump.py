@@ -1,5 +1,7 @@
 import sys
 
+TABLE_ADDR_FOMTJP = 0x080F8230
+TABLE_ADDR_MFOMTJP = 0x0810145C
 TABLE_ADDR_FOMT = 0x080F89D4
 TABLE_ADDR_MFOMT = 0x081014BC
 
@@ -267,12 +269,18 @@ def dump_script(f, table_addr, id):
 
 def find_script_table_addr(f):
     f.seek(0xA0)  # ROM name in header
-    game_title = f.read(12)
+    game_title = f.read(16)
 
-    if game_title == b"HARVESTMOGBA":
+    if game_title == b"BOKUMONOGBA\0A4NJ":
+        return TABLE_ADDR_FOMTJP
+
+    elif game_title == b"BOKUMONOGBA\0BFGJ":
+        return TABLE_ADDR_MFOMTJP
+
+    elif game_title == b"HARVESTMOGBAAA4NE":
         return TABLE_ADDR_FOMT
 
-    elif game_title == b"HM MFOM USA\0":
+    elif game_title == b"HM MFOM USA\0BFGE":
         return TABLE_ADDR_MFOMT
 
     return 0

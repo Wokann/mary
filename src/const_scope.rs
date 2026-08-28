@@ -45,7 +45,7 @@ impl ConstScope {
 }
 
 impl NameAccess for ConstScope {
-    fn lookup_name(&self, name: &str) -> Option<NameRef> {
+    fn lookup_name(&self, name: &str) -> Option<NameRef<'_>> {
         if let Some(val) = self.constants.get(name) {
             Some(NameRef::Const(val))
         } else {

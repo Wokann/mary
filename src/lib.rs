@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod bytecode;
+pub mod charmap;
 pub mod compiler;
 pub mod const_scope;
 pub mod decompiler;

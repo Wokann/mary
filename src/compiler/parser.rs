@@ -39,6 +39,7 @@ pomelo! {
     %type Integer IntValue;
     %type Name String;
     %type StringLit Vec<u8>;
+    %type string_literal Vec<u8>;
 
     // errors
 
@@ -182,7 +183,7 @@ pomelo! {
     %type ir_arg IrArg;
     ir_arg ::= Integer(value) { IrArg::Int(value) };
     ir_arg ::= Minus Integer(value) { IrArg::Int(-value) };
-    ir_arg ::= StringLit(value) { IrArg::Str(value) };
+    ir_arg ::= string_literal(value) { IrArg::Str(value) };
 
     %type initializers Vec<(String, Option<Expr>)>;
     initializers ::= initializers(mut v) Comma initializer(i) { v.push(i); v };
@@ -287,7 +288,13 @@ pomelo! {
     %type primary_expr Expr;
     primary_expr ::= Name(n) { Expr::Name(n) };
     primary_expr ::= Integer(i) { Expr::Int(i) };
-    primary_expr ::= StringLit(s) { Expr::Str(s) };
+    string_literal ::= StringLit(s) { s };
+    string_literal ::= string_literal(mut left) StringLit(right) {
+        left.extend(right);
+        left
+    };
+
+    primary_expr ::= string_literal(s) { Expr::Str(s) };
     primary_expr ::= LParen expr RParen;
     primary_expr ::= LParen postincr RParen;
     primary_expr ::= LParen preincr RParen;

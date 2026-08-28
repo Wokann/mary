@@ -55,6 +55,9 @@ impl fmt::Display for CompileErrors {
 
 #[derive(Debug, Error)]
 pub enum ScriptError {
+    #[error("Character map error: {0}")]
+    Charmap(#[from] crate::charmap::CharmapError),
+
     #[error("Compile errors while compiling {0}: {1}")]
     CompileErrors(String, CompileErrors),
 

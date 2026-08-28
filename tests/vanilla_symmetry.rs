@@ -1,6 +1,6 @@
 #[cfg(feature = "test_with_roms")]
 mod tests {
-    use std::{env, fs, io};
+    use std::{env, fs, io, sync::Arc};
 
     use mary::compiler::{self, ScriptError};
     use thiserror::Error;
@@ -27,18 +27,59 @@ mod tests {
         use mary::{bytecode, utility::rom_info};
 
         let rom = fs::read(env::var(which_rom)?)?;
-        let encoded_scripts = rom_info::get_all_scripts(&rom)?;
+        let table = rom_info::get_script_table(&rom)?;
+        assert_eq!(table.first().map(|entry| entry.id()), Some(0));
+        match rom_info::identify_rom(&rom).unwrap() {
+            rom_info::FomtVariant::FomtUs => {
+                assert_eq!(table.len(), 1329);
+                assert!(matches!(
+                    table.first(),
+                    Some(rom_info::ScriptTableEntry::Empty { id: 0 })
+                ));
+            }
+            rom_info::FomtVariant::MfomtUs => {
+                assert_eq!(table.len(), 1416);
+                assert!(matches!(
+                    table.first(),
+                    Some(rom_info::ScriptTableEntry::Empty { id: 0 })
+                ));
+            }
+            rom_info::FomtVariant::FomtJp => {
+                assert_eq!(table.len(), 1329);
+                assert!(matches!(
+                    table.first(),
+                    Some(rom_info::ScriptTableEntry::Empty { id: 0 })
+                ));
+            }
+            rom_info::FomtVariant::MfomtJp => {
+                assert_eq!(table.len(), 1416);
+                assert!(matches!(
+                    table.first(),
+                    Some(rom_info::ScriptTableEntry::Empty { id: 0 })
+                ));
+            }
+        }
+        assert!(table
+            .windows(2)
+            .all(|pair| pair[1].id() == pair[0].id() + 1));
+        let encoded_scripts: Vec<(usize, &[u8])> = table
+            .iter()
+            .filter_map(|entry| match entry {
+                rom_info::ScriptTableEntry::Empty { .. } => None,
+                rom_info::ScriptTableEntry::Script { id, data } => Some((*id, *data)),
+            })
+            .collect();
 
         for i in 0..encoded_scripts.len() {
-            let to_decode = encoded_scripts[i];
+            let (script_id, to_decode) = encoded_scripts[i];
             let script = bytecode::decode_script(&mut &to_decode[..]).unwrap();
             let reencoded = bytecode::encode_script(&script);
 
             if !(to_decode == reencoded) {
-                fs::write(format!("test_failed_base_{0}.dmp", i + 1), to_decode)?;
-                fs::write(format!("test_failed_reen_{0}.dmp", i + 1), reencoded)?;
+                fs::write(format!("test_failed_base_{script_id}.dmp"), to_decode)?;
+                fs::write(format!("test_failed_reen_{script_id}.dmp"), reencoded)?;
 
-                return Err(TestFailure::ScriptFailed(i + 1));
+                return Err(TestFailure::ScriptFailed(script_id));
             }
         }
 
@@ -67,16 +108,31 @@ mod tests {
         reencode_scripts(which_rom)
     }
 
+    #[test]
+    fn script_reencode_fomt_jp() -> Result<(), TestFailure> {
+        reencode_scripts("FOMT_JP_GBA")
+    }
+
+    #[test]
+    fn script_reencode_mfomt_jp() -> Result<(), TestFailure> {
+        reencode_scripts("MFOMT_JP_GBA")
+    }
+
     fn render_decompiled_source(
         library: &str,
         script_id: usize,
         stmts: &[mary::ast::Stmt],
+        charmap: Option<&mary::charmap::Charmap>,
     ) -> String {
         use mary::pretty_print::PrettyStmts;
 
+        let body = match charmap {
+            Some(charmap) => format!("{}", PrettyStmts::with_charmap(stmts, 1, charmap)),
+            None => format!("{}", PrettyStmts::with_indent(stmts, 1)),
+        };
         format!(
             "{library}\n\nscript {script_id} EventScript_{script_id}\n{{\n{}\n}}\n",
-            PrettyStmts::with_indent(stmts, 1)
+            body
         )
     }
 
@@ -102,11 +158,15 @@ mod tests {
         })
     }
 
-    fn recompile_scripts(which_rom: &str, which_lib: &str) -> Result<(), TestFailure> {
+    fn recompile_scripts(
+        which_rom: &str,
+        which_lib: &str,
+        charmap_path: Option<&str>,
+    ) -> Result<(), TestFailure> {
         use mary::{
             bytecode::{decode_script, encode_script},
             decompiler::decompile_script,
-            utility::rom_info::get_all_scripts,
+            utility::rom_info::{get_script_table, ScriptTableEntry},
         };
 
         #[derive(Debug)]
@@ -122,9 +182,20 @@ mod tests {
         }
 
         let rom = fs::read(env::var(which_rom)?)?;
-        let encoded_scripts = get_all_scripts(&rom)?;
+        let encoded_scripts: Vec<(usize, &[u8])> = get_script_table(&rom)?
+            .into_iter()
+            .filter_map(|entry| match entry {
+                ScriptTableEntry::Empty { .. } => None,
+                ScriptTableEntry::Script { id, data } => Some((id, data)),
+            })
+            .collect();
 
         let lib_text = fs::read_to_string(env::var(which_lib)?)?;
+        let charmap = charmap_path
+            .map(|path| fs::read_to_string(path))
+            .transpose()?
+            .map(|source| mary::charmap::Charmap::parse(&source).unwrap())
+            .map(Arc::new);
 
         let lib_scope = match compiler::parse_string(&lib_text) {
             Ok(parse_context) => parse_context.const_scope,
@@ -134,7 +205,7 @@ mod tests {
         let mut scripts = vec![];
 
         for i in 0..encoded_scripts.len() {
-            let to_decode = encoded_scripts[i];
+            let to_decode = encoded_scripts[i].1;
             let decoded = decode_script(&mut &to_decode[..]).unwrap();
             scripts.push(decoded);
         }
@@ -144,7 +215,8 @@ mod tests {
         let mut jump_next_ids = vec![];
 
         for i in 0..encoded_scripts.len() {
-            let to_decode = encoded_scripts[i];
+            let script_id = encoded_scripts[i].0;
+            let to_decode = encoded_scripts[i].1;
             let decoded = &scripts[i];
 
             let decompiled = match decompile_script(&decoded, &lib_scope) {
@@ -157,23 +229,28 @@ mod tests {
             };
 
             if matches!(&decompiled[..], [mary::ast::Stmt::Ir(_)]) {
-                low_level_ids.push(i + 1);
+                low_level_ids.push(script_id);
                 if let Err(err) =
                     mary::decompiler::decompile_script_structured(&scripts[i], &lib_scope)
                 {
-                    println!("structured failure {}: {err}", i + 1);
+                    println!("structured failure {script_id}: {err}");
                 }
             }
 
             if contains_jump_next(&decompiled) {
-                jump_next_ids.push(i + 1);
+                jump_next_ids.push(script_id);
             }
 
             // A decompilation is only successful if its printed source can be
             // parsed and compiled again. Compiling the in-memory AST directly
             // would hide pretty-printer/parser information loss.
-            let source = render_decompiled_source(&lib_text, i + 1, &decompiled);
-            let recompiled = match compiler::parse_string(&source) {
+            let source =
+                render_decompiled_source(&lib_text, script_id, &decompiled, charmap.as_deref());
+            let parsed_source = match &charmap {
+                Some(charmap) => compiler::parse_string_with_charmap(&source, Arc::clone(charmap)),
+                None => compiler::parse_string(&source),
+            };
+            let recompiled = match parsed_source {
                 Ok(mut parsed) if parsed.scripts.len() == 1 => parsed.scripts.remove(0).2,
                 Ok(parsed) => {
                     results.push(FailType::SourceParseError(format!(
@@ -238,15 +315,16 @@ mod tests {
         }
 
         for i in 0..results.len() {
+            let script_id = encoded_scripts[i].0;
             match &results[i] {
                 FailType::Ok => continue,
 
                 FailType::DecompileError(err) => {
-                    println!("Script {0} decompile error: {err}", i + 1)
+                    println!("Script {script_id} decompile error: {err}")
                 }
 
                 FailType::SourceParseError(err) => {
-                    println!("Script {0} source parse/compile error: {err}", i + 1)
+                    println!("Script {script_id} source parse/compile error: {err}")
                 }
 
                 FailType::OutputMismatch {
@@ -256,7 +334,7 @@ mod tests {
                 } => {
                     println!(
                         "Script {} output mismatch: first byte {:?}, original length {}, rebuilt length {}",
-                        i + 1,
+                        script_id,
                         first_diff,
                         original_len,
                         reencoded_len
@@ -269,7 +347,7 @@ mod tests {
             results
                 .iter()
                 .enumerate()
-                .filter_map(|(index, result)| predicate(result).then_some(index + 1))
+                .filter_map(|(index, result)| predicate(result).then_some(encoded_scripts[index].0))
                 .collect::<Vec<_>>()
         };
 
@@ -315,6 +393,20 @@ mod tests {
         Err(TestFailure::DecompileFailure)
     }
 
+    fn recompile_scripts_on_large_stack(
+        which_rom: &'static str,
+        which_lib: &'static str,
+        charmap_path: Option<&'static str>,
+    ) -> Result<(), TestFailure> {
+        std::thread::Builder::new()
+            .name(format!("{which_rom}-round-trip"))
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || recompile_scripts(which_rom, which_lib, charmap_path))
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
     #[test]
     fn script_recompile_fomt() -> Result<(), TestFailure> {
         /* FOMT US : 0x080F89D4 1328 */
@@ -325,7 +417,7 @@ mod tests {
         // let script_table_addr = 0x080F89D4;
         // let script_table_size = 1328;
 
-        recompile_scripts(which_rom, which_lib)
+        recompile_scripts_on_large_stack(which_rom, which_lib, Some("charmap_jp.txt"))
     }
 
     #[test]
@@ -337,6 +429,20 @@ mod tests {
         // let script_table_addr = 0x081014BC;
         // let script_table_size = 1415;
 
-        recompile_scripts(which_rom, which_lib)
+        recompile_scripts_on_large_stack(which_rom, which_lib, Some("charmap_jp.txt"))
+    }
+
+    #[test]
+    fn script_recompile_fomt_jp() -> Result<(), TestFailure> {
+        recompile_scripts_on_large_stack("FOMT_JP_GBA", "FOMT_JP_MARY_LIB", Some("charmap_jp.txt"))
+    }
+
+    #[test]
+    fn script_recompile_mfomt_jp() -> Result<(), TestFailure> {
+        recompile_scripts_on_large_stack(
+            "MFOMT_JP_GBA",
+            "MFOMT_JP_MARY_LIB",
+            Some("charmap_jp.txt"),
+        )
     }
 }
