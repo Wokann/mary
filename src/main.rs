@@ -24,7 +24,7 @@ enum Error {
     ScriptError(#[from] ScriptError),
 
     #[error("Lib script error: {0}")]
-    LibScriptError(ScriptError),
+    LibraryScript(ScriptError),
 
     #[error("Decode error: {0}")]
     DecodeFailed(#[from] DecodeError),
@@ -33,10 +33,10 @@ enum Error {
     DecompileFailed(#[from] DecompileError),
 
     #[error("IO Error: {0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
 
     #[error("CLI Error: {0}")]
-    CliError(&'static str),
+    Cli(&'static str),
 
     #[error("Character map error: {0}")]
     CharmapError(#[from] CharmapError),
@@ -134,7 +134,7 @@ fn print_compiled_scripts_in_c<W: io::Write>(
         writeln!(w, "// {name}: length of {bytes} bytes (+ padding)")?;
         write!(w, "unsigned int const {name}[] = {{")?;
 
-        for i in 0..(bytecode.len() + 3) / 4 {
+        for i in 0..bytecode.len().div_ceil(4) {
             let val = u32::from_le_bytes([
                 bytecode[i * 4],
                 *bytecode.get(i * 4 + 1).unwrap_or(&0),
@@ -215,7 +215,7 @@ fn main_error() -> Result<(), Error> {
 
             if binary {
                 if parse_result.scripts.len() != 1 {
-                    Err(Error::CliError(
+                    Err(Error::Cli(
                         "In binary output mode, only and exactly one (1) script can be defined",
                     ))
                 } else {
@@ -228,7 +228,7 @@ fn main_error() -> Result<(), Error> {
                         }
 
                         None => {
-                            stdout().write(&bytecode)?;
+                            stdout().write_all(&bytecode)?;
                         }
                     }
 
@@ -269,11 +269,11 @@ fn main_error() -> Result<(), Error> {
 
             if all {
                 if script_id.is_some() || offset.is_some() {
-                    return Err(Error::CliError(
+                    return Err(Error::Cli(
                         "--all cannot be combined with --script-id or --offset",
                     ));
                 }
-                let output_dir = output.ok_or(Error::CliError(
+                let output_dir = output.ok_or(Error::Cli(
                     "--all requires --output to name an output directory",
                 ))?;
                 decompile_all_scripts(
@@ -299,7 +299,7 @@ fn main_error() -> Result<(), Error> {
                     let entry = script_table
                         .iter()
                         .find(|entry| entry.id() == script_id)
-                        .ok_or(Error::CliError("Script ID is outside the pointer table"))?;
+                        .ok_or(Error::Cli("Script ID is outside the pointer table"))?;
                     match entry {
                         rom_info::ScriptTableEntry::Script { data, backing, .. } => {
                             bytecode::decode_script_with_backing(data, backing)?
@@ -328,13 +328,13 @@ fn main_error() -> Result<(), Error> {
 
                 (None, None) => {
                     event_script_id = 0;
-                    event_script_name = format!("YourEventScriptNameHere");
+                    event_script_name = "YourEventScriptNameHere".to_string();
 
                     bytecode::decode_script(&mut &rom[..])?
                 }
 
                 _ => {
-                    return Err(Error::CliError(
+                    return Err(Error::Cli(
                         "Expected at most one (1) of script ID or offset",
                     ))
                 }
@@ -344,7 +344,7 @@ fn main_error() -> Result<(), Error> {
 
             let library_scope = match parse_string(&library_code) {
                 Ok(parse_result) => parse_result.const_scope,
-                Err(err) => return Err(Error::LibScriptError(err)),
+                Err(err) => return Err(Error::LibraryScript(err)),
             };
 
             let stmts = match decompile_script(&script, &library_scope) {
@@ -371,7 +371,7 @@ fn main_error() -> Result<(), Error> {
                         event_script_name,
                         stmts,
                         &library_path_for_include,
-                        print_ir.then(|| &script),
+                        print_ir.then_some(&script),
                         charmap.as_deref(),
                     )?;
 
@@ -388,7 +388,7 @@ fn main_error() -> Result<(), Error> {
                         event_script_name,
                         stmts,
                         &library_path_for_include,
-                        print_ir.then(|| &script),
+                        print_ir.then_some(&script),
                         charmap.as_deref(),
                     )?;
 
@@ -411,7 +411,7 @@ fn decompile_all_scripts(
     let library_code = fs::read_to_string(input_library)?;
     let library_scope = match parse_string(&library_code) {
         Ok(parse_result) => parse_result.const_scope,
-        Err(err) => return Err(Error::LibScriptError(err)),
+        Err(err) => return Err(Error::LibraryScript(err)),
     };
     let library_path_for_include = input_library.to_string_lossy();
     fs::create_dir_all(output_dir)?;

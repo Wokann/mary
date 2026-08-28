@@ -24,21 +24,24 @@ fn parse_string_inner(
     use crate::compiler::Parser;
 
     let charmap_error = Rc::new(RefCell::new(None));
-    let mut l = match charmap {
+    let l = match charmap {
         Some(charmap) => Lexer::new_with_state(
             code_string,
             crate::compiler::lexer::LexerState::with_charmap(charmap, Rc::clone(&charmap_error)),
         ),
-        None => Lexer::new(code_string),
+        None => Lexer::new_with_state(
+            code_string,
+            crate::compiler::lexer::LexerState::with_error_sink(Rc::clone(&charmap_error)),
+        ),
     };
     let mut p = Parser::new(ParseContext::new());
 
-    while let Some(tok) = l.next() {
+    for tok in l {
         match tok {
             Ok((start, tok, _)) => match p.parse(tok) {
                 Ok(()) => {}
                 Err(ScriptError::SyntaxError) => return Err(ScriptError::SyntaxErrorAt(start)),
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(err),
             },
 
             Err(err) => match err.kind {
@@ -54,6 +57,6 @@ fn parse_string_inner(
 
     match p.end_of_input() {
         Ok((_, parse_ctx)) => Ok(parse_ctx),
-        Err(err) => Err(err.into()),
+        Err(err) => Err(err),
     }
 }

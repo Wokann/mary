@@ -10,7 +10,7 @@ struct SwitchAllocator {
 
 impl SwitchAllocator {
     fn new_switch(&mut self) -> SwitchId {
-        self.switch_counter = self.switch_counter + 1;
+        self.switch_counter += 1;
         SwitchId(self.switch_counter - 1)
     }
 

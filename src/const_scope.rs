@@ -5,6 +5,7 @@ use crate::{
     ir::{CallId, CallableShape, ValueType},
 };
 
+#[derive(Default)]
 pub struct ConstScope {
     constants: HashMap<String, ConstVal>,
     callables: HashMap<String, (CallId, CallableShape)>,
@@ -13,11 +14,7 @@ pub struct ConstScope {
 
 impl ConstScope {
     pub fn new() -> Self {
-        Self {
-            constants: HashMap::new(),
-            callables: HashMap::new(),
-            user_types: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn add_const(&mut self, name: String, val: ConstVal) {

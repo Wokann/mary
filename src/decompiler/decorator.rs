@@ -55,13 +55,13 @@ impl<'a> StringDecorateVisitor<'a> {
         for (expr, param_type) in zip(&mut invoke.args, shape.parameter_types()) {
             match *param_type {
                 ValueType::String => {
-                    if let Err(_) = self.stringify_expr(expr) {
+                    if self.stringify_expr(expr).is_err() {
                         error = true;
                     }
                 }
 
                 _ => {
-                    if let Err(_) = self.visit_expr(expr) {
+                    if self.visit_expr(expr).is_err() {
                         error = true;
                     }
                 }
@@ -193,8 +193,7 @@ pub(super) fn decorate_stmts_with_strings(
     let mut string_constants = vec![];
     let mut string_constant_stmts = vec![];
 
-    for i in 0..strings.len() {
-        let string = &strings[i];
+    for (i, string) in strings.iter().enumerate() {
         let name = format!("MESSAGE_{i}");
 
         string_constants.push(name.clone());

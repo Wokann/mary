@@ -28,6 +28,13 @@ pub struct LexerState {
 }
 
 impl LexerState {
+    pub fn with_error_sink(charmap_error: Rc<RefCell<Option<CharmapError>>>) -> Self {
+        Self {
+            charmap_error,
+            ..Self::default()
+        }
+    }
+
     pub fn with_charmap(
         charmap: Arc<Charmap>,
         charmap_error: Rc<RefCell<Option<CharmapError>>>,
@@ -43,6 +50,13 @@ impl LexerState {
         self.text_buf.push_str(text);
     }
 
+    fn record_charmap_error(&self, error: CharmapError) {
+        let mut current = self.charmap_error.borrow_mut();
+        if current.is_none() {
+            *current = Some(error);
+        }
+    }
+
     fn flush_text(&mut self) {
         if self.text_buf.is_empty() {
             return;
@@ -53,10 +67,11 @@ impl LexerState {
             None => Ok(text.as_bytes().to_vec()),
         };
         match encoded {
-            Ok(bytes) => self.string_buf.extend(bytes),
-            Err(err) if self.charmap_error.borrow().is_none() => {
-                *self.charmap_error.borrow_mut() = Some(err)
+            Ok(bytes) if bytes.contains(&0) => {
+                self.record_charmap_error(CharmapError::EmbeddedNull)
             }
+            Ok(bytes) => self.string_buf.extend(bytes),
+            Err(err) if self.charmap_error.borrow().is_none() => self.record_charmap_error(err),
             Err(_) => {}
         }
     }
@@ -204,7 +219,11 @@ lexer! {
             let m = lexer.match_();
             let byte = u8::from_str_radix(&m[m.len() - 2..], 16).unwrap();
             lexer.state().flush_text();
-            lexer.state().string_buf.push(byte);
+            if byte == 0 {
+                lexer.state().record_charmap_error(CharmapError::EmbeddedNull);
+            } else {
+                lexer.state().string_buf.push(byte);
+            }
             lexer.continue_()
         },
 

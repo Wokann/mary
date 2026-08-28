@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, iter::repeat};
+use std::collections::BTreeMap;
 
 use super::opcodes::*;
 use crate::ir::{CaseEnum, Ins, IntValue, Script, StrValue};
@@ -217,7 +217,7 @@ fn encode_jump(vec: &mut Vec<u8>, jump_tables: JumpTables) {
 
     /* make room for table offsets */
     let table_begin = vec.len();
-    vec.extend(repeat(0).take(4 * jump_tables.len()));
+    vec.extend(std::iter::repeat_n(0, 4 * jump_tables.len()));
 
     for (i, jt) in jump_tables.iter().enumerate() {
         let off = vec.len() - data_begin;
@@ -265,12 +265,12 @@ fn encode_jump(vec: &mut Vec<u8>, jump_tables: JumpTables) {
     }
 }
 
-fn encode_str(vec: &mut Vec<u8>, str_tab: &Vec<StrValue>) {
+fn encode_str(vec: &mut Vec<u8>, str_tab: &[StrValue]) {
     vec.push_u32(str_tab.len() as u32);
 
     // alloc space for offset table
     let table_begin = vec.len();
-    vec.extend(repeat(0).take(4 * str_tab.len()));
+    vec.extend(std::iter::repeat_n(0, 4 * str_tab.len()));
 
     let data_begin = vec.len();
 
@@ -308,7 +308,7 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
 
     // second chunk is JUMP, if present
 
-    if jump_tables.0.len() != 0 {
+    if !jump_tables.0.is_empty() {
         let chunk_hook = vec.len();
         vec.extend(b"JUMP");
         vec.push_u32(0);
@@ -360,7 +360,7 @@ mod tests {
                 let mut last = code.len() - 1;
 
                 while code[last] == OPCODE_NOP {
-                    last = last - 1;
+                    last -= 1;
                 }
 
                 code[last] == OPCODE_END

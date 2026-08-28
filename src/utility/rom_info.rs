@@ -36,10 +36,10 @@ fn read_u32(from: &[u8]) -> usize {
 }
 
 pub fn identify_rom(rom: &[u8]) -> Option<FomtVariant> {
-    match &rom[0xA0..0xAC] {
+    match rom.get(0xA0..0xAC)? {
         b"HARVESTMOGBA" => Some(FomtVariant::FomtUs),
         b"HM MFOM USA\0" => Some(FomtVariant::MfomtUs),
-        b"BOKUMONOGBA\0" => match &rom[0xAC..0xB0] {
+        b"BOKUMONOGBA\0" => match rom.get(0xAC..0xB0)? {
             b"A4NJ" => Some(FomtVariant::FomtJp),
             b"BFGJ" => Some(FomtVariant::MfomtJp),
             _ => None,
@@ -49,7 +49,12 @@ pub fn identify_rom(rom: &[u8]) -> Option<FomtVariant> {
 }
 
 pub fn get_script_table(rom: &[u8]) -> io::Result<Vec<ScriptTableEntry<'_>>> {
-    let variant = identify_rom(rom).unwrap();
+    let variant = identify_rom(rom).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "ROM header does not match a supported FoMT/MFoMT variant",
+        )
+    })?;
 
     let (addr, table_slot_count) = match variant {
         FomtVariant::FomtUs => (0x080F89D4, 1329),
@@ -59,7 +64,11 @@ pub fn get_script_table(rom: &[u8]) -> io::Result<Vec<ScriptTableEntry<'_>>> {
     };
 
     let mut result = vec![];
-    let table_bytes = &rom[addr & 0x01FFFFFF..];
+    let table_offset = addr & 0x01FFFFFF;
+    let table_size = table_slot_count * 4;
+    let table_bytes = rom
+        .get(table_offset..table_offset + table_size)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated script table"))?;
 
     for i in 0..table_slot_count {
         let script_addr = read_u32(&table_bytes[i * 4..]);
@@ -104,4 +113,19 @@ pub fn get_all_scripts(rom: &[u8]) -> io::Result<Vec<&[u8]>> {
             ScriptTableEntry::Script { data, .. } => Some(data),
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_or_unknown_roms_are_rejected_without_panicking() {
+        assert_eq!(identify_rom(&[]), None);
+        assert_eq!(identify_rom(&[0; 0xB0]), None);
+        assert_eq!(
+            get_script_table(&[]).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 }

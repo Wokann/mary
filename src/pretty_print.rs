@@ -527,6 +527,7 @@ impl<'a> fmt::Display for PrettyStringLit<'a> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod string_lit_tests {
     use super::{PrettyStmts, PrettyStringLit};
     use crate::ast::{Expr, Stmt};
@@ -648,7 +649,7 @@ fn fmt_switch_case_with_charmap(
 ) -> Result<(), fmt::Error> {
     let indent_string = "    ".repeat(indent);
 
-    Ok(match switch_case {
+    match switch_case {
         SwitchCase::Case(exprs, stmts) => {
             write!(f, "{indent_string}case ")?;
             fmt_args(f, exprs, charmap)?;
@@ -656,7 +657,7 @@ fn fmt_switch_case_with_charmap(
 
             writeln!(f, "{indent_string}{{")?;
 
-            if stmts.len() > 0 {
+            if !stmts.is_empty() {
                 let pretty_body = PrettyStmts(&stmts[..], indent + 1, charmap);
                 writeln!(f, "{pretty_body}")?;
             }
@@ -717,5 +718,7 @@ fn fmt_switch_case_with_charmap(
 
             write!(f, "{indent_string}}}")?;
         }
-    })
+    }
+
+    Ok(())
 }

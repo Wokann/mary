@@ -259,13 +259,49 @@ ir
 
 ## 验证
 
-普通测试：
+`tests/` 是 Rust 集成测试和人工验证辅助脚本目录：
+
+- `structured_stress.rs`：构造嵌套 `switch`、循环、`if/else`、`break` 和栈密集表达式，连续执行三轮“编译 → 结构化反编译 → 输出源码 → 重编译”并比较字节；其中还包含两层和三层控制流组合矩阵。
+- `vanilla_symmetry.rs`：读取四个原始 ROM 的全部指针表槽位。每个版本分别验证直接解码/编码和高级语言源码往返，要求 RIFF 逐字节一致，并禁止残留低级 `ir` 或 `jump next`。
+- `common/mod.rs`：供集成测试共用的 AST 递归检查函数，不会作为独立测试执行。
+- `decompile_all_roms.bat`：手动批量解包四个 ROM 的辅助脚本，不会被 `cargo test` 自动执行。
+
+不依赖 ROM 的普通测试：
 
 ```console
-cargo test
+cargo test --all-targets
 ```
 
-完整 ROM 测试需要启用 `test_with_roms` feature，并设置指向四个 ROM 和两套 callable library 的环境变量。成功标准不是“能够解析”，而是每个脚本重新生成的 RIFF 与 ROM 原始数据逐字节完全一致。
+完整 ROM 测试前，将四个文件放在以下固定位置：
+
+```text
+rom/fomt.gba
+rom/mfomt.gba
+rom/fomtjp.gba
+rom/mfomtjp.gba
+```
+
+ROM 和解包输出目录均由 Git 忽略。两套 callable library 直接使用仓库内的 `goodies/lib_fomt.txt` 与 `goodies/lib_mfomt.txt`，不需要设置环境变量。运行：
+
+```console
+cargo test --all-targets --features test_with_roms
+```
+
+只执行四 ROM 严格测试并显示逐版本统计：
+
+```console
+cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture
+```
+
+失败时，原始和重建的 RIFF 会保存在被忽略的 `test_failures/<版本>/` 中。完整 ROM 测试的成功标准不是“能够解析”，而是每个脚本重新生成的 RIFF 与 ROM 原始数据逐字节完全一致。
+
+在 Windows 上批量生成四个 ROM 的全部反编译源码，可从仓库根目录运行：
+
+```console
+tests\decompile_all_roms.bat
+```
+
+脚本会先构建当前代码，再生成 `decompiled_text/fomt_us`、`mfomt_us`、`fomt_jp` 和 `mfomt_jp`。它只用于检查解包结果，不替代严格往返测试。
 
 ## 相关项目
 

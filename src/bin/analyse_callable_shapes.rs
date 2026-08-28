@@ -319,9 +319,7 @@ fn analyse_backwards(block: &mut BlockInfo, current_knowledge: &mut HashMap<Call
             Ins::Call(call_id) => {
                 /* get or insert entry */
 
-                let info = current_knowledge
-                    .entry(*call_id)
-                    .or_insert_with(CallableInfo::default);
+                let info = current_knowledge.entry(*call_id).or_default();
 
                 update_stats_from_disps(info, *current_disp, next_disp);
 
@@ -395,9 +393,7 @@ fn analyse_forwards(block: &mut BlockInfo, current_knowledge: &mut HashMap<CallI
             Ins::Call(call_id) => {
                 /* get or insert entry */
 
-                let info = current_knowledge
-                    .entry(*call_id)
-                    .or_insert_with(CallableInfo::default);
+                let info = current_knowledge.entry(*call_id).or_default();
 
                 update_stats_from_disps(info, current_disp, *next_disp);
 
@@ -469,8 +465,8 @@ fn analyse_forwards(block: &mut BlockInfo, current_knowledge: &mut HashMap<CallI
 fn analyse_callables(scripts: &[Script]) -> HashMap<CallId, CallableInfo> {
     let mut blocks = vec![];
 
-    for i in 0..scripts.len() {
-        blocks.extend(split_instructions(&scripts[i].instructions, i));
+    for (i, script) in scripts.iter().enumerate() {
+        blocks.extend(split_instructions(&script.instructions, i));
     }
 
     let mut current_knowledge = HashMap::new();
@@ -505,13 +501,11 @@ fn analyse_callables(scripts: &[Script]) -> HashMap<CallId, CallableInfo> {
      * to infer callable parameter/result count */
 
     for _ in 0..50 {
-        for i in 0..blocks.len() {
-            let block = &mut blocks[i];
+        for block in &mut blocks {
             analyse_backwards(block, &mut current_knowledge);
         }
 
-        for i in 0..blocks.len() {
-            let block = &mut blocks[i];
+        for block in &mut blocks {
             analyse_forwards(block, &mut current_knowledge);
         }
     }

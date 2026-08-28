@@ -259,13 +259,49 @@ The four current vanilla corpora need no `ir` fallback.
 
 ## Verification
 
-Run ordinary tests with:
+`tests/` contains Rust integration tests and a manual verification helper:
+
+- `structured_stress.rs` constructs nested switches, loops, conditionals, breaks, and stack-heavy expressions. Each case performs three compile/decompile/print/recompile rounds and compares the resulting bytes; pairwise and three-level control-flow matrices are included.
+- `vanilla_symmetry.rs` reads every pointer-table slot from all four vanilla ROMs. Each version gets both a direct decode/encode test and a printed high-level source round trip; RIFF bytes must match exactly, with no residual low-level `ir` or `jump next`.
+- `common/mod.rs` provides recursive AST inspection shared by the integration tests and is not an independently executed test.
+- `decompile_all_roms.bat` manually decompiles all four ROMs for inspection and is not run by `cargo test`.
+
+Run ordinary tests that do not require ROMs with:
 
 ```console
-cargo test
+cargo test --all-targets
 ```
 
-The complete ROM suite uses the `test_with_roms` feature and environment variables pointing to all four ROMs and both callable libraries. Its success criterion is byte-for-byte equality for every regenerated RIFF—not merely successful parsing.
+Before running the complete ROM suite, place the four files at these fixed paths:
+
+```text
+rom/fomt.gba
+rom/mfomt.gba
+rom/fomtjp.gba
+rom/mfomtjp.gba
+```
+
+The ROM and decompiled-output directories are ignored by Git. Callable declarations come directly from the tracked `goodies/lib_fomt.txt` and `goodies/lib_mfomt.txt`; no environment variables are required. Run:
+
+```console
+cargo test --all-targets --features test_with_roms
+```
+
+To run only the four-ROM strict suite and show per-version statistics:
+
+```console
+cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture
+```
+
+On failure, original and rebuilt RIFF files are stored under the ignored `test_failures/<variant>/` directory. Success means byte-for-byte equality for every regenerated RIFF—not merely successful parsing.
+
+On Windows, generate decompiled source for all four ROMs from the repository root with:
+
+```console
+tests\decompile_all_roms.bat
+```
+
+The helper builds the current code and writes `decompiled_text/fomt_us`, `mfomt_us`, `fomt_jp`, and `mfomt_jp`. It is intended for inspecting decompiled output and does not replace the strict round-trip suite.
 
 ## Related projects
 

@@ -1,8 +1,7 @@
+mod common;
+
 use mary::{
-    ast::{Stmt, SwitchCase},
-    bytecode::encode_script,
-    compiler,
-    decompiler::decompile_script_structured,
+    ast::Stmt, bytecode::encode_script, compiler, decompiler::decompile_script_structured,
     pretty_print::PrettyStmts,
 };
 
@@ -12,23 +11,7 @@ func 0x003 Probe(value)
 "#;
 
 fn contains_low_level(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(|stmt| match stmt {
-        Stmt::Ir(_) | Stmt::JumpNext => true,
-        Stmt::If(_, body) | Stmt::DoWhile(_, body) => contains_low_level(body),
-        Stmt::IfElse(_, then_body, else_body) => {
-            contains_low_level(then_body) || contains_low_level(else_body)
-        }
-        Stmt::For(elements) => contains_low_level(&elements.3),
-        Stmt::Switch(_, cases, _, _) => cases.iter().any(|case| match case {
-            SwitchCase::Case(_, body)
-            | SwitchCase::Fallthrough(_, body)
-            | SwitchCase::Default(body)
-            | SwitchCase::DefaultFallthrough(body)
-            | SwitchCase::ImplicitDefault(body)
-            | SwitchCase::DeadJump(body) => contains_low_level(body),
-        }),
-        _ => false,
-    })
+    common::contains_stmt(stmts, &|stmt| matches!(stmt, Stmt::Ir(_) | Stmt::JumpNext))
 }
 
 fn assert_source_round_trip(name: &str, body: &str) {
@@ -441,7 +424,7 @@ fn wrap_control(kind: &str, depth: usize, inner: &str) -> String {
             "switch compact value\n{{\n    case 0\n    {{\n{inner}\n    }}\n    default {{ Mark({}) }}\n}}",
             1200 + depth
         ),
-        _ => unreachable!(),
+        _ => panic!("unknown generated control-flow kind: {kind}"),
     }
 }
 
@@ -457,4 +440,51 @@ fn generated_pairwise_control_flow_matrix() {
             assert_source_round_trip(&format!("pairwise_{outer}_{inner}"), &body);
         }
     }
+}
+
+#[test]
+fn generated_three_level_control_flow_matrix() {
+    let kinds = ["if_else", "do_while", "for", "switch", "switch_compact"];
+
+    for (outer_index, outer) in kinds.iter().enumerate() {
+        for (middle_index, middle) in kinds.iter().enumerate() {
+            for (inner_index, inner) in kinds.iter().enumerate() {
+                let case_index =
+                    (outer_index * kinds.len() + middle_index) * kinds.len() + inner_index;
+                let leaf = format!("Mark({})", 2000 + case_index);
+                let inner_body = wrap_control(inner, 2, &leaf);
+                let middle_body = wrap_control(middle, 1, &inner_body);
+                let body = format!("var value = 0\n{}", wrap_control(outer, 0, &middle_body));
+                assert_source_round_trip(&format!("triple_{outer}_{middle}_{inner}"), &body);
+            }
+        }
+    }
+}
+
+#[test]
+fn nested_conditions_with_stack_heavy_expressions() {
+    assert_source_round_trip(
+        "nested_conditions_with_stack_heavy_expressions",
+        r#"
+    var a = 1, b = 2, c = 3, d = 4
+    if (Probe(a + b * c) && Probe((d - a) % b)) || Probe(-c)
+    {
+        switch Probe(a + Probe(b + Probe(c)))
+        {
+            case 0
+            {
+                for var i = Probe(a); Probe(i + b) < Probe(c + d); i++
+                {
+                    if Probe(i) != 0 { Mark(i + a * b) } else { break }
+                }
+            }
+            default { Mark(3000) }
+        }
+    }
+    else
+    {
+        do { a += Probe(b + c) } while Probe(a) < Probe(d)
+    }
+"#,
+    );
 }

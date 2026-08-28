@@ -33,6 +33,9 @@ pub enum DecodeError {
 
     #[error("Corrupt STR chunk")]
     BadStrChunk,
+
+    #[error("STR string {index} at pool offset 0x{offset:X} has no 0x00 terminator")]
+    UnterminatedString { index: usize, offset: usize },
 }
 
 // This is pub(crate) as it is used in encoder tests also
@@ -186,7 +189,7 @@ fn decode_jump_chunk(data: &[u8]) -> Result<DecodedJumpChunk, DecodeError> {
         let off = read.read_u32()? as usize;
         offs.push(off);
 
-        if off % 4 != 0 {
+        if !off.is_multiple_of(4) {
             return Err(DecodeError::MisalignedJumpTable(off));
         }
     }
@@ -406,14 +409,10 @@ fn disassemble(
     Ok(result)
 }
 
-fn read_str(data: &[u8]) -> &[u8] {
-    let mut end_off = 0;
-
-    while end_off < data.len() && data[end_off] != 0 {
-        end_off += 1;
-    }
-
-    &data[0..end_off]
+fn read_str(data: &[u8]) -> Option<&[u8]> {
+    data.iter()
+        .position(|byte| *byte == 0)
+        .map(|end| &data[..end])
 }
 
 fn decode_string_chunk(
@@ -451,7 +450,9 @@ fn decode_string_chunk(
             return Err(DecodeError::BadStrChunk);
         }
 
-        string_table.push(read_str(&string_pool[offset..]).to_vec());
+        let string = read_str(&string_pool[offset..])
+            .ok_or(DecodeError::UnterminatedString { index: i, offset })?;
+        string_table.push(string.to_vec());
     }
 
     Ok(string_table)
@@ -489,6 +490,72 @@ mod chunk_tests {
             decode_string_chunk(&declared, &backing).unwrap(),
             vec![b"new".to_vec()]
         );
+    }
+
+    #[test]
+    fn str_entry_must_have_a_null_terminator_in_the_available_backing() {
+        let data = [
+            1, 0, 0, 0, // count
+            0, 0, 0, 0, // id 0 -> start of pool
+            b'A', b'B',
+        ];
+
+        assert!(matches!(
+            decode_string_chunk(&data, &data),
+            Err(DecodeError::UnterminatedString {
+                index: 0,
+                offset: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn relocated_str_entry_must_have_a_null_terminator_in_the_external_backing() {
+        let declared = [
+            1, 0, 0, 0, // count
+            4, 0, 0, 0, // id 0 -> pool + 4
+        ];
+        let mut backing = declared.to_vec();
+        backing.extend(b"pad\0text without terminator");
+
+        assert!(matches!(
+            decode_string_chunk(&declared, &backing),
+            Err(DecodeError::UnterminatedString {
+                index: 0,
+                offset: 4
+            })
+        ));
+    }
+
+    #[test]
+    fn str_offsets_can_share_and_reorder_null_terminated_values() {
+        let data = [
+            4, 0, 0, 0, // count
+            2, 0, 0, 0, // id 0 -> "B"
+            0, 0, 0, 0, // id 1 -> "A"
+            2, 0, 0, 0, // id 2 -> shared "B"
+            4, 0, 0, 0, // id 3 -> empty string
+            b'A', 0, b'B', 0, 0,
+        ];
+
+        assert_eq!(
+            decode_string_chunk(&data, &data).unwrap(),
+            vec![b"B".to_vec(), b"A".to_vec(), b"B".to_vec(), vec![]]
+        );
+    }
+
+    #[test]
+    fn truncated_chunk_body_is_rejected_instead_of_partially_decoded() {
+        let encoded = [
+            b'C', b'O', b'D', b'E', // name
+            4, 0, 0, 0, // declared body length
+            0x20, 0x00, // only half the body is available
+        ];
+
+        assert!(matches!(
+            read_riff_chunks(&mut &encoded[..], 22),
+            Err(DecodeError::IoError(ref err)) if err.kind() == io::ErrorKind::UnexpectedEof
+        ));
     }
 
     #[test]
@@ -534,7 +601,7 @@ fn read_riff_chunks<R: io::Read>(
         let chunk_size = read.read_u32()? as usize;
 
         let mut chunk_data = vec![0u8; chunk_size];
-        read.read(&mut chunk_data)?;
+        read.read_exact(&mut chunk_data)?;
 
         let chunk_name = std::str::from_utf8(&chunk_name)?.to_string();
         chunks.insert(

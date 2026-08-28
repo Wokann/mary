@@ -12,8 +12,12 @@ pub enum CharmapError {
     DuplicateBytes { line: usize, value: String },
     #[error("charmap line {line}: mapped text must not be empty")]
     EmptyText { line: usize },
+    #[error("charmap line {line}: byte sequence {value} contains reserved STR terminator 00")]
+    ReservedNull { line: usize, value: String },
     #[error("text contains a character sequence not present in the active charmap: '{0}'")]
     UnmappedText(String),
+    #[error("string literals cannot contain the reserved STR terminator byte 00")]
+    EmbeddedNull,
 }
 
 /// Replaceable mapping between encoded ROM bytes and UTF-8 source text.
@@ -64,6 +68,13 @@ impl Charmap {
                     line,
                     value: hex.into(),
                 })?;
+
+            if bytes.contains(&0) {
+                return Err(CharmapError::ReservedNull {
+                    line,
+                    value: hex.into(),
+                });
+            }
 
             if result.decode.insert(bytes.clone(), text.clone()).is_some() {
                 return Err(CharmapError::DuplicateBytes {
@@ -252,5 +263,39 @@ mod tests {
         assert_eq!(map.raw_sequence_len(&[0xBB, 0xDD, 0xEE]), 3);
         assert_eq!(map.raw_sequence_len(&[0xCC, 0x20]), 1);
         assert_eq!(map.raw_sequence_len(&[0xAA]), 1);
+    }
+
+    #[test]
+    fn rejects_mappings_that_embed_the_str_terminator() {
+        assert_eq!(
+            Charmap::parse("4100=invalid\n"),
+            Err(CharmapError::ReservedNull {
+                line: 1,
+                value: "4100".into(),
+            })
+        );
+        // Empty TBL slots remain legal because they do not define a mapping.
+        assert!(Charmap::parse("00=\n").is_ok());
+    }
+
+    #[test]
+    fn rejects_raw_null_escape_with_or_without_a_charmap() {
+        use std::sync::Arc;
+
+        let source = r#"script 1 Invalid { const MESSAGE = "\x00" }"#;
+        assert!(matches!(
+            crate::compiler::parse_string(source),
+            Err(crate::compiler::ScriptError::Charmap(
+                CharmapError::EmbeddedNull
+            ))
+        ));
+
+        let map = Arc::new(Charmap::parse("41=A\n").unwrap());
+        assert!(matches!(
+            crate::compiler::parse_string_with_charmap(source, map),
+            Err(crate::compiler::ScriptError::Charmap(
+                CharmapError::EmbeddedNull
+            ))
+        ));
     }
 }

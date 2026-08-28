@@ -73,14 +73,14 @@ impl<'a> fmt::Display for DecompileState<'a> {
                 DecompileToken::Expr(expr) => {
                     writeln!(f, "    /* Expression */")?;
                     /* PUSH {expr} */
-                    let pretty_expr = PrettyExpr::new(&expr);
+                    let pretty_expr = PrettyExpr::new(expr);
                     writeln!(f, "    push {pretty_expr}")?;
                 }
 
                 DecompileToken::AssignExpr(var_id, assign_operation, expr) => {
                     writeln!(f, "    /* Assignment Expression */")?;
                     /* PUSH var_{0} {assign_operation} {expr} */
-                    let pretty_expr = PrettyExpr::new(&expr);
+                    let pretty_expr = PrettyExpr::new(expr);
                     writeln!(
                         f,
                         "    push var_{0} {1} {pretty_expr}",
@@ -144,7 +144,7 @@ impl<'a> fmt::Display for DecompileState<'a> {
             }
         }
 
-        if self.input.len() > 0 {
+        if !self.input.is_empty() {
             writeln!(f, "{separator} REMAINING INSTRUCTIONS")?;
 
             writeln!(f, ">   {0:?}", self.input[0])?;

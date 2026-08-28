@@ -1,3 +1,5 @@
+#![allow(clippy::absurd_extreme_comparisons, clippy::let_unit_value)]
+
 use pomelo::pomelo;
 
 use super::{compile_script, ScriptError};
@@ -16,11 +18,17 @@ pub struct ParseContext {
 
 impl ParseContext {
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for ParseContext {
+    fn default() -> Self {
         Self {
             allow_scripts: true,
             allow_declarations: true,
             scripts: Vec::new(),
-            const_scope: ConstScope::new(),
+            const_scope: ConstScope::default(),
         }
     }
 }

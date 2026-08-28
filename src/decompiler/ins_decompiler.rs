@@ -52,13 +52,13 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
     }
 
     fn is_expr(&self, token: &DecompileToken) -> bool {
-        match token {
+        matches!(
+            token,
             DecompileToken::Expr(_)
-            | DecompileToken::FunctionCall(_)
-            | DecompileToken::PushVar(_)
-            | DecompileToken::PushInt(_) => true,
-            _ => false,
-        }
+                | DecompileToken::FunctionCall(_)
+                | DecompileToken::PushVar(_)
+                | DecompileToken::PushInt(_)
+        )
     }
 
     fn variable_name(&mut self, var_id: VarId) -> String {
@@ -125,12 +125,9 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
 
         use Ins::{Cmp, Jmp, Label, PushInt};
 
-        match &self.state.input[..] {
+        match self.state.input {
             [Cmp, check_branch, PushInt(0), Jmp(jump_l), Label(label_k), PushInt(1), Label(label_l), ..]
-                if check_branch
-                    .branch_target()
-                    .map_or(false, |branch_k| branch_k == *label_k)
-                    && *jump_l == *label_l =>
+                if check_branch.branch_target() == Some(*label_k) && *jump_l == *label_l =>
             {
                 // make sure we got the size (7) of the input head to remove right
                 assert!(matches!(self.state.input[6], Label(l) if (*jump_l == l)));
@@ -167,7 +164,7 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
             }
         };
 
-        match &self.state.input[..] {
+        match self.state.input {
             /* post-increment (i++) */
             [Ins::Dupe, Ins::Inc, Ins::PopVar(pop_var_id), ..] if pushed_var_id == *pop_var_id => {
                 self.state.input = &self.state.input[3..];
@@ -553,7 +550,7 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
          */
 
         // check for SWITCH:s LABEL:e sequence at input head
-        let (switch_id, past_switch_jump_id) = match &self.state.input[..] {
+        let (switch_id, past_switch_jump_id) = match self.state.input {
             [Ins::Switch(switch_id), Ins::Label(jump_id), ..] => (*switch_id, *jump_id),
 
             _ => {
@@ -1018,25 +1015,17 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                  * - within a conditional expression, which is matched by a forward pattern at CMP */
 
                 if let Err(DecompileError::CouldntReduce) = self.match_at_jump(Some(jump_id)) {
-                    let is_break_else_arm = match self.back() {
+                    let is_break_else_arm = matches!(self.back(),
                         [.., check_expr, DecompileToken::Beq(beq_id), DecompileToken::Stmts(_), DecompileToken::Jump(end_id), DecompileToken::Label(else_id)]
                             if self.is_expr(check_expr)
                                 && beq_id == else_id
-                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id) =>
-                        {
-                            true
-                        }
-                        _ => false,
-                    };
-                    let is_break_if_body = match self.back() {
+                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id)
+                    );
+                    let is_break_if_body = matches!(self.back(),
                         [.., check_expr, DecompileToken::Beq(end_id)]
                             if self.is_expr(check_expr)
-                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id) =>
-                        {
-                            true
-                        }
-                        _ => false,
-                    };
+                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id)
+                    );
 
                     if self.switch_break_ids.contains(&jump_id)
                         && (matches!(self.state.input.get(1), Some(Ins::Jmp(_)))
@@ -1071,7 +1060,7 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                  * - at the tail of a do-while statement
                  * - within a conditional expression, which is matched by a forward pattern at CMP */
 
-                if let Err(_) = self.match_at_bne(jump_id) {
+                if self.match_at_bne(jump_id).is_err() {
                     self.state.stack.push(DecompileToken::Bne(jump_id));
                     self.state.input = &self.state.input[1..];
                 }
@@ -1207,8 +1196,8 @@ fn prepare_jump_to_idx(instructions: &[Ins]) -> HashMap<JumpId, usize> {
     let mut result = HashMap::new();
     let mut idx = 0;
 
-    for i in 0..instructions.len() {
-        match instructions[i] {
+    for instruction in instructions {
+        match *instruction {
             Ins::Label(jump_id) => {
                 result.insert(jump_id, idx);
             }

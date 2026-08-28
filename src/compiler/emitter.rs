@@ -52,7 +52,7 @@ impl<'a> BlockScope<'a> {
         match self.names.entry(name) {
             Entry::Occupied(_) => None,
             Entry::Vacant(v) => {
-                self.var_frame = self.var_frame + 1;
+                self.var_frame += 1;
                 v.insert(NameVal::Var(id));
 
                 Some(id)
@@ -104,7 +104,7 @@ impl Emit {
     }
 
     fn new_label(&mut self) -> JumpId {
-        self.location_counter = self.location_counter + 1;
+        self.location_counter += 1;
         JumpId(self.location_counter)
     }
 
@@ -287,32 +287,32 @@ impl Emit {
 
             Expr::CmpEq(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Beq(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Beq);
             }
 
             Expr::CmpNe(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Bne(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Bne);
             }
 
             Expr::CmpLt(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Blt(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Blt);
             }
 
             Expr::CmpLe(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Ble(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Ble);
             }
 
             Expr::CmpGe(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Bge(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Bge);
             }
 
             Expr::CmpGt(ops) => {
                 let (lhs, rhs) = *ops;
-                self.expr_cmp(scope, lhs, rhs, |id| Ins::Bgt(id));
+                self.expr_cmp(scope, lhs, rhs, Ins::Bgt);
             }
 
             Expr::Call(invoke) => match scope.lookup_name(&invoke.func) {
@@ -383,7 +383,7 @@ impl Emit {
             Stmt::Consts(inits) => {
                 for (name, expr) in inits {
                     if let Some(val) = ConstVal::eval_expr(&expr, scope) {
-                        if let None = scope.define_const(name.clone(), val) {
+                        if scope.define_const(name.clone(), val).is_none() {
                             self.errors.push(NameAlreadyDeclared(name));
                         }
                     } else {
@@ -643,7 +643,7 @@ impl Emit {
     }
 
     fn end(self) -> Result<Script, CompileErrors> {
-        if self.errors.len() != 0 {
+        if !self.errors.is_empty() {
             Err(CompileErrors(self.errors))
         } else {
             Ok(Script::new(self.instructions, self.strings))
