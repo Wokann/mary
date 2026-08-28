@@ -4,7 +4,7 @@
 
 All vanilla scripts now complete a strict source round trip: bytecode is decoded, decompiled to editable text, parsed again, compiled, encoded, and compared byte-for-byte with the original. This covers 100% of both games: 1328/1328 FoMT scripts and 1415/1415 MFoMT scripts.
 
-The decompiler emits structured source where it can do so losslessly. The remaining 25 FoMT and 15 MFoMT scripts contain control flow that the structurer cannot yet express; these are emitted as explicit instruction-level `ir` blocks. They are editable and lossless, and are not counted as structured decompilation successes.
+All 2743 vanilla scripts are emitted as structured source. None of the FoMT or MFoMT corpus currently requires the instruction-level `ir` fallback.
 
 The easiest way to get started would be, I think, to simply decompile a bunch of vanilla scripts to see what they are like, and perhaps modify and recompile them and see what they do in-game.
 
@@ -206,10 +206,21 @@ Constants don't have any correspondance in the compiled bytecode. They are evalu
     switch EXPR
     {
         case VALUE, ... { ... }
+        case VALUE, ... fallthrough { ... }
         dead { ... } // preserve a layout-only jump with no case values
         ...
         default { ... } // optional
+        default implicit { ... } // default body without a bytecode case marker
     }
+
+    // switch whose final case jump also serves as its tail jump
+    switch compact EXPR { ... }
+
+    // leave the innermost switch from a nested branch
+    break
+
+    // preserve a byte-observable jump to the immediately following statement
+    jump next
 
 When control flow cannot be represented by the structured constructs without changing the bytecode, the decompiler uses an instruction-level block instead:
 
@@ -228,12 +239,12 @@ The IR contains decoded instructions, labels, operands, and string-table entries
 
 | Game | Structured source | Explicit low-level IR | Strict byte-exact source round trip |
 | --- | ---: | --- | ---: |
-| FoMT (US) | 1303/1328 | 356, 403, 540, 571, 610, 614, 617, 620, 623, 625, 629, 632, 635, 638, 640, 644, 647, 650, 653, 855, 858, 861, 1008, 1013, 1031 | 1328/1328 |
-| MFoMT (US) | 1400/1415 | 359, 365, 412, 433, 549, 580, 726, 1075, 1078, 1083, 1086, 1095, 1098, 1101, 1113 | 1415/1415 |
+| FoMT (US) | 1328/1328 | none | 1328/1328 |
+| MFoMT (US) | 1415/1415 | none | 1415/1415 |
 
 ## TODO
 
-- Continue lifting the remaining `ir` scripts into structured source without sacrificing losslessness
+- Extend the structured control-flow corpus with synthetic deeply nested combinations
 - Better error checking (function/procedure call parameter count coherence)
 - Better error reporting (locations...)
 - Constant evaluations need to be completed (should be easy)

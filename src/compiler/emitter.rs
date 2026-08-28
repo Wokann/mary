@@ -89,6 +89,7 @@ struct Emit {
     location_counter: usize,
     strings: Vec<StrValue>,
     errors: Vec<CompileError>,
+    switch_breaks: Vec<JumpId>,
 }
 
 impl Emit {
@@ -98,6 +99,7 @@ impl Emit {
             location_counter: 0,
             strings: Vec::new(),
             errors: Vec::new(),
+            switch_breaks: Vec::new(),
         }
     }
 
@@ -514,11 +516,13 @@ impl Emit {
                 self.ins(Ins::Jmp(switch_lab));
 
                 let mut found_default = false;
+                self.switch_breaks.push(next_lab);
 
                 for case in cases {
                     match case {
                         SwitchCase::Case(exprs, stmts) => {
-                            let ends_in_exit = matches!(stmts.last(), Some(Stmt::Exit));
+                            let ends_in_exit =
+                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
 
                             for expr in exprs {
                                 match ConstVal::eval_expr(&expr, scope) {
@@ -542,12 +546,28 @@ impl Emit {
                             }
                         }
 
+                        SwitchCase::Fallthrough(exprs, stmts) => {
+                            for expr in exprs {
+                                match ConstVal::eval_expr(&expr, scope) {
+                                    Some(ConstVal::Int(val)) => {
+                                        self.ins(Ins::Case(switch_id, CaseEnum::Val(val)));
+                                    }
+                                    Some(ConstVal::Str(_)) => {
+                                        self.errors.push(ExpectedConstantIntGotStr)
+                                    }
+                                    None => self.errors.push(FailedConstantEvaluation),
+                                }
+                            }
+                            self.stmts(scope, stmts);
+                        }
+
                         SwitchCase::Default(stmts) => {
                             if found_default {
                                 self.errors.push(MultipleDefaults);
                             }
 
-                            let ends_in_exit = matches!(stmts.last(), Some(Stmt::Exit));
+                            let ends_in_exit =
+                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
 
                             found_default = true;
                             self.ins(Ins::Case(switch_id, CaseEnum::Default));
@@ -559,17 +579,35 @@ impl Emit {
                             }
                         }
 
-                        SwitchCase::DeadJump(stmts) => {
-                            // This is a layout instruction recovered from the
-                            // original bytecode, not a semantic case. Keeping
-                            // the body empty makes that fact explicit.
-                            if !stmts.is_empty() {
-                                self.errors.push(CompileError::NonEmptyDeadJump);
+                        SwitchCase::DefaultFallthrough(stmts) => {
+                            if found_default {
+                                self.errors.push(MultipleDefaults);
                             }
+                            found_default = true;
+                            self.ins(Ins::Case(switch_id, CaseEnum::Default));
+                            self.stmts(scope, stmts);
+                        }
+
+                        SwitchCase::ImplicitDefault(stmts) => {
+                            if found_default {
+                                self.errors.push(MultipleDefaults);
+                            }
+                            found_default = true;
+                            let ends_in_exit =
+                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
+                            self.stmts(scope, stmts);
+                            if !ends_in_exit {
+                                self.ins(Ins::Jmp(next_lab));
+                            }
+                        }
+
+                        SwitchCase::DeadJump(stmts) => {
+                            self.stmts(scope, stmts);
                             self.ins(Ins::Jmp(next_lab));
                         }
                     }
                 }
+                self.switch_breaks.pop();
 
                 if layout == crate::ast::SwitchLayout::Standard {
                     self.ins(Ins::Jmp(next_lab)); // dead, but needed to produce matching code
@@ -580,6 +618,17 @@ impl Emit {
             }
 
             Stmt::Ir(_) => self.errors.push(CompileError::MisplacedIrBlock),
+
+            Stmt::JumpNext => {
+                let target = self.new_label();
+                self.ins(Ins::Jmp(target));
+                self.ins(Ins::Label(target));
+            }
+
+            Stmt::Break => match self.switch_breaks.last() {
+                Some(target) => self.ins(Ins::Jmp(*target)),
+                None => self.errors.push(CompileError::BreakOutsideSwitch),
+            },
 
             Stmt::Exit => self.ins(Ins::Exit),
         }

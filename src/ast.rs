@@ -103,6 +103,8 @@ pub enum Stmt {
     /// Complete decoded VM instructions and string table. This is the honest
     /// fallback when control flow cannot yet be raised to structured source.
     Ir(Vec<IrItem>),
+    JumpNext,
+    Break,
     Exit,
 }
 
@@ -117,7 +119,10 @@ pub enum SwitchLayout {
 #[derive(Debug, PartialEq)]
 pub enum SwitchCase {
     Case(Vec<Expr>, Vec<Stmt>),
+    Fallthrough(Vec<Expr>, Vec<Stmt>),
     Default(Vec<Stmt>),
+    DefaultFallthrough(Vec<Stmt>),
+    ImplicitDefault(Vec<Stmt>),
     /// An explicit unreachable jump in a switch case sequence. Some vanilla
     /// scripts contain this layout instruction even though it has no case
     /// value. It must remain visible in source for byte-exact round-tripping.
@@ -128,7 +133,10 @@ impl SwitchCase {
     pub fn stmts(&self) -> &[Stmt] {
         match self {
             SwitchCase::Case(_, stmts) => stmts,
+            SwitchCase::Fallthrough(_, stmts) => stmts,
             SwitchCase::Default(stmts) => stmts,
+            SwitchCase::DefaultFallthrough(stmts) => stmts,
+            SwitchCase::ImplicitDefault(stmts) => stmts,
             SwitchCase::DeadJump(stmts) => stmts,
         }
     }
@@ -136,7 +144,10 @@ impl SwitchCase {
     pub fn stmts_mut(&mut self) -> &mut [Stmt] {
         match self {
             SwitchCase::Case(_, stmts) => stmts,
+            SwitchCase::Fallthrough(_, stmts) => stmts,
             SwitchCase::Default(stmts) => stmts,
+            SwitchCase::DefaultFallthrough(stmts) => stmts,
+            SwitchCase::ImplicitDefault(stmts) => stmts,
             SwitchCase::DeadJump(stmts) => stmts,
         }
     }

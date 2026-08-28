@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
+    #[error("break used outside a switch")]
+    BreakOutsideSwitch,
     #[error("a switch dead block must be empty")]
     NonEmptyDeadJump,
     #[error("invalid low-level IR: {0}")]

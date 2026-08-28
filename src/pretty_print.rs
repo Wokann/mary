@@ -380,6 +380,8 @@ impl<'a> fmt::Display for PrettyStmts<'a> {
                     write!(f, "{indent_string}}}")?;
                 }
 
+                Stmt::JumpNext => write!(f, "{indent_string}jump next")?,
+                Stmt::Break => write!(f, "{indent_string}break")?,
                 Stmt::Exit => write!(f, "{indent_string}exit")?,
             }
 
@@ -474,6 +476,38 @@ pub(crate) fn fmt_switch_case(
             let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
             writeln!(f, "{pretty_body}")?;
 
+            write!(f, "{indent_string}}}")?;
+        }
+
+        SwitchCase::DefaultFallthrough(stmts) => {
+            writeln!(f, "{indent_string}default fallthrough")?;
+            writeln!(f, "{indent_string}{{")?;
+            if !stmts.is_empty() {
+                let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
+                writeln!(f, "{pretty_body}")?;
+            }
+            write!(f, "{indent_string}}}")?;
+        }
+
+        SwitchCase::ImplicitDefault(stmts) => {
+            writeln!(f, "{indent_string}default implicit")?;
+            writeln!(f, "{indent_string}{{")?;
+            if !stmts.is_empty() {
+                let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
+                writeln!(f, "{pretty_body}")?;
+            }
+            write!(f, "{indent_string}}}")?;
+        }
+
+        SwitchCase::Fallthrough(exprs, stmts) => {
+            write!(f, "{indent_string}case ")?;
+            fmt_args(f, exprs)?;
+            writeln!(f, " fallthrough")?;
+            writeln!(f, "{indent_string}{{")?;
+            if !stmts.is_empty() {
+                let pretty_body = PrettyStmts::with_indent(&stmts[..], indent + 1);
+                writeln!(f, "{pretty_body}")?;
+            }
             write!(f, "{indent_string}}}")?;
         }
 

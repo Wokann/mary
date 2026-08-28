@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::error::DecompileError;
 use super::error::DecompileErrorExtra;
@@ -19,6 +19,7 @@ pub(super) struct InsDecompiler<'a, 'b> {
     /// used for merging switch cases, which need to break to the same
     /// location
     jump_to_idx: HashMap<JumpId, usize>,
+    switch_break_ids: HashSet<JumpId>,
 
     known_callables: &'b HashMap<CallId, (String, CallableShape)>,
 }
@@ -32,6 +33,7 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
             state: DecompileState::new(instructions),
             variables: HashMap::new(),
             jump_to_idx: prepare_jump_to_idx(instructions),
+            switch_break_ids: prepare_switch_break_ids(instructions),
             known_callables,
         }
     }
@@ -317,12 +319,21 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                 Ok(())
             }
 
+            /* A reachable jump to the immediately following label has no
+             * semantic branch, but remains observable in bytecode. */
+            [.., Jump(jump_id)] if *jump_id == last_label_id => {
+                self.state.stack.pop();
+                self.push_stmt(Stmt::JumpNext);
+                self.state.input = &self.state.input[1..];
+                Ok(())
+            }
+
             _ => Err(DecompileError::CouldntReduce),
         }
     }
 
     fn match_at_bne(&mut self, bne_jump_id: JumpId) -> Result<(), DecompileError> {
-        use DecompileToken::{Label, Stmts};
+        use DecompileToken::{Case, Label, Stmts};
 
         match self.back() {
             /* Do-While statement:
@@ -331,6 +342,16 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                 if self.is_expr(check_expr) && *label_id == bne_jump_id =>
             {
                 self.apply_do_while(true);
+                Ok(())
+            }
+
+            /* A case marker has no runtime footprint and may be placed between
+             * the backward loop label and its body. Preserve the case outside
+             * the reconstructed do-while. */
+            [.., Label(label_id), Case(_, _), Stmts(_), check_expr]
+                if self.is_expr(check_expr) && *label_id == bne_jump_id =>
+            {
+                self.apply_do_while_in_case();
                 Ok(())
             }
 
@@ -365,6 +386,51 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         true
     }
 
+    fn switch_tail_label_count(
+        &self,
+        switch_cases: &[(SwitchCase, Option<JumpId>)],
+        past_switch_jump_id: JumpId,
+    ) -> Option<usize> {
+        let target_idx = self.jump_to_idx[&past_switch_jump_id];
+        let labels: Vec<JumpId> = self.state.input[1..]
+            .iter()
+            .take_while(|ins| {
+                matches!(ins, Ins::Label(id) if self.jump_to_idx.get(id) == Some(&target_idx))
+            })
+            .filter_map(|ins| match ins {
+                Ins::Label(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+
+        let mut last = labels.iter().position(|id| *id == past_switch_jump_id)?;
+        for (_, break_id) in switch_cases {
+            if let Some(break_id) = break_id {
+                last = last.max(labels.iter().position(|id| id == break_id)?);
+            }
+        }
+        Some(last + 1)
+    }
+
+    fn append_switch_case(
+        &mut self,
+        switch_id: SwitchId,
+        switch_case: SwitchCase,
+        break_id: Option<JumpId>,
+    ) {
+        match self.state.stack.last_mut() {
+            Some(DecompileToken::SwitchCases(existing_id, switch_cases))
+                if *existing_id == switch_id =>
+            {
+                switch_cases.push((switch_case, break_id));
+            }
+            _ => self.state.stack.push(DecompileToken::SwitchCases(
+                switch_id,
+                vec![(switch_case, break_id)],
+            )),
+        }
+    }
+
     fn match_at_jump(&mut self, jump_id: Option<JumpId>) -> Result<(), DecompileError> {
         use DecompileToken::{Case, Stmts, SwitchCases};
 
@@ -373,24 +439,27 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         match self.back() {
             [.., Case(case_switch_id, _), Stmts(_)] | [.., Case(case_switch_id, _)] => {
                 let case_switch_id = *case_switch_id;
-                let switch_case = self.reduce_switch_case();
+                let switch_case = self.reduce_switch_case(true, false);
+                self.append_switch_case(case_switch_id, switch_case, jump_id);
 
-                // check for existing switch cases list, and check for coherent params
-                match self.state.stack.last_mut() {
-                    Some(SwitchCases(back_cases_switch_id, switch_cases))
-                        if *back_cases_switch_id == case_switch_id =>
-                    {
-                        switch_cases.push((switch_case, jump_id));
-                    }
+                Ok(())
+            }
 
-                    // this is the first switch case block for this switch statement
-                    _ => {
-                        self.state
-                            .stack
-                            .push(SwitchCases(case_switch_id, vec![(switch_case, jump_id)]));
-                    }
+            /* Unreachable high-level statements may be retained between the
+             * final real case and the switch dispatch block. */
+            [.., SwitchCases(case_switch_id, _), Stmts(_)]
+                if matches!(
+                    self.state.input.get(1..3),
+                    Some([Ins::Label(_), Ins::Switch(id)]) if id == case_switch_id
+                ) =>
+            {
+                let case_switch_id = *case_switch_id;
+                let stmts = match self.state.stack.pop() {
+                    Some(Stmts(stmts)) => stmts,
+                    _ => unreachable!(),
                 };
-
+                self.append_switch_case(case_switch_id, SwitchCase::DeadJump(stmts), jump_id);
+                self.state.input = &self.state.input[1..];
                 Ok(())
             }
 
@@ -491,7 +560,6 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                 return Err(DecompileError::UnexpectedLookahead);
             }
         };
-
         use DecompileToken::{Jump, Label, SwitchCases};
 
         match self.back() {
@@ -502,30 +570,10 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     && *sc_switch_id == switch_id
                     && self.is_expr(check_expr) =>
             {
-                /* check that next instructions are the break labels */
-
-                let mut break_ids = vec![];
-
-                for i in 0..switch_cases.len() {
-                    if let Some(break_id) = switch_cases[i].1 {
-                        break_ids.push(break_id);
-                    }
-                }
-
-                if self.state.input.len() < break_ids.len() {
-                    return Err(DecompileError::UnexpectedLookahead);
-                }
-
-                for i in 0..break_ids.len() {
-                    let ins_idx = 2 + break_ids.len() - i - 1;
-
-                    match self.state.input[ins_idx] {
-                        Ins::Label(l_jump_id) if l_jump_id == break_ids[i] => { /* OK */ }
-                        _ => return Err(DecompileError::UnexpectedLookahead),
-                    }
-                }
-
-                self.apply_switch(break_ids.len(), SwitchLayout::Standard);
+                let tail_label_count = self
+                    .switch_tail_label_count(switch_cases, past_switch_jump_id)
+                    .ok_or(DecompileError::UnexpectedLookahead)?;
+                self.apply_switch(tail_label_count, SwitchLayout::Standard);
                 Ok(())
             }
 
@@ -537,24 +585,10 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     && *sc_switch_id == switch_id
                     && self.is_expr(check_expr) =>
             {
-                let break_ids: Vec<_> = switch_cases
-                    .iter()
-                    .filter_map(|(_, break_id)| *break_id)
-                    .collect();
-
-                if self.state.input.len() < 2 + break_ids.len() {
-                    return Err(DecompileError::UnexpectedLookahead);
-                }
-
-                for (i, break_id) in break_ids.iter().enumerate() {
-                    let ins_idx = 2 + break_ids.len() - i - 1;
-                    match self.state.input[ins_idx] {
-                        Ins::Label(label_id) if label_id == *break_id => {}
-                        _ => return Err(DecompileError::UnexpectedLookahead),
-                    }
-                }
-
-                self.apply_switch(break_ids.len(), SwitchLayout::Compact);
+                let tail_label_count = self
+                    .switch_tail_label_count(switch_cases, past_switch_jump_id)
+                    .ok_or(DecompileError::UnexpectedLookahead)?;
+                self.apply_switch(tail_label_count, SwitchLayout::Compact);
                 Ok(())
             }
 
@@ -771,10 +805,23 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         self.push_stmt(Stmt::DoWhile(expr, stmts));
     }
 
-    fn apply_switch(&mut self, num_case_labels: usize, layout: SwitchLayout) {
+    fn apply_do_while_in_case(&mut self) {
+        self.state.input = &self.state.input[1..];
+        let expr = self.pop_expr();
+        let stmts = match self.state.stack.pop() {
+            Some(DecompileToken::Stmts(stmts)) => stmts,
+            _ => unreachable!(),
+        };
+        let case = self.state.stack.pop().unwrap();
+        self.state.stack.pop(); // loop label
+        self.state.stack.push(case);
+        self.push_stmt(Stmt::DoWhile(expr, stmts));
+    }
+
+    fn apply_switch(&mut self, tail_label_count: usize, layout: SwitchLayout) {
         /* expr JMP:k cases:s,e JMP:e LABEL:k | SWITCH:s LABEL:e... */
 
-        self.state.input = &self.state.input[2 + num_case_labels..]; // consume SWITCH:s LABEL:e
+        self.state.input = &self.state.input[1 + tail_label_count..];
 
         self.state.stack.pop(); // discard LABEL:k
         if layout == SwitchLayout::Standard {
@@ -795,10 +842,12 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         self.push_stmt(Stmt::Switch(expr, cases, SwitchId(0), layout));
     }
 
-    fn reduce_switch_case(&mut self) -> SwitchCase {
+    fn reduce_switch_case(&mut self, consume_jump: bool, fallthrough: bool) -> SwitchCase {
         /* CASE:s stmts | JMP:e */
 
-        self.state.input = &self.state.input[1..]; // consume upcoming jump
+        if consume_jump {
+            self.state.input = &self.state.input[1..];
+        }
 
         /* TODO: has_stmts */
         let stmts = if let Some(DecompileToken::Stmts(_)) = self.state.stack.last() {
@@ -832,9 +881,14 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
 
                 case_exprs.reverse();
 
-                SwitchCase::Case(case_exprs, stmts)
+                if fallthrough {
+                    SwitchCase::Fallthrough(case_exprs, stmts)
+                } else {
+                    SwitchCase::Case(case_exprs, stmts)
+                }
             }
 
+            CaseEnum::Default if fallthrough => SwitchCase::DefaultFallthrough(stmts),
             CaseEnum::Default => SwitchCase::Default(stmts),
         }
     }
@@ -954,7 +1008,13 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                  * - within a conditional expression, which is matched by a forward pattern at CMP */
 
                 if let Err(DecompileError::CouldntReduce) = self.match_at_jump(Some(jump_id)) {
-                    self.state.stack.push(DecompileToken::Jump(jump_id));
+                    if self.switch_break_ids.contains(&jump_id)
+                        && matches!(self.state.input.get(1), Some(Ins::Jmp(_)))
+                    {
+                        self.push_stmt(Stmt::Break);
+                    } else {
+                        self.state.stack.push(DecompileToken::Jump(jump_id));
+                    }
                     self.state.input = &self.state.input[1..];
                 }
 
@@ -999,6 +1059,60 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
 
             Ins::Case(switch_id, case_enum) => {
                 /* TODO: merge successive cases */
+
+                let implicit_default_break = match self.back() {
+                    [.., check_expr, DecompileToken::Jump(_), DecompileToken::Stmts(_), DecompileToken::Jump(break_id)]
+                        if self.is_expr(check_expr) =>
+                    {
+                        Some(*break_id)
+                    }
+                    _ => None,
+                };
+                if let Some(break_id) = implicit_default_break {
+                    self.state.stack.pop();
+                    let stmts = match self.state.stack.pop() {
+                        Some(DecompileToken::Stmts(stmts)) => stmts,
+                        _ => unreachable!(),
+                    };
+                    self.append_switch_case(
+                        switch_id,
+                        SwitchCase::ImplicitDefault(stmts),
+                        Some(break_id),
+                    );
+                }
+
+                let interleaved_default = match self.back() {
+                    [.., DecompileToken::SwitchCases(existing_id, _), DecompileToken::Stmts(_), DecompileToken::Jump(break_id)]
+                        if *existing_id == switch_id =>
+                    {
+                        Some(*break_id)
+                    }
+                    _ => None,
+                };
+                if let Some(break_id) = interleaved_default {
+                    self.state.stack.pop();
+                    let stmts = match self.state.stack.pop() {
+                        Some(DecompileToken::Stmts(stmts)) => stmts,
+                        _ => unreachable!(),
+                    };
+                    self.append_switch_case(
+                        switch_id,
+                        SwitchCase::ImplicitDefault(stmts),
+                        Some(break_id),
+                    );
+                }
+
+                if matches!(
+                    self.back(),
+                    [.., DecompileToken::Case(_, _), DecompileToken::Stmts(_)]
+                ) {
+                    let previous_switch_id = match self.back()[self.back().len() - 2] {
+                        DecompileToken::Case(id, _) => id,
+                        _ => unreachable!(),
+                    };
+                    let switch_case = self.reduce_switch_case(false, true);
+                    self.append_switch_case(previous_switch_id, switch_case, None);
+                }
 
                 let token = DecompileToken::Case(switch_id, case_enum);
 
@@ -1055,6 +1169,35 @@ fn prepare_jump_to_idx(instructions: &[Ins]) -> HashMap<JumpId, usize> {
         }
     }
 
+    result
+}
+
+fn prepare_switch_break_ids(instructions: &[Ins]) -> HashSet<JumpId> {
+    let mut result = HashSet::new();
+    for (index, ins) in instructions.iter().enumerate() {
+        if let Ins::Switch(switch_id) = ins {
+            let tail_ids: HashSet<JumpId> = instructions[index + 1..]
+                .iter()
+                .map_while(|tail| match tail {
+                    Ins::Label(id) => Some(*id),
+                    _ => None,
+                })
+                .collect();
+            let Some(case_start) = instructions[..index]
+                .iter()
+                .position(|candidate| matches!(candidate, Ins::Case(id, _) if id == switch_id))
+            else {
+                continue;
+            };
+            for candidate in &instructions[case_start..index] {
+                if let Ins::Jmp(target) = candidate {
+                    if tail_ids.contains(target) {
+                        result.insert(*target);
+                    }
+                }
+            }
+        }
+    }
     result
 }
 

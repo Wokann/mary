@@ -185,7 +185,7 @@ mod tests {
 
         let success_count = results.iter().filter(|r| matches!(r, FailType::Ok)).count();
 
-        if success_count == scripts.len() {
+        if success_count == scripts.len() && low_level_ids.is_empty() {
             println!(
                 "100% ({}/{}) strict source round-trip success; low-level IR scripts: {:?}",
                 success_count,
@@ -193,6 +193,13 @@ mod tests {
                 low_level_ids
             );
             return Ok(());
+        }
+
+        if !low_level_ids.is_empty() {
+            println!(
+                "high-level structuring incomplete; low-level IR scripts: {:?}",
+                low_level_ids
+            );
         }
 
         for i in 0..results.len() {

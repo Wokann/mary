@@ -18,7 +18,10 @@ impl SwitchAllocator {
         for switch_case in switch_cases {
             match switch_case {
                 SwitchCase::Case(_, stmts) => self.visit_stmts(stmts),
+                SwitchCase::Fallthrough(_, stmts) => self.visit_stmts(stmts),
                 SwitchCase::Default(stmts) => self.visit_stmts(stmts),
+                SwitchCase::DefaultFallthrough(stmts) => self.visit_stmts(stmts),
+                SwitchCase::ImplicitDefault(stmts) => self.visit_stmts(stmts),
                 SwitchCase::DeadJump(stmts) => self.visit_stmts(stmts),
             }
         }
@@ -55,6 +58,8 @@ impl SwitchAllocator {
             | Stmt::AssignNoDisc(_, _, _)
             | Stmt::Expr(_)
             | Stmt::Call(_)
+            | Stmt::JumpNext
+            | Stmt::Break
             | Stmt::Exit => {}
         }
     }

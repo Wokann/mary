@@ -168,7 +168,7 @@ impl<'a> StringDecorateVisitor<'a> {
 
             Stmt::Ir(_) => Ok(()),
 
-            Stmt::Exit => Ok(()),
+            Stmt::JumpNext | Stmt::Break | Stmt::Exit => Ok(()),
         }
     }
 

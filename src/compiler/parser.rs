@@ -160,6 +160,8 @@ pomelo! {
     stmt ::= KwSwitch expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0), SwitchLayout::Standard) };
     stmt ::= KwSwitch KwCompact expr(e) LCurly cases(c) RCurly { Stmt::Switch(e, c, SwitchId(0), SwitchLayout::Compact) };
     stmt ::= KwExit { Stmt::Exit };
+    stmt ::= KwBreak { Stmt::Break };
+    stmt ::= KwJump KwNext { Stmt::JumpNext };
     stmt ::= KwDiscard expr(e) { Stmt::Expr(e) };
     stmt ::= preincr(e) { Stmt::Expr(e) };
     stmt ::= postincr(e) { Stmt::Expr(e) };
@@ -208,7 +210,10 @@ pomelo! {
 
     %type case SwitchCase;
     case ::= KwCase args(a) stmt_block(b) { SwitchCase::Case(a, b) };
+    case ::= KwCase args(a) KwFallthrough stmt_block(b) { SwitchCase::Fallthrough(a, b) };
     case ::= KwDefault stmt_block(b) { SwitchCase::Default(b) };
+    case ::= KwDefault KwFallthrough stmt_block(b) { SwitchCase::DefaultFallthrough(b) };
+    case ::= KwDefault KwImplicit stmt_block(b) { SwitchCase::ImplicitDefault(b) };
     case ::= KwDead stmt_block(b) { SwitchCase::DeadJump(b) };
 
     /* =============== */
