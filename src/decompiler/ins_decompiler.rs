@@ -1018,8 +1018,30 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                  * - within a conditional expression, which is matched by a forward pattern at CMP */
 
                 if let Err(DecompileError::CouldntReduce) = self.match_at_jump(Some(jump_id)) {
+                    let is_break_else_arm = match self.back() {
+                        [.., check_expr, DecompileToken::Beq(beq_id), DecompileToken::Stmts(_), DecompileToken::Jump(end_id), DecompileToken::Label(else_id)]
+                            if self.is_expr(check_expr)
+                                && beq_id == else_id
+                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id) =>
+                        {
+                            true
+                        }
+                        _ => false,
+                    };
+                    let is_break_if_body = match self.back() {
+                        [.., check_expr, DecompileToken::Beq(end_id)]
+                            if self.is_expr(check_expr)
+                                && matches!(self.state.input.get(1), Some(Ins::Label(label_id)) if label_id == end_id) =>
+                        {
+                            true
+                        }
+                        _ => false,
+                    };
+
                     if self.switch_break_ids.contains(&jump_id)
-                        && matches!(self.state.input.get(1), Some(Ins::Jmp(_)))
+                        && (matches!(self.state.input.get(1), Some(Ins::Jmp(_)))
+                            || is_break_else_arm
+                            || is_break_if_body)
                     {
                         self.push_stmt(Stmt::Break);
                     } else {
