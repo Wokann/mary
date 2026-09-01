@@ -27,7 +27,13 @@ pub fn decompile_script_named<'a>(
     const_scope: &ConstScope,
     script_name: &str,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
-    match decompile_script_structured_inner(script, const_scope, Some(script_name), None) {
+    match decompile_script_structured_inner(
+        script,
+        const_scope,
+        Some(script_name),
+        None,
+        &HashMap::new(),
+    ) {
         Ok(stmts) => Ok(stmts),
         Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
     }
@@ -39,15 +45,29 @@ pub fn decompile_script_with_text_names<'a>(
     script_name: &str,
     text_names: &[Option<String>],
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
-    match decompile_script_structured_inner(
+    decompile_script_with_metadata(
+        script,
+        const_scope,
+        script_name,
+        text_names,
+        &HashMap::new(),
+    )
+}
+
+pub fn decompile_script_with_metadata<'a>(
+    script: &'a Script,
+    const_scope: &ConstScope,
+    script_name: &str,
+    text_names: &[Option<String>],
+    local_types: &HashMap<String, crate::ir::ValueType>,
+) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
+    decompile_script_structured_inner(
         script,
         const_scope,
         Some(script_name),
         Some(text_names),
-    ) {
-        Ok(stmts) => Ok(stmts),
-        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
-    }
+        local_types,
+    )
 }
 
 /// Decompile without the lossless instruction-level fallback.  This is useful
@@ -56,7 +76,7 @@ pub fn decompile_script_structured<'a>(
     script: &'a Script,
     const_scope: &ConstScope,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
-    decompile_script_structured_inner(script, const_scope, None, None)
+    decompile_script_structured_inner(script, const_scope, None, None, &HashMap::new())
 }
 
 fn decompile_script_structured_inner<'a>(
@@ -64,6 +84,7 @@ fn decompile_script_structured_inner<'a>(
     const_scope: &ConstScope,
     script_name: Option<&str>,
     text_names: Option<&[Option<String>]>,
+    local_types: &HashMap<String, crate::ir::ValueType>,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
     let mut known_callables = HashMap::new();
 
@@ -81,6 +102,7 @@ fn decompile_script_structured_inner<'a>(
         const_scope,
         script_name,
         text_names,
+        local_types,
     ) {
         return Err(DecompileErrorExtra(err, DecompileState::new(&[])));
     }
@@ -93,7 +115,7 @@ fn decompile_script_structured_inner<'a>(
 mod tests {
     use crate::ast::{AssignOperation, Expr, Invoke, Stmt};
     use crate::bytecode;
-    use crate::ir::{CallId, Ins, JumpId, VarId};
+    use crate::ir::{CallId, Ins, JumpId, ValueType, VarId};
 
     use super::*;
 
@@ -157,5 +179,34 @@ mod tests {
 
             assert_eq!(&decompiled[..], &expected_decompiled[..]);
         }
+    }
+
+    #[test]
+    fn explicit_local_type_decorates_literal_definitions_and_rejects_typos() {
+        let script = Script {
+            instructions: vec![Ins::PushInt(0), Ins::PushInt(1), Ins::Assign, Ins::Discard],
+            strings: vec![],
+        };
+        let mut scope = ConstScope::new();
+        scope.add_typed_int_const("MaryBool", "FALSE".into(), 0);
+        scope.add_typed_int_const("MaryBool", "TRUE".into(), 1);
+        let bool_type = ValueType::UserType(scope.user_type("MaryBool").unwrap());
+        let local_types = HashMap::from([("var_0".to_owned(), bool_type)]);
+
+        let stmts =
+            decompile_script_with_metadata(&script, &scope, "Test", &[], &local_types).unwrap();
+        assert!(stmts.iter().any(|stmt| matches!(
+            stmt,
+            Stmt::Assign(AssignOperation::None, name, Expr::Name(value))
+                if name == "var_0" && value == "TRUE"
+        )));
+
+        let typo = HashMap::from([("var_9".to_owned(), bool_type)]);
+        assert!(
+            decompile_script_with_metadata(&script, &scope, "Test", &[], &typo)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown local 'var_9'")
+        );
     }
 }

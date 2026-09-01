@@ -10,6 +10,7 @@ mod script_table;
 mod table;
 mod text_names;
 
+pub use constants::{parse_constant_header, ConstantHeaderError};
 pub use preprocessor::{preprocess, PreprocessError};
 pub use pretty::{
     format_named_script, format_named_script_with_charmap, format_script, PrettyCError,
@@ -20,6 +21,7 @@ pub use script::{
     ScriptContext,
 };
 pub use script_table::{parse_script_table, ScriptSlot, ScriptTable, ScriptTableError};
+pub use table::parse_callable_table_with_scope;
 pub use table::{parse_callable_table, CallableTable, MaryCError};
 pub use text_names::{parse_text_name_table, ScriptSymbols, TextNameTableError};
 
@@ -72,3 +74,4 @@ fn validate_macro_name(name: &str, line: usize) -> Result<(), PreprocessError> {
     }
     Ok(())
 }
+mod constants;

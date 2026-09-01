@@ -179,6 +179,10 @@ pub trait ConstAccess {
 
 pub trait NameAccess {
     fn lookup_name(&self, name: &str) -> Option<NameRef<'_>>;
+
+    fn typed_identity_type(&self, _name: &str) -> Option<crate::ir::ValueType> {
+        None
+    }
 }
 
 impl<N: NameAccess> ConstAccess for N {
@@ -256,7 +260,7 @@ impl ConstVal {
             Expr::Name(name) => match a.lookup_const(name) {
                 Some(ConstRef::Int(i)) => Some(Self::Int(i)),
                 Some(ConstRef::Str(s)) => Some(Self::Str(s.clone())),
-                None => todo!(), // TODO: error
+                None => None,
             },
 
             Expr::Int(i) => Some(Self::Int(*i)),
@@ -271,17 +275,17 @@ impl ConstVal {
             Expr::OpNeg(inner) => Self::neg(eval(inner)),
             Expr::OpNot(inner) => Self::not(eval(inner)),
 
-            Expr::PostIncrement(_) => todo!(), // TODO: error
-            Expr::PreIncrement(_) => todo!(),  // TODO: error
-            Expr::PostDecrement(_) => todo!(), // TODO: error
-            Expr::PreDecrement(_) => todo!(),  // TODO: error
-            Expr::CmpEq(_) => todo!(),         // TODO
-            Expr::CmpNe(_) => todo!(),         // TODO
-            Expr::CmpLt(_) => todo!(),         // TODO
-            Expr::CmpLe(_) => todo!(),         // TODO
-            Expr::CmpGe(_) => todo!(),         // TODO
-            Expr::CmpGt(_) => todo!(),         // TODO
-            Expr::Call(_) => todo!(),          // TODO: error
+            Expr::PostIncrement(_)
+            | Expr::PreIncrement(_)
+            | Expr::PostDecrement(_)
+            | Expr::PreDecrement(_)
+            | Expr::CmpEq(_)
+            | Expr::CmpNe(_)
+            | Expr::CmpLt(_)
+            | Expr::CmpLe(_)
+            | Expr::CmpGe(_)
+            | Expr::CmpGt(_)
+            | Expr::Call(_) => None,
         }
     }
 }

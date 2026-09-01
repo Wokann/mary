@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -7,7 +7,11 @@ use super::{preprocess, Options, PreprocessError, ScriptSlot, ScriptTable, Scrip
 #[derive(Clone, Debug)]
 enum SymbolSlot {
     Empty,
-    Script { name: String, texts: Vec<String> },
+    Script {
+        name: String,
+        texts: Vec<String>,
+        local_types: Vec<(String, String)>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -38,6 +42,29 @@ impl ScriptSymbols {
             Some(SymbolSlot::Script { texts, .. }) => texts.len(),
             _ => 0,
         }
+    }
+
+    pub fn local_types(
+        &self,
+        id: usize,
+        const_scope: &crate::const_scope::ConstScope,
+    ) -> Result<HashMap<String, crate::ir::ValueType>, String> {
+        let local_types = match self.slots.get(id) {
+            Some(SymbolSlot::Script { local_types, .. }) => local_types,
+            _ => return Ok(HashMap::new()),
+        };
+        local_types
+            .iter()
+            .map(|(local, type_name)| {
+                const_scope
+                    .user_type(type_name)
+                    .map(crate::ir::ValueType::UserType)
+                    .map(|value_type| (local.clone(), value_type))
+                    .ok_or_else(|| {
+                        format!("script {id} local '{local}' references unknown type '{type_name}'")
+                    })
+            })
+            .collect()
     }
 
     pub fn script_table(&self) -> Result<ScriptTable, ScriptTableError> {
@@ -92,7 +119,48 @@ pub fn parse_text_name_table(
             punct(&tokens, &mut at, Kind::Lb, "expected '{' after script name")?;
             let mut texts = Vec::new();
             let mut text_names = HashSet::new();
+            let mut local_types = Vec::new();
+            let mut local_names = HashSet::new();
             while !eat(&tokens, &mut at, &Kind::Rb) {
+                if peek_word(&tokens, at, "mary_local_type") {
+                    at += 1;
+                    punct(
+                        &tokens,
+                        &mut at,
+                        Kind::Lp,
+                        "expected '(' after mary_local_type",
+                    )?;
+                    let local = ident(&tokens, &mut at)?;
+                    if local.strip_prefix("var_").is_none_or(|index| {
+                        index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit())
+                    }) {
+                        return error(
+                            &tokens,
+                            at.saturating_sub(1),
+                            "local type name must use the generated var_N form",
+                        );
+                    }
+                    punct(
+                        &tokens,
+                        &mut at,
+                        Kind::Comma,
+                        "expected ',' after local name",
+                    )?;
+                    let type_name = ident(&tokens, &mut at)?;
+                    punct(&tokens, &mut at, Kind::Rp, "expected ')' after type name")?;
+                    if !local_names.insert(local.clone()) {
+                        return error(
+                            &tokens,
+                            at.saturating_sub(1),
+                            &format!("local '{local}' has more than one explicit type"),
+                        );
+                    }
+                    local_types.push((local, type_name));
+                    if !eat(&tokens, &mut at, &Kind::Comma) && !peek(&tokens, at, &Kind::Rb) {
+                        return error(&tokens, at, "expected ',' or '}' after local type");
+                    }
+                    continue;
+                }
                 let text = ident(&tokens, &mut at)?;
                 if !text_names.insert(text.clone()) {
                     return error(
@@ -106,7 +174,11 @@ pub fn parse_text_name_table(
                     return error(&tokens, at, "expected ',' or '}' after text symbol");
                 }
             }
-            slots.push(SymbolSlot::Script { name, texts });
+            slots.push(SymbolSlot::Script {
+                name,
+                texts,
+                local_types,
+            });
         }
         if !eat(&tokens, &mut at, &Kind::Comma) && !peek(&tokens, at, &Kind::Rb) {
             return error(&tokens, at, "expected ',' or '}' after script symbol");
@@ -124,6 +196,8 @@ enum Kind {
     Id(String),
     Lb,
     Rb,
+    Lp,
+    Rp,
     Comma,
     Semi,
 }
@@ -172,6 +246,8 @@ fn lex(source: &str) -> Result<Vec<Token>, TextNameTableError> {
             match byte {
                 b'{' => Kind::Lb,
                 b'}' => Kind::Rb,
+                b'(' => Kind::Lp,
+                b')' => Kind::Rp,
                 b',' => Kind::Comma,
                 b';' => Kind::Semi,
                 _ => {
@@ -301,5 +377,65 @@ mary_script_symbols {
             &Options::default(),
         )
         .is_err());
+    }
+
+    #[test]
+    fn local_type_metadata_is_order_neutral_and_target_aware() {
+        let source = r#"
+mary_script_symbols {
+    Script {
+        FirstText,
+#if defined(MARY_MFOMT)
+        mary_local_type(var_0, MaryBool),
+#endif
+        SecondText,
+    },
+};
+"#;
+        let boy = parse_text_name_table(source, &Options::default()).unwrap();
+        let girl =
+            parse_text_name_table(source, &Options::default().define("MARY_MFOMT_US").unwrap())
+                .unwrap();
+        assert_eq!(
+            boy.names(0, 2),
+            vec![Some("FirstText".into()), Some("SecondText".into())]
+        );
+        assert_eq!(girl.names(0, 2), boy.names(0, 2));
+
+        let mut scope = crate::const_scope::ConstScope::new();
+        scope.add_or_get_user_type("MaryBool".into());
+        assert!(boy.local_types(0, &scope).unwrap().is_empty());
+        assert_eq!(girl.local_types(0, &scope).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn invalid_duplicate_or_unknown_local_type_metadata_is_rejected() {
+        let duplicate = r#"
+mary_script_symbols { Script {
+    mary_local_type(var_0, MaryBool),
+    mary_local_type(var_0, MaryChoice),
+}, };
+"#;
+        assert!(parse_text_name_table(duplicate, &Options::default())
+            .unwrap_err()
+            .to_string()
+            .contains("more than one explicit type"));
+
+        let invalid_name =
+            "mary_script_symbols { Script { mary_local_type(choice, MaryBool), }, };";
+        assert!(parse_text_name_table(invalid_name, &Options::default())
+            .unwrap_err()
+            .to_string()
+            .contains("var_N"));
+
+        let symbols = parse_text_name_table(
+            "mary_script_symbols { Script { mary_local_type(var_0, Missing), }, };",
+            &Options::default(),
+        )
+        .unwrap();
+        assert!(symbols
+            .local_types(0, &crate::const_scope::ConstScope::new())
+            .unwrap_err()
+            .contains("unknown type"));
     }
 }

@@ -27,26 +27,35 @@ pub enum ValueType {
 #[derive(Debug, Clone)]
 pub struct CallableShape {
     parameter_types: Vec<ValueType>,
-    has_return_value: bool,
+    return_type: ValueType,
 }
 
 impl CallableShape {
     pub fn new_func(parameter_types: Vec<ValueType>) -> Self {
+        Self::new_typed_func(ValueType::Integer, parameter_types)
+    }
+
+    pub fn new_typed_func(return_type: ValueType, parameter_types: Vec<ValueType>) -> Self {
+        debug_assert!(return_type != ValueType::Undefined);
         Self {
             parameter_types,
-            has_return_value: true,
+            return_type,
         }
     }
 
     pub fn new_proc(parameter_types: Vec<ValueType>) -> Self {
         Self {
             parameter_types,
-            has_return_value: false,
+            return_type: ValueType::Undefined,
         }
     }
 
     pub fn is_func(&self) -> bool {
-        self.has_return_value
+        self.return_type != ValueType::Undefined
+    }
+
+    pub fn return_type(&self) -> ValueType {
+        self.return_type
     }
 
     pub fn num_parameters(&self) -> usize {

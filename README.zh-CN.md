@@ -43,7 +43,7 @@ Mary-C 是新的 C 形标准前端。文件使用 `.mary.c` 和 `.mary.h` 后缀
 mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
 ```
 
-输出目录包含每个非空脚本的 `.mary.c`，以及本地 `mary_callables.mary.h`、`mary_scripts.mary.h`。`.mary.sym` 只供反编译命名使用，不会被复制或 include；空指针槽仍以 `NULL` 保留在生成的脚本表中。
+输出目录按指针表的每个槽生成 `.mary.c`，空指针槽也会生成明确标注 `NULL`、不含伪造脚本正文的占位文件；此外还会生成本地 `mary_constants.mary.h`、`mary_callables.mary.h`、`mary_scripts.mary.h`。`.mary.sym` 只供反编译命名使用，不会被复制或 include，空槽同时以 `NULL` 保留在脚本表中。单脚本 Mary-C 反编译写入文件时也会把固定常量头和 callable 头复制到输出文件旁；提供脚本符号表或脚本表时，还会一并生成本地脚本表头。
 
 每个生成脚本都会显式选择 ROM 目标：
 
@@ -63,55 +63,50 @@ mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap 
 
 ## 命令行用法
 
-以下命令说明为兼容保留的原始 DSL；Mary-C 请使用上一节的流程。
-
 ### 解包全部脚本
 
 ```console
-mary decompile ROM LIBRARY --all --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
+mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
 ```
 
-示例：
-
-```console
-mary decompile rom/fomtjp.gba goodies/lib_fomt.txt --all --charmap charmap_jp.txt -o decompiled_text/fomt_jp
-```
-
-`--all` 按指针表槽位输出 `EventScript_0000.mary`、`EventScript_0001.mary` 等文件。空指针会生成明确的占位文件，不会被删除或压缩，因此后续脚本 ID 不会偏移。
+`--all` 按指针表槽位输出 `.mary.c`；有语义名的文件使用脚本名，空指针生成明确占位文件，后续脚本 ID 不会偏移。
 
 ### 解包单个脚本
 
 ```console
-mary decompile ROM LIBRARY --script-id ID --charmap charmap_jp.txt -o OUTPUT.mary
+mary decompile ROM goodies/mary_callables.mary.h --script-id ID --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
 ```
 
 也可以从任意二进制偏移读取 RIFF：
 
 ```console
-mary decompile BINARY LIBRARY --offset OFFSET --charmap charmap_jp.txt -o OUTPUT.mary
+mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
 ```
 
 `--script-id` 和 `--offset` 不能同时使用。
+`--offset` 接受十进制或带 `0x` 前缀的十六进制文件偏移；越过输入文件会返回错误，不会发生崩溃。
 
 ### 编译脚本
 
 生成可嵌入 C 工程的数据定义：
 
 ```console
-mary compile INPUT.mary --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --charmap charmap_jp.txt -o OUTPUT.c
 ```
 
 直接生成单个 RIFF 二进制：
 
 ```console
-mary compile INPUT.mary --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --binary --charmap charmap_jp.txt -o OUTPUT.riff
 ```
 
-二进制模式只允许输入一个脚本。反编译文件顶部的 `#include` 用于指出 callable library；`mary` 本身不是 C 预处理器。回编独立提取文件前，应先展开 include，或将相应 `goodies/lib_*.txt` 声明放在脚本前面，例如：
+二进制模式只允许一个脚本。不使用 `--binary` 时输出可供 C 工程嵌入的数据定义；这只是输出容器，不表示 `.mary.c` 能交给普通 C 编译器。Mary-C 会读取源码中的本地 `#include`，无需外部 `cpp`。
 
 ```console
-cpp INPUT.mary | mary compile --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o OUTPUT.c
 ```
+
+`--print-ir` 在文本形式的反编译源码或 C 字节数组定义中附加虚拟栈 IR 审计注释，不参与回编。`--binary` 输出是纯 RIFF 字节流，无法容纳注释，因此不要把两者组合使用。
 
 使用 `mary compile --help` 和 `mary decompile --help` 查看完整参数。
 
@@ -191,107 +186,18 @@ const MESSAGE_13 =
 
 表长由指针合法性和 RIFF 数据确定，不会通过删除空项来推断；空槽位会保留。
 
-## callable library
+## callable、常量与脚本语法
 
-虚拟机通过数字 ID 调用游戏原生代码。`mary` 需要知道每个 ID 的调用形态：它是有返回值的 `func` 还是无返回值的 `proc`，以及参数数量和类型。
+统一的 [Mary-C callable 表](goodies/mary_callables.mary.h) 按四个目标选择真实物理 ID，并为已确认的原生函数声明返回值、参数类型和中英文用途。固定编号位于 `mary_constants.mary.h`；脚本槽由生成的 `mary_scripts.mary.h` 按顺序决定。符号与原始整数会生成相同 VM 字节。
 
-- [FoMT library](goodies/lib_fomt.txt)
-- [MFoMT library](goodies/lib_mfomt.txt)
-
-FoMT 为便于对照沿用了 MFoMT 风格的函数名称，因此名称中的数字不一定等于 FoMT ROM 内部 ID；应以所选 library 的声明为准。
-
-## 脚本语法
-
-该语言采用类似 C 的结构化写法，但不是完整 C，只表达当前栈式虚拟机能够无损编码的语义。
-
-### 顶层声明
-
-```c
-func 0x106 Func106()
-proc 0x022 TalkMessage(message : string)
-const NAME = VALUE
-
-script 19 EventScript_19
-{
-    // 脚本主体
-}
-```
-
-### 值与调用
-
-```c
-const MESSAGE_0 =
-    "第一行\r\n"
-    "第二行\p"
-    "下一页{Press}"
-
-var value = Func106()
-var other
-other = value + 1
-TalkMessage(MESSAGE_0)
-```
-
-顶层和局部常量只在编译期存在，不会额外生成虚拟机指令。
-
-### 控制流
-
-```c
-if condition
-{
-    Proc001()
-}
-else
-{
-    Proc002()
-}
-
-for var i = 0; i < 10; i++
-{
-    Proc003(i)
-}
-
-do
-{
-    i++
-} while i < 10
-
-switch value
-{
-    case 1
-    {
-        Proc004()
-        break
-    }
-    case 2 fallthrough
-    {
-        Proc005()
-    }
-    default
-    {
-        Proc006()
-    }
-}
-```
-
-为保留虚拟机语义和字节布局，还支持 `nodisc`、`discard`、`switch compact`、`default implicit`、`dead` 和 `jump next`。如果未来出现无法在不改变字节码的情况下结构化的合法脚本，仍可使用可编辑的低级指令块：
-
-```c
-ir
-{
-    PushInt(1)
-    Label(0)
-    Jmp(0)
-    Exit()
-}
-```
-
-当前四个原版 ROM 均不需要 `ir` 保底格式。
+Mary-C 支持的 C 子集、未支持语法的等价改写建议，以及 `mary_nodisc`、`mary_switch_compact`、`mary_implicit_default`、`mary_dead_jump`、`mary_break_switch` 等无损专用语法，统一以 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.md) 为准。打印器若残留低级 `ir` 或 `jump next` 会报错，不会伪装成高级语言成功。
 
 ## 验证
 
 `tests/` 是 Rust 集成测试和人工验证辅助脚本目录：
 
 - `structured_stress.rs`：构造嵌套 `switch`、循环、`if/else`、`break` 和栈密集表达式，连续执行三轮“编译 → 结构化反编译 → 输出源码 → 重编译”并比较字节；其中还包含两层和三层控制流组合矩阵。
+- `mary_c_vanilla.rs`：对四个 ROM 执行“RIFF → Mary-C 文本 → RIFF”严格逐字节往返，同时验证脚本名、文本名和跨脚本调用符号。
 - `vanilla_symmetry.rs`：读取四个原始 ROM 的全部指针表槽位。每个版本分别验证直接解码/编码和高级语言源码往返，要求 RIFF 逐字节一致，并禁止残留低级 `ir` 或 `jump next`。
 - `common/mod.rs`：供集成测试共用的 AST 递归检查函数，不会作为独立测试执行。
 - `decompile_all_roms.bat`：手动批量解包四个 ROM 的辅助脚本，不会被 `cargo test` 自动执行。
@@ -311,13 +217,19 @@ rom/fomtjp.gba
 rom/mfomtjp.gba
 ```
 
-ROM 和解包输出目录均由 Git 忽略。两套 callable library 直接使用仓库内的 `goodies/lib_fomt.txt` 与 `goodies/lib_mfomt.txt`，不需要设置环境变量。运行：
+ROM 和解包输出目录均由 Git 忽略。Mary-C 测试直接使用仓库内统一的 `goodies/mary_callables.mary.h`、`mary_constants.mary.h` 与 `mary_scripts_text.mary.sym`，不需要设置环境变量。运行：
 
 ```console
 cargo test --all-targets --features test_with_roms
 ```
 
-只执行四 ROM 严格测试并显示逐版本统计：
+只执行四 ROM 的 Mary-C 严格测试并显示逐版本统计：
+
+```console
+cargo test --features test_with_roms --test mary_c_vanilla -- --nocapture
+```
+
+同时可单独运行原结构化 DSL 的对称性回归测试：
 
 ```console
 cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture

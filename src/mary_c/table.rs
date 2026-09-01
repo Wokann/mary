@@ -27,6 +27,8 @@ pub enum MaryCError {
         column: usize,
         name: String,
     },
+    #[error("invalid callable type metadata: {message}")]
+    InvalidTypeMetadata { message: String },
 }
 
 pub struct CallableTable {
@@ -57,9 +59,17 @@ struct Token {
 }
 
 pub fn parse_callable_table(source: &str, options: &Options) -> Result<CallableTable, MaryCError> {
+    parse_callable_table_with_scope(source, options, &ConstScope::new())
+}
+
+pub fn parse_callable_table_with_scope(
+    source: &str,
+    options: &Options,
+    base_scope: &ConstScope,
+) -> Result<CallableTable, MaryCError> {
     let source = preprocess(source, options)?;
     let tokens = lex(&source)?;
-    Parser { tokens, cursor: 0 }.table()
+    Parser { tokens, cursor: 0 }.table(base_scope.clone())
 }
 
 struct Parser {
@@ -68,10 +78,10 @@ struct Parser {
 }
 
 impl Parser {
-    fn table(mut self) -> Result<CallableTable, MaryCError> {
+    fn table(mut self, mut scope: ConstScope) -> Result<CallableTable, MaryCError> {
         self.keyword("mary_callable_table")?;
         if self.peek(&TokenKind::LBrace) {
-            return self.ordered_name_table();
+            return self.ordered_name_table(scope);
         }
         self.punct(TokenKind::LParen)?;
         let name = self.ident()?;
@@ -83,7 +93,6 @@ impl Parser {
         let base = base as usize;
         self.punct(TokenKind::RParen)?;
         self.punct(TokenKind::LBrace)?;
-        let mut scope = ConstScope::new();
         let mut names = HashSet::new();
         let mut id = base;
         while !self.eat(&TokenKind::RBrace) {
@@ -102,15 +111,15 @@ impl Parser {
                 self.punct(TokenKind::RParen)?;
                 self.punct(TokenKind::Semicolon)?;
             } else {
-                let returns_value = if self.peek_ident("int") {
+                let return_type = if self.peek_ident("int") {
                     self.cursor += 1;
-                    true
+                    Some(ValueType::Integer)
                 } else if self.peek_ident("void") {
                     self.cursor += 1;
-                    false
+                    None
                 } else {
-                    return self
-                        .error("expected int/void prototype, mary_unknown, or mary_reserved");
+                    let type_name = self.ident()?;
+                    Some(ValueType::UserType(scope.add_or_get_user_type(type_name)))
                 };
                 let callable_name = self.ident()?;
                 if !names.insert(callable_name.clone()) {
@@ -122,15 +131,15 @@ impl Parser {
                     });
                 }
                 self.punct(TokenKind::LParen)?;
-                let params = self.params()?;
+                let params = self.params(&mut scope)?;
                 self.punct(TokenKind::RParen)?;
                 self.punct(TokenKind::Semicolon)?;
                 if id > u32::MAX as usize {
                     return Err(MaryCError::CallableIdOverflow { id });
                 }
                 let call_id = CallId(id);
-                if returns_value {
-                    scope.add_func(callable_name, call_id, params);
+                if let Some(return_type) = return_type {
+                    scope.add_typed_func(callable_name, call_id, return_type, params);
                 } else {
                     scope.add_proc(callable_name, call_id, params);
                 }
@@ -143,6 +152,9 @@ impl Parser {
         if !self.at_end() {
             return self.error("unexpected text after callable table");
         }
+        scope
+            .validate_callable_type_metadata()
+            .map_err(|message| MaryCError::InvalidTypeMetadata { message })?;
         Ok(CallableTable {
             name,
             base,
@@ -151,7 +163,7 @@ impl Parser {
         })
     }
 
-    fn ordered_name_table(mut self) -> Result<CallableTable, MaryCError> {
+    fn ordered_name_table(mut self, mut scope: ConstScope) -> Result<CallableTable, MaryCError> {
         self.punct(TokenKind::LBrace)?;
         let mut slots: Vec<Option<String>> = Vec::new();
         let mut names = HashSet::new();
@@ -183,22 +195,23 @@ impl Parser {
 
         let mut declarations = HashMap::new();
         while !self.at_end() {
-            let returns_value = if self.peek_ident("int") {
+            let return_type = if self.peek_ident("int") {
                 self.cursor += 1;
-                true
+                Some(ValueType::Integer)
             } else if self.peek_ident("void") {
                 self.cursor += 1;
-                false
+                None
             } else {
-                return self.error("expected an int or void callable prototype");
+                let type_name = self.ident()?;
+                Some(ValueType::UserType(scope.add_or_get_user_type(type_name)))
             };
             let name = self.ident()?;
             self.punct(TokenKind::LParen)?;
-            let params = self.params()?;
+            let params = self.params(&mut scope)?;
             self.punct(TokenKind::RParen)?;
             self.punct(TokenKind::Semicolon)?;
             if declarations
-                .insert(name.clone(), (returns_value, params))
+                .insert(name.clone(), (return_type, params))
                 .is_some()
             {
                 let token = &self.tokens[self.cursor.saturating_sub(1)];
@@ -210,17 +223,16 @@ impl Parser {
             }
         }
 
-        let mut scope = ConstScope::new();
         for (id, slot) in slots.iter().enumerate() {
             let Some(name) = slot else { continue };
-            let Some((returns_value, params)) = declarations.remove(name) else {
+            let Some((return_type, params)) = declarations.remove(name) else {
                 return self.error(&format!(
                     "callable '{name}' has a table slot but no prototype"
                 ));
             };
             let call_id = CallId(id);
-            if returns_value {
-                scope.add_func(name.clone(), call_id, params);
+            if let Some(return_type) = return_type {
+                scope.add_typed_func(name.clone(), call_id, return_type, params);
             } else {
                 scope.add_proc(name.clone(), call_id, params);
             }
@@ -228,6 +240,9 @@ impl Parser {
         // Prototypes for another target may remain in the shared header. They
         // do not enter the selected target's scope unless its ordered table
         // contains the same symbol.
+        scope
+            .validate_callable_type_metadata()
+            .map_err(|message| MaryCError::InvalidTypeMetadata { message })?;
         Ok(CallableTable {
             name: "MARY_CALLABLES".into(),
             base: 0,
@@ -236,7 +251,7 @@ impl Parser {
         })
     }
 
-    fn params(&mut self) -> Result<Vec<ValueType>, MaryCError> {
+    fn params(&mut self, scope: &mut ConstScope) -> Result<Vec<ValueType>, MaryCError> {
         if self.peek(&TokenKind::RParen) {
             return Ok(Vec::new());
         }
@@ -257,8 +272,14 @@ impl Parser {
                 self.keyword("char")?;
                 self.punct(TokenKind::Star)?;
                 ValueType::String
+            } else if matches!(
+                self.tokens.get(self.cursor).map(|token| &token.kind),
+                Some(TokenKind::Ident(_))
+            ) {
+                let name = self.ident()?;
+                ValueType::UserType(scope.add_or_get_user_type(name))
             } else {
-                return self.error("parameters must use int or const char *");
+                return self.error("parameters must use int, const char *, or a named ID type");
             };
             self.ident()?;
             result.push(ty);
@@ -459,6 +480,7 @@ fn lex(source: &str) -> Result<Vec<Token>, MaryCError> {
 mod tests {
     use super::*;
     use crate::ast::{NameAccess, NameRef};
+    use crate::mary_c::constants::parse_constant_header;
 
     #[test]
     fn conditional_slots_shift_only_selected_target() {
@@ -556,5 +578,30 @@ void After(const char *message);
             girl.scope.lookup_name("After"),
             Some(NameRef::Proc(CallId(2)))
         ));
+    }
+
+    #[test]
+    fn rejects_callable_type_metadata_with_an_invalid_parameter_index() {
+        let constants = parse_constant_header(
+            r#"
+typedef enum MaryKind {
+KIND_A = 0,
+} MaryKind;
+typedef enum MaryValue {
+VALUE_A = 0,
+} MaryValue;
+mary_callable_parameter_type_when(Test, 0, KIND_A, 1, MaryValue);
+"#,
+            &Options::default(),
+        )
+        .unwrap();
+        let error = parse_callable_table_with_scope(
+            "mary_callable_table { Test, }; void Test(MaryKind kind);",
+            &Options::default(),
+            &constants,
+        )
+        .err()
+        .expect("invalid metadata must be rejected");
+        assert!(error.to_string().contains("target parameter 1"), "{error}");
     }
 }

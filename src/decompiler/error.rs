@@ -25,6 +25,9 @@ pub enum DecompileError {
 
     #[error("Couldn't map all strings")]
     NotEnoughStringConsumers,
+
+    #[error("Explicit local type references unknown local '{0}'")]
+    UnknownLocalTypeHint(String),
 }
 
 #[derive(Debug)]

@@ -82,6 +82,10 @@ impl<'a> NameAccess for BlockScope<'a> {
             self.parent.lookup_name(name)
         }
     }
+
+    fn typed_identity_type(&self, name: &str) -> Option<crate::ir::ValueType> {
+        self.parent.typed_identity_type(name)
+    }
 }
 
 struct Emit {
@@ -227,10 +231,19 @@ impl Emit {
                 self.ins(Ins::LogicalAnd);
             }
 
-            Expr::OpNeg(inner) => {
-                self.expr(scope, *inner);
-                self.ins(Ins::Neg);
-            }
+            Expr::OpNeg(inner) => match ConstVal::eval_expr(&inner, scope) {
+                Some(ConstVal::Int(value)) => {
+                    if let Some(value) = value.checked_neg() {
+                        self.ins(Ins::PushInt(value));
+                    } else {
+                        self.errors.push(CompileError::FailedConstantEvaluation);
+                    }
+                }
+                _ => {
+                    self.expr(scope, *inner);
+                    self.ins(Ins::Neg);
+                }
+            },
 
             Expr::OpNot(inner) => {
                 self.expr(scope, *inner);
@@ -313,6 +326,44 @@ impl Emit {
             Expr::CmpGt(ops) => {
                 let (lhs, rhs) = *ops;
                 self.expr_cmp(scope, lhs, rhs, Ins::Bgt);
+            }
+
+            Expr::Call(invoke) if scope.typed_identity_type(&invoke.func).is_some() => {
+                if invoke.args.len() != 1 {
+                    self.errors.push(CompileError::WrongArgumentCount {
+                        name: invoke.func,
+                        expected: 1,
+                        actual: invoke.args.len(),
+                    });
+                } else {
+                    let argument = invoke.args.into_iter().next().unwrap();
+                    self.expr(scope, argument);
+                }
+            }
+
+            Expr::Call(invoke) if invoke.func == "mary_negated_int" => {
+                if invoke.args.len() != 1 {
+                    self.errors.push(CompileError::WrongArgumentCount {
+                        name: invoke.func,
+                        expected: 1,
+                        actual: invoke.args.len(),
+                    });
+                } else {
+                    match ConstVal::eval_expr(&invoke.args[0], scope) {
+                        Some(ConstVal::Int(value)) => {
+                            if let Some(magnitude) = value.checked_neg() {
+                                self.ins(Ins::PushInt(magnitude));
+                                self.ins(Ins::Neg);
+                            } else {
+                                self.errors.push(CompileError::FailedConstantEvaluation);
+                            }
+                        }
+                        Some(ConstVal::Str(_)) => {
+                            self.errors.push(CompileError::ExpectedConstantIntGotStr)
+                        }
+                        None => self.errors.push(CompileError::FailedConstantEvaluation),
+                    }
+                }
             }
 
             Expr::Call(invoke) => match scope.lookup_name(&invoke.func) {

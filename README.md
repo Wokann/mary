@@ -43,7 +43,7 @@ Decompile all scripts from a Japanese FoMT ROM:
 mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
 ```
 
-The output directory contains one `.mary.c` per non-null script plus local `mary_callables.mary.h` and `mary_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null pointer slots remain `NULL` in the generated script table.
+The output directory contains one `.mary.c` per pointer-table slot, including an explicit `NULL` placeholder with no fabricated script body for every empty pointer, plus local `mary_constants.mary.h`, `mary_callables.mary.h`, and `mary_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null slots also remain `NULL` in the generated script table. A single-script Mary-C decompile written to a file also copies the fixed constants and callable headers beside that file; when script symbols or a script table are supplied, it generates the local script-table header as well.
 
 Each generated source explicitly selects its ROM target:
 
@@ -63,55 +63,50 @@ Available targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY
 
 ## Command-line usage
 
-The commands below describe the original DSL, which remains supported for compatibility.
-
 ### Decompile every script
 
 ```console
-mary decompile ROM LIBRARY --all --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
+mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
 ```
 
-Example:
-
-```console
-mary decompile rom/fomtjp.gba goodies/lib_fomt.txt --all --charmap charmap_jp.txt -o decompiled_text/fomt_jp
-```
-
-`--all` writes one file per pointer-table slot, named `EventScript_0000.mary`, `EventScript_0001.mary`, and so on. Null pointers become explicit placeholder files, so later script IDs never shift.
+`--all` writes one `.mary.c` per pointer-table slot. Named scripts use their semantic symbol; null pointers become explicit placeholders, so later IDs never shift.
 
 ### Decompile one script
 
 ```console
-mary decompile ROM LIBRARY --script-id ID --charmap charmap_jp.txt -o OUTPUT.mary
+mary decompile ROM goodies/mary_callables.mary.h --script-id ID --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
 ```
 
 An arbitrary RIFF offset can also be decoded:
 
 ```console
-mary decompile BINARY LIBRARY --offset OFFSET --charmap charmap_jp.txt -o OUTPUT.mary
+mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
 ```
 
 `--script-id` and `--offset` are mutually exclusive.
+`--offset` accepts either decimal or `0x`-prefixed hexadecimal file offsets. An offset beyond the input is diagnosed instead of panicking.
 
 ### Compile source
 
 Generate C data definitions:
 
 ```console
-mary compile INPUT.mary --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --charmap charmap_jp.txt -o OUTPUT.c
 ```
 
 Generate one binary RIFF directly:
 
 ```console
-mary compile INPUT.mary --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --binary --charmap charmap_jp.txt -o OUTPUT.riff
 ```
 
-Binary mode accepts exactly one script. The `#include` line in generated source identifies its callable library; `mary` is not itself a C preprocessor. Expand the include before compiling a standalone extracted file, for example:
+Binary mode accepts exactly one script. Omitting `--binary` emits a C data definition for embedding; that output choice does not make `.mary.c` ordinary C. Mary-C reads supported local `#include` files itself, so no external `cpp` pass is needed.
 
 ```console
-cpp INPUT.mary | mary compile --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o OUTPUT.c
 ```
+
+`--print-ir` appends stack-VM IR audit comments to textual decompiler output or C byte-array definitions; those comments do not participate in recompilation. A `--binary` result is a raw RIFF byte stream and cannot contain comments, so do not combine the two options.
 
 Use `mary compile --help` and `mary decompile --help` for all options.
 
@@ -191,107 +186,18 @@ Compilation produces a standard self-contained RIFF: strings are written consecu
 
 Table length is determined from pointer validity and RIFF data, not by dropping null entries. Empty slots are retained.
 
-## Callable libraries
+## Callables, constants, and script syntax
 
-The VM invokes native game code by numeric ID. `mary` needs a callable “shape” for each ID: whether it is a value-returning `func` or a `proc`, plus its parameters.
+The unified [Mary-C callable table](goodies/mary_callables.mary.h) selects the physical IDs of all four targets and documents each verified native function's return value, parameter types, and purpose in English and Chinese. Fixed domains live in `mary_constants.mary.h`; generated `mary_scripts.mary.h` order defines script slots. Symbols and raw integers compile to identical VM bytes.
 
-- [FoMT library](goodies/lib_fomt.txt)
-- [MFoMT library](goodies/lib_mfomt.txt)
-
-FoMT uses MFoMT-oriented names for easier comparison, so digits in a name do not necessarily equal the FoMT ROM ID. The declaration in the selected library is authoritative.
-
-## Script syntax
-
-The language uses C-like structured syntax, but it is not full C. It represents only semantics that the stack VM can encode losslessly.
-
-### Top-level declarations
-
-```c
-func 0x106 Func106()
-proc 0x022 TalkMessage(message : string)
-const NAME = VALUE
-
-script 19 EventScript_19
-{
-    // body
-}
-```
-
-### Values and calls
-
-```c
-const MESSAGE_0 =
-    "First line\r\n"
-    "Second line\p"
-    "Next page{Press}"
-
-var value = Func106()
-var other
-other = value + 1
-TalkMessage(MESSAGE_0)
-```
-
-Top-level and local constants are compile-time only and add no VM instructions.
-
-### Control flow
-
-```c
-if condition
-{
-    Proc001()
-}
-else
-{
-    Proc002()
-}
-
-for var i = 0; i < 10; i++
-{
-    Proc003(i)
-}
-
-do
-{
-    i++
-} while i < 10
-
-switch value
-{
-    case 1
-    {
-        Proc004()
-        break
-    }
-    case 2 fallthrough
-    {
-        Proc005()
-    }
-    default
-    {
-        Proc006()
-    }
-}
-```
-
-Lossless VM-specific constructs include `nodisc`, `discard`, `switch compact`, `default implicit`, `dead`, and `jump next`. If a future valid script cannot be structured without changing its bytecode, an editable instruction block remains available:
-
-```c
-ir
-{
-    PushInt(1)
-    Label(0)
-    Jmp(0)
-    Exit()
-}
-```
-
-The four current vanilla corpora need no `ir` fallback.
+The [Mary-C language reference](docs/MARY_C_LANGUAGE.en.md) is authoritative for the supported C subset, recommended rewrites for unsupported syntax, and the lossless `mary_nodisc`, `mary_switch_compact`, `mary_implicit_default`, `mary_dead_jump`, and `mary_break_switch` forms. The printer rejects residual low-level `ir` or `jump next` rather than reporting false high-level success.
 
 ## Verification
 
 `tests/` contains Rust integration tests and a manual verification helper:
 
 - `structured_stress.rs` constructs nested switches, loops, conditionals, breaks, and stack-heavy expressions. Each case performs three compile/decompile/print/recompile rounds and compares the resulting bytes; pairwise and three-level control-flow matrices are included.
+- `mary_c_vanilla.rs` performs a strict `RIFF -> Mary-C text -> RIFF` byte round trip on all four ROMs and also verifies script names, text names, and symbolic cross-script calls.
 - `vanilla_symmetry.rs` reads every pointer-table slot from all four vanilla ROMs. Each version gets both a direct decode/encode test and a printed high-level source round trip; RIFF bytes must match exactly, with no residual low-level `ir` or `jump next`.
 - `common/mod.rs` provides recursive AST inspection shared by the integration tests and is not an independently executed test.
 - `decompile_all_roms.bat` manually decompiles all four ROMs for inspection and is not run by `cargo test`.
@@ -311,13 +217,19 @@ rom/fomtjp.gba
 rom/mfomtjp.gba
 ```
 
-The ROM and decompiled-output directories are ignored by Git. Callable declarations come directly from the tracked `goodies/lib_fomt.txt` and `goodies/lib_mfomt.txt`; no environment variables are required. Run:
+The ROM and decompiled-output directories are ignored by Git. Mary-C tests read the unified tracked `goodies/mary_callables.mary.h`, `mary_constants.mary.h`, and `mary_scripts_text.mary.sym` directly; no environment variables are required. Run:
 
 ```console
 cargo test --all-targets --features test_with_roms
 ```
 
-To run only the four-ROM strict suite and show per-version statistics:
+To run only the strict four-ROM Mary-C suite and show per-version statistics:
+
+```console
+cargo test --features test_with_roms --test mary_c_vanilla -- --nocapture
+```
+
+The original structured-DSL symmetry regression can be run separately:
 
 ```console
 cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture

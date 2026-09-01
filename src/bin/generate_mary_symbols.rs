@@ -123,6 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             begin(&mut out, selected, all_targets, "");
             active_scripts = Some(selected);
         }
+        out.push_str(&format!("    // Script ID: {id:04}\n"));
         if !present.into_iter().any(|yes| yes) {
             out.push_str("    NULL,\n\n");
             continue;

@@ -81,14 +81,7 @@ fn format_named_script_inner(
     let mut out = String::new();
     if text_count != 0 {
         out.push_str("mary_text_table\n{\n");
-        for stmt in &statements[..text_count] {
-            let Stmt::Consts(items) = stmt else {
-                unreachable!()
-            };
-            writeln!(out, "    {},", items[0].0).map_err(|_| PrettyCError::Format)?;
-        }
-        out.push_str("};\n\n");
-        for stmt in &statements[..text_count] {
+        for (text_index, stmt) in statements[..text_count].iter().enumerate() {
             let Stmt::Consts(items) = stmt else {
                 unreachable!()
             };
@@ -97,12 +90,13 @@ fn format_named_script_inner(
                     Some(charmap) => PrettyStringLit::with_charmap(bytes, charmap),
                     None => PrettyStringLit::new(bytes),
                 };
-                writeln!(out, "const char {}[] =", items[0].0).map_err(|_| PrettyCError::Format)?;
+                writeln!(out, "    const char {}[] =", items[0].0)
+                    .map_err(|_| PrettyCError::Format)?;
                 let fragments = literal.source_fragments();
                 for (index, fragment) in fragments.iter().enumerate() {
                     writeln!(
                         out,
-                        "    \"{fragment}\"{}",
+                        "        \"{fragment}\"{}",
                         if index + 1 == fragments.len() {
                             ";"
                         } else {
@@ -112,11 +106,19 @@ fn format_named_script_inner(
                     .map_err(|_| PrettyCError::Format)?;
                 }
             } else {
-                writeln!(out, "const char {}[] = {};", items[0].0, expr(&items[0].1))
-                    .map_err(|_| PrettyCError::Format)?;
+                writeln!(
+                    out,
+                    "    const char {}[] = {};",
+                    items[0].0,
+                    expr(&items[0].1)
+                )
+                .map_err(|_| PrettyCError::Format)?;
+            }
+            if text_index + 1 != text_count {
+                out.push('\n');
             }
         }
-        out.push('\n');
+        out.push_str("};\n\n");
     }
     writeln!(out, "void {name}(void)\n{{").map_err(|_| PrettyCError::Format)?;
     format_stmts(&mut out, &statements[text_count..], 1, &mut Vec::new())?;

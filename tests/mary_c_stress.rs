@@ -91,6 +91,18 @@ fn invalid_constructs_report_the_real_problem() {
             "requires const char *",
         ),
         ("mary_script(1) void X(void){P(\"wrong\");}", "requires int"),
+        (
+            "mary_script(1) void X(void){P(mary_negated_int());}",
+            "requires 1",
+        ),
+        (
+            "mary_script(1) void X(void){P(mary_negated_int(F(1)));}",
+            "constant expression",
+        ),
+        (
+            "mary_script(1) void X(void){P(mary_negated_int(\"wrong\"));}",
+            "constant integer",
+        ),
     ];
     for (source, needle) in cases {
         let error = parse_scripts(source, &Options::default(), &table.scope)
@@ -98,6 +110,104 @@ fn invalid_constructs_report_the_real_problem() {
             .to_string();
         assert!(error.contains(needle), "expected {needle:?} in {error:?}");
     }
+}
+
+#[test]
+fn documented_unsupported_language_boundary_is_rejected() {
+    let table = table();
+    let cases = [
+        ("while", "mary_script(1) void X(void){while(F(1)){P(1);}}"),
+        (
+            "continue",
+            "mary_script(1) void X(void){for(int i=0;i<3;i++){continue;}}",
+        ),
+        (
+            "goto",
+            "mary_script(1) void X(void){goto done;done:return;}",
+        ),
+        (
+            "conditional operator",
+            "mary_script(1) void X(void){int x=F(1)?2:3;P(x);}",
+        ),
+        (
+            "comma operator",
+            "mary_script(1) void X(void){int x=(F(1),F(2));P(x);}",
+        ),
+        ("character literal", "mary_script(1) void X(void){P('A');}"),
+        ("return value", "mary_script(1) void X(void){return 1;}"),
+        ("script parameter", "mary_script(1) void X(int x){P(x);}"),
+        (
+            "ordinary helper function",
+            "int Helper(int x){return x+1;}mary_script(1) void X(void){P(Helper(1));}",
+        ),
+        ("pointer", "mary_script(1) void X(void){int *p;P(*p);}"),
+        (
+            "runtime array",
+            "mary_script(1) void X(void){int values[2];P(values[0]);}",
+        ),
+        (
+            "structure",
+            "mary_script(1) void X(void){struct Pair p;P(p.left);}",
+        ),
+        ("floating point", "mary_script(1) void X(void){P(1.5);}"),
+        ("bitwise and", "mary_script(1) void X(void){P(F(1)&3);}"),
+        ("left shift", "mary_script(1) void X(void){P(F(1)<<2);}"),
+        ("cast", "mary_script(1) void X(void){P((int)F(1));}"),
+        ("sizeof", "mary_script(1) void X(void){P(sizeof(int));}"),
+    ];
+
+    for (name, source) in cases {
+        assert!(
+            parse_scripts(source, &Options::default(), &table.scope).is_err(),
+            "documented unsupported construct unexpectedly compiled: {name}"
+        );
+    }
+}
+
+#[test]
+fn binary_output_rejects_ir_comments_at_the_cli_boundary() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mary"))
+        .args(["compile", "--binary", "--print-ir"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used with")
+            && stderr.contains("--binary")
+            && stderr.contains("--print-ir"),
+        "unexpected CLI diagnostic: {stderr}"
+    );
+}
+
+#[test]
+fn arbitrary_binary_offset_outside_the_input_is_a_diagnostic_not_a_panic() {
+    let directory = std::path::PathBuf::from("test_failures")
+        .join(format!("invalid_offset_{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let input = directory.join("short.bin");
+    std::fs::write(&input, [0_u8; 4]).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_mary"))
+        .args([
+            "decompile",
+            input.to_str().unwrap(),
+            "goodies/lib_fomt.txt",
+            "--offset",
+            "0x100",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Offset is outside the input binary"),
+        "unexpected CLI diagnostic: {stderr}"
+    );
+    assert!(!stderr.contains("panicked"), "CLI panicked: {stderr}");
 }
 
 #[test]
@@ -164,9 +274,10 @@ mary_script_symbols {
     .unwrap();
     let scripts = symbols.script_table().unwrap();
     let source = r#"
-mary_text_table { gText_Stress_000, gText_Stress_001, };
-const char gText_Stress_000[] = "A\x05";
-const char gText_Stress_001[] = "B\x05";
+mary_text_table {
+    const char gText_Stress_000[] = "A\x05";
+    const char gText_Stress_001[] = "B\x05";
+};
 void Stress(void)
 {
     int x = G(F(3), 4);
@@ -193,6 +304,7 @@ void Stress(void)
             .unwrap();
     let printed = format_named_script("Stress", &raised).unwrap();
     assert!(printed.contains("mary_text_table"));
+    assert!(printed.contains("    const char gText_Stress_000[] ="));
     assert!(!printed.contains("mary_script("));
     let second = parse_named_scripts(&printed, &options, &callables.scope, &scripts).unwrap();
     assert_eq!(bytes, encode_script(&second.scripts[0].2), "{printed}");

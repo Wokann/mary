@@ -3,7 +3,11 @@ mod common;
 
 #[cfg(feature = "test_with_roms")]
 mod tests {
-    use std::{fs, io, path::PathBuf, sync::Arc};
+    use std::{
+        fs, io,
+        path::{Path, PathBuf},
+        sync::Arc,
+    };
 
     use super::common;
     use mary::compiler::{self, ScriptError};
@@ -16,6 +20,15 @@ mod tests {
     const MFOMT_JP_ROM: &str = "rom/mfomtjp.gba";
     const FOMT_LIBRARY: &str = "goodies/lib_fomt.txt";
     const MFOMT_LIBRARY: &str = "goodies/lib_mfomt.txt";
+
+    fn local_rom_path(path: &str) -> PathBuf {
+        let repository_path = Path::new(path);
+        if repository_path.is_file() {
+            repository_path.to_owned()
+        } else {
+            Path::new("..").join(path)
+        }
+    }
 
     #[derive(Clone, Copy)]
     struct RomCase {
@@ -106,7 +119,7 @@ mod tests {
     fn reencode_scripts(case: RomCase) -> Result<(), TestFailure> {
         use mary::{bytecode, utility::rom_info};
 
-        let rom = fs::read(case.rom_path)?;
+        let rom = fs::read(local_rom_path(case.rom_path))?;
         validate_table(case, &rom)?;
         let table = rom_info::get_script_table(&rom)?;
         let encoded_scripts: Vec<(usize, &[u8])> = table
@@ -186,7 +199,7 @@ mod tests {
             },
         }
 
-        let rom = fs::read(case.rom_path)?;
+        let rom = fs::read(local_rom_path(case.rom_path))?;
         validate_table(case, &rom)?;
         let encoded_scripts: Vec<(usize, &[u8])> = get_script_table(&rom)?
             .into_iter()

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use crate::{ast::ConstVal, const_scope::ConstScope, ir::IntValue};
+use crate::{const_scope::ConstScope, ir::IntValue};
 
 use super::{preprocess, Options, PreprocessError};
 
@@ -52,7 +52,7 @@ impl ScriptTable {
 
     pub fn add_constants(&self, scope: &mut ConstScope) {
         for (name, id) in &self.ids {
-            scope.add_const(name.clone(), ConstVal::Int(*id));
+            scope.add_typed_int_const("MaryScriptId", name.clone(), *id);
         }
     }
 }

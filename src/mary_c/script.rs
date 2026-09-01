@@ -493,6 +493,21 @@ impl P {
             return Ok(Vec::new());
         }
         self.take(K::Lb)?;
+        if self.is_word("const") {
+            let mut result = Vec::new();
+            let mut names = HashSet::new();
+            while !self.eat(&K::Rb) {
+                let (name, value) = self.text_declaration()?;
+                if !names.insert(name.clone()) {
+                    return self.err(&format!("text '{name}' is declared more than once"));
+                }
+                result.push(Stmt::Consts(vec![(name, value)]));
+            }
+            self.eat(&K::Semi);
+            return Ok(result);
+        }
+
+        // Compatibility syntax: an ordered name list followed by declarations.
         let mut names = Vec::new();
         while !self.eat(&K::Rb) {
             names.push(self.id()?);
@@ -504,26 +519,8 @@ impl P {
 
         let mut declarations = HashMap::new();
         while self.eat_word("const") {
-            self.word("char")?;
-            let name = self.id()?;
-            self.take(K::Ls)?;
-            self.take(K::Rs)?;
-            self.take(K::Eq)?;
-            let mut bytes = match self.primary()? {
-                Expr::Str(bytes) => bytes,
-                _ => return self.err("text declarations require a string literal"),
-            };
-            while matches!(self.peek().map(|token| &token.k), Some(K::Str(_))) {
-                let Expr::Str(next) = self.primary()? else {
-                    unreachable!()
-                };
-                bytes.extend(next);
-            }
-            self.take(K::Semi)?;
-            if declarations
-                .insert(name.clone(), Expr::Str(bytes))
-                .is_some()
-            {
+            let (name, value) = self.text_declaration_after_const()?;
+            if declarations.insert(name.clone(), value).is_some() {
                 return self.err(&format!("text '{name}' is declared more than once"));
             }
         }
@@ -542,6 +539,31 @@ impl P {
             return self.err(&format!("text declaration '{name}' has no table slot"));
         }
         Ok(result)
+    }
+
+    fn text_declaration(&mut self) -> Result<(String, Expr), MaryScriptError> {
+        self.word("const")?;
+        self.text_declaration_after_const()
+    }
+
+    fn text_declaration_after_const(&mut self) -> Result<(String, Expr), MaryScriptError> {
+        self.word("char")?;
+        let name = self.id()?;
+        self.take(K::Ls)?;
+        self.take(K::Rs)?;
+        self.take(K::Eq)?;
+        let mut bytes = match self.primary()? {
+            Expr::Str(bytes) => bytes,
+            _ => return self.err("text declarations require a string literal"),
+        };
+        while matches!(self.peek().map(|token| &token.k), Some(K::Str(_))) {
+            let Expr::Str(next) = self.primary()? else {
+                unreachable!()
+            };
+            bytes.extend(next);
+        }
+        self.take(K::Semi)?;
+        Ok((name, Expr::Str(bytes)))
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>, MaryScriptError> {
@@ -1238,7 +1260,7 @@ mod tests {
             crate::mary_c::parse_script_table("mary_script_table { Script }", &Options::default())
                 .unwrap();
         let parsed = parse_named_scripts_with_charmap(
-            r#"mary_text_table { T }; const char T[] = "A\n\"\\{Press}"; void Script(void){Text(T);}"#,
+            r#"mary_text_table { const char T[] = "A\n\"\\{Press}"; }; void Script(void){Text(T);}"#,
             &Options::default(),
             &scope,
             &table,

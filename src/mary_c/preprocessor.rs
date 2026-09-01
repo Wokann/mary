@@ -33,6 +33,24 @@ struct Conditional {
 /// callable tables. Inactive lines are retained as blank lines so later error
 /// locations continue to refer to the original source.
 pub fn preprocess(source: &str, options: &Options) -> Result<String, PreprocessError> {
+    preprocess_inner(source, options, false)
+}
+
+/// Preprocess a fixed constant header while retaining active object-like
+/// `#define` lines for the constant-table parser. Conditional-control
+/// directives and target-selection macros are still consumed normally.
+pub(crate) fn preprocess_constant_header(
+    source: &str,
+    options: &Options,
+) -> Result<String, PreprocessError> {
+    preprocess_inner(source, options, true)
+}
+
+fn preprocess_inner(
+    source: &str,
+    options: &Options,
+    retain_active_defines: bool,
+) -> Result<String, PreprocessError> {
     let mut macros = options.defines.clone();
     let mut stack: Vec<Conditional> = Vec::new();
     let mut output = String::with_capacity(source.len());
@@ -44,8 +62,16 @@ pub fn preprocess(source: &str, options: &Options) -> Result<String, PreprocessE
         let active = stack.last().is_none_or(|c| c.active);
 
         if let Some(rest) = trimmed.strip_prefix('#') {
+            let retain = retain_active_defines
+                && active
+                && rest
+                    .trim_start()
+                    .strip_prefix("define")
+                    .is_some_and(|tail| tail.starts_with(char::is_whitespace));
             handle_directive(rest.trim(), line, &mut macros, &mut stack)?;
-            if raw_line.ends_with('\n') {
+            if retain {
+                output.push_str(raw_line);
+            } else if raw_line.ends_with('\n') {
                 output.push('\n');
             }
         } else if active {
