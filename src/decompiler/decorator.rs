@@ -1178,6 +1178,10 @@ impl<'a> StringDecorateVisitor<'a> {
                 let mut exit_types = Vec::with_capacity(switch_cases.len() + 1);
                 let mut exit_origins = Vec::with_capacity(switch_cases.len() + 1);
                 let mut exit_values = Vec::with_capacity(switch_cases.len() + 1);
+                let mut fallthrough_types = None;
+                let mut fallthrough_origins = None;
+                let mut fallthrough_values = None;
+                let mut fallthrough_overrides = None;
                 if !has_default {
                     exit_types.push(outer_types.clone());
                     exit_origins.push(outer_origins.clone());
@@ -1191,7 +1195,12 @@ impl<'a> StringDecorateVisitor<'a> {
                     self.callable_return_overrides = outer_overrides.clone();
                     match switch_case {
                         SwitchCase::Case(values, _) | SwitchCase::Fallthrough(values, _) => {
+                            let mut label_states = Vec::with_capacity(values.len());
                             for value in values {
+                                self.local_types = outer_types.clone();
+                                self.local_origins = outer_origins.clone();
+                                self.local_values = outer_values.clone();
+                                self.callable_return_overrides = outer_overrides.clone();
                                 if let (Some(discriminator), Some(discriminator_value)) = (
                                     switch_origin.as_deref(),
                                     match &*value {
@@ -1217,14 +1226,91 @@ impl<'a> StringDecorateVisitor<'a> {
                                 }
                                 self.decorate_typed_int(value, switch_type);
                                 self.visit_expr(value)?;
+                                label_states.push((
+                                    self.local_types.clone(),
+                                    self.local_origins.clone(),
+                                    self.local_values.clone(),
+                                    self.callable_return_overrides.clone(),
+                                ));
+                            }
+                            if let Some((types, origins, values, overrides)) =
+                                label_states.into_iter().reduce(
+                                    |(types, origins, values, overrides),
+                                     (next_types, next_origins, next_values, next_overrides)| {
+                                        (
+                                            self.join_local_value_types(
+                                                &types,
+                                                &values,
+                                                &next_types,
+                                                &next_values,
+                                            ),
+                                            Self::join_local_types([origins, next_origins]),
+                                            Self::join_local_types([values, next_values]),
+                                            Self::join_local_types([overrides, next_overrides]),
+                                        )
+                                    },
+                                )
+                            {
+                                self.local_types = types;
+                                self.local_origins = origins;
+                                self.local_values = values;
+                                self.callable_return_overrides = overrides;
                             }
                         }
                         _ => {}
                     }
+
+                    if let (Some(types), Some(origins), Some(values), Some(overrides)) = (
+                        fallthrough_types.take(),
+                        fallthrough_origins.take(),
+                        fallthrough_values.take(),
+                        fallthrough_overrides.take(),
+                    ) {
+                        self.local_types = self.join_local_value_types(
+                            &self.local_types,
+                            &self.local_values,
+                            &types,
+                            &values,
+                        );
+                        self.local_origins = Self::join_local_types([
+                            std::mem::take(&mut self.local_origins),
+                            origins,
+                        ]);
+                        self.local_values = Self::join_local_types([
+                            std::mem::take(&mut self.local_values),
+                            values,
+                        ]);
+                        self.callable_return_overrides = Self::join_local_types([
+                            std::mem::take(&mut self.callable_return_overrides),
+                            overrides,
+                        ]);
+                    }
+
                     self.visit_stmts(switch_case.stmts_mut())?;
-                    exit_types.push(self.local_types.clone());
-                    exit_origins.push(self.local_origins.clone());
-                    exit_values.push(self.local_values.clone());
+                    if matches!(
+                        switch_case,
+                        SwitchCase::Fallthrough(_, _)
+                            | SwitchCase::DefaultFallthrough(_)
+                            | SwitchCase::ImplicitDefault(_)
+                            | SwitchCase::DeadJump(_)
+                    ) {
+                        fallthrough_types = Some(self.local_types.clone());
+                        fallthrough_origins = Some(self.local_origins.clone());
+                        fallthrough_values = Some(self.local_values.clone());
+                        fallthrough_overrides = Some(self.callable_return_overrides.clone());
+                    } else {
+                        exit_types.push(self.local_types.clone());
+                        exit_origins.push(self.local_origins.clone());
+                        exit_values.push(self.local_values.clone());
+                    }
+                }
+
+                if let (Some(types), Some(origins), Some(values)) =
+                    (fallthrough_types, fallthrough_origins, fallthrough_values)
+                {
+                    exit_types.push(types);
+                    exit_origins.push(origins);
+                    exit_values.push(values);
                 }
 
                 self.local_types = Self::join_local_types(exit_types);

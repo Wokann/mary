@@ -4036,7 +4036,7 @@ mary_script_symbols
     // Script ID: 0483
     EventScript_ShopEvent_Clinic_ExaminationChoice
     {
-        mary_local_type(var_1, MaryClinicExaminationDiagnosis),
+        mary_local_type(var_1, MaryClinicExaminationResult),
         gText_ShopEvent_Clinic_ExaminationChoice_Table,
         gText_ShopEvent_Clinic_ExaminationChoice_ExaminationPrice,
         gText_ShopEvent_Clinic_ExaminationChoice_PleaseExamineMe,
@@ -20034,7 +20034,7 @@ mary_script_symbols
     // Script ID: 0492
     EventScript_ShopEvent_Clinic_ExaminationChoice
     {
-        mary_local_type(var_1, MaryClinicExaminationDiagnosis),
+        mary_local_type(var_1, MaryClinicExaminationResult),
         gText_ShopEvent_Clinic_ExaminationChoice_ReceptionDesk,
         gText_ShopEvent_Clinic_ExaminationChoice_ExaminationPrice,
         gText_ShopEvent_Clinic_ExaminationChoice_PleaseExamineMe,

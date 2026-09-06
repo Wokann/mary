@@ -11,6 +11,28 @@ use mary::{
 };
 
 #[test]
+fn tool_experience_requirements_parse_for_all_four_targets() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        parse_constant_header(&header, &options).unwrap();
+    }
+    for declaration in [
+        "TOOL_EXPERIENCE_REQUIRED_FOR_COPPER = 6000",
+        "TOOL_EXPERIENCE_REQUIRED_FOR_SILVER = 18000",
+        "TOOL_EXPERIENCE_REQUIRED_FOR_GOLD = 36000",
+        "TOOL_EXPERIENCE_REQUIRED_FOR_MYSTRILE_OR_MYTHIC = 65535",
+    ] {
+        assert!(header.contains(declaration), "missing {declaration}");
+    }
+}
+
+#[test]
 fn retired_external_tree_is_not_cited_as_evidence() {
     fn inspect(path: &std::path::Path, forbidden: &str, violations: &mut Vec<String>) {
         if path.is_dir() {
@@ -144,10 +166,7 @@ fn facing_direction_symbols_round_trip_on_all_four_targets() {
             source.contains("GetOppositeFacing(FACING_UP)"),
             "{target}: {source}"
         );
-        assert!(
-            source.contains("CreateFarmHorse(FACING_LEFT"),
-            "{target}: {source}"
-        );
+        assert!(source.contains("CreateFarmHorse(2,"), "{target}: {source}");
         assert!(
             source.contains("GetEntityFacing(ENTITY_PLAYER) == FACING_LEFT"),
             "{target}: {source}"
@@ -1178,7 +1197,7 @@ fn fomt_festival_runtime_fields_follow_verified_calendar_dispatchers() {
         (393, "VAR_SPRING_HORSE_RACE_FESTIVAL_ACTIVE"),
         (394, "VAR_SPRING_HORSE_RACE_RESULT"),
         (396, "VAR_COOKING_FESTIVAL_ACTIVE"),
-        (397, "VAR_COOKING_FESTIVAL_RESULT"),
+        (397, "VAR_COOKING_FESTIVAL_DISH_CATEGORY"),
         (398, "VAR_COOKING_FESTIVAL_COMPLETED"),
         (399, "VAR_COOKING_FESTIVAL_PLAYER_ENTERED"),
         (400, "VAR_COOKING_FESTIVAL_PLAYER_DISH_RATING"),
@@ -2606,7 +2625,6 @@ fn mfomt_late_event_television_and_fish_pond_variables_use_verified_ids() {
                 "{target}: {name}"
             );
         }
-
         for (name, value) in [
             ("GIRLS_COOKING_REQUEST_STATE_INACTIVE", 0),
             ("GIRLS_COOKING_REQUEST_STATE_RECIPE_SEED_1", 1),
@@ -2795,7 +2813,36 @@ fn daily_reset_only_boolean_slots_stay_explicitly_unknown() {
 }
 
 #[test]
-fn unknown_lifecycle_slots_do_not_acquire_names_from_adjacency() {
+fn unknown_multibit_fields_do_not_inherit_adjacent_boolean_or_lifecycle_types() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        if target.starts_with("MARY_FOMT_") {
+            // Physical widths 3/4/4 are known; event semantics are not.
+            // A nearby lifecycle enum is not evidence for these fields.
+            for id in [314, 327, 333] {
+                assert_eq!(constants.variable_value_type(id), None, "{target}: {id}");
+            }
+            assert_eq!(constants.variable_value_type(320), None);
+        } else {
+            assert_eq!(constants.variable_value_type(325), None);
+            // Same numeric ID327 has a different meaning in the two families.
+            assert_eq!(constants.variable_value_type(327), None);
+        }
+    }
+}
+
+#[test]
+fn unknown_multibit_slots_do_not_acquire_types_from_adjacency() {
     let expected = [
         (
             "MARY_FOMT_US",
@@ -2862,8 +2909,8 @@ fn unknown_lifecycle_slots_do_not_acquire_names_from_adjacency() {
                 );
                 assert_eq!(
                     constants.variable_value_type(*id),
-                    constants.constant_value_type("EVENT_LIFECYCLE_IN_PROGRESS"),
-                    "{target}: lifecycle domain for slot {id}"
+                    None,
+                    "{target}: unproven value domain for slot {id}"
                 );
             }
         }
@@ -3389,7 +3436,7 @@ fn family_romance_and_pet_variables_round_trip_on_all_targets() {
         (47, "VAR_CHILD_CAN_WALK"),
         (48, "VAR_CHILD_BIRTHDAY_SEASON"),
         (49, "VAR_CHILD_BIRTHDAY_DAY"),
-        (50, "VAR_DAYS_MARRIED"),
+        (50, "VAR_DAYS_SINCE_PREGNANCY_EVENT"),
         (51, "VAR_WEDDING_SEASON"),
         (52, "VAR_WEDDING_DAY"),
     ];
@@ -4091,7 +4138,7 @@ fn child_and_pet_state_values_compile_to_their_numeric_bytes() {
         let dog_variable = if target.contains("MFOMT") { 67 } else { 65 };
         let numeric = parse_named_scripts(
             &format!(
-                "void TestPetState(void) {{ if (VarGet(47) == 1 && VarGet({dog_variable}) == 1) {{ return; }} }}\n"
+                "void TestPetState(void) {{ if (VarGet(46) >= 60 && VarGet(46) >= 120 && VarGet(46) < 255 && VarGet(47) == 1 && VarGet({dog_variable}) == 1) {{ return; }} }}\n"
             ),
             &options,
             &callables.scope,
@@ -4100,7 +4147,7 @@ fn child_and_pet_state_values_compile_to_their_numeric_bytes() {
         .unwrap();
         let symbolic = parse_named_scripts(
             &format!(
-                "void TestPetState(void) {{ if (VarGet(VAR_CHILD_CAN_WALK) == CHILD_WALKING_CAN_WALK && VarGet({dog_variable}) == PET_GROWTH_STAGE_ADULT) {{ return; }} }}\n"
+                "void TestPetState(void) {{ if (VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FAMILY_SCENE_AND_INJURY_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FIRST_STEPS_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) < CHILD_AGE_DAYS_SATURATED_MAXIMUM && VarGet(VAR_CHILD_CAN_WALK) == CHILD_WALKING_CAN_WALK && VarGet({dog_variable}) == PET_GROWTH_STAGE_ADULT) {{ return; }} }}\n"
             ),
             &options,
             &callables.scope,
@@ -4112,6 +4159,77 @@ fn child_and_pet_state_values_compile_to_their_numeric_bytes() {
             encode_script(&symbolic.scripts[0].2),
             "{target}"
         );
+
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestPetState")
+                .unwrap();
+        let source = format_named_script("TestPetState", &raised).unwrap();
+        for symbol in [
+            "CHILD_AGE_DAYS_FAMILY_SCENE_AND_INJURY_EVENT_START",
+            "CHILD_AGE_DAYS_FIRST_STEPS_EVENT_START",
+            "CHILD_AGE_DAYS_SATURATED_MAXIMUM",
+        ] {
+            assert!(source.contains(symbol), "{target}: {source}");
+        }
+    }
+}
+
+#[test]
+fn pregnancy_day_thresholds_compile_and_raise_on_all_targets() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestPregnancyDays, };\n", &options).unwrap();
+        let numeric = parse_named_scripts(
+            "void TestPregnancyDays(void) { if (VarGet(50) >= 1 && VarGet(50) >= 9 && VarGet(50) >= 20 && VarGet(50) >= 40 && VarGet(50) >= 59 && VarGet(50) >= 60) { return; } }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let symbolic = parse_named_scripts(
+            "void TestPregnancyDays(void) { if (VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_CLINIC_CONFIRMED_START && VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_SPOUSE_DIALOGUE_SECOND_STAGE_START && VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_CLINIC_VISIBLE_CHANGE_START && VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_LATE_STAGE_START && VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_BIRTH_IMMINENT_START && VarGet(VAR_DAYS_SINCE_PREGNANCY_EVENT) >= PREGNANCY_DAYS_CHILDBIRTH_EVENT_START) { return; } }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&symbolic.scripts[0].2),
+            "{target}"
+        );
+
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestPregnancyDays")
+                .unwrap();
+        let source = format_named_script("TestPregnancyDays", &raised).unwrap();
+        for symbol in [
+            "PREGNANCY_DAYS_CLINIC_CONFIRMED_START",
+            "PREGNANCY_DAYS_SPOUSE_DIALOGUE_SECOND_STAGE_START",
+            "PREGNANCY_DAYS_CLINIC_VISIBLE_CHANGE_START",
+            "PREGNANCY_DAYS_LATE_STAGE_START",
+            "PREGNANCY_DAYS_BIRTH_IMMINENT_START",
+            "PREGNANCY_DAYS_CHILDBIRTH_EVENT_START",
+        ] {
+            assert!(source.contains(symbol), "{target}: {source}");
+        }
     }
 }
 
@@ -5156,28 +5274,7 @@ fn plain_integer_returns_are_explicitly_numeric_or_dynamically_typed() {
     let constants_source = include_str!("../goodies/mary_constants.mary.h");
     let callables_source = include_str!("../goodies/mary_callables.mary.h");
     let shared_expected = [
-        "CountAnimalsByLifeState",
-        "GetAmountShipped",
-        "GetAnimalAffection",
-        "GetAnimalAge",
-        "GetAnimalHealthyPregnancyDays",
-        "GetCaughtFishSize",
-        "GetCharacterLove",
-        "GetChickenCount",
-        "GetCowCount",
-        "GetDaysSinceLastSpokenToNpc",
         "GetEventContextValue",
-        "GetHarvestSpriteTaskExperience",
-        "GetHarvestSpriteWorkDaysLeft",
-        "GetIncubatorCapacity",
-        "GetKnownRecipeCount",
-        "GetMoney",
-        "GetNpcFriendship",
-        "GetPregnancyStallCapacity",
-        "GetSavedLetterCount",
-        "GetSheepCount",
-        "GetTotalFishCaught",
-        "GetWaitingLetterCount",
         "RandomIntInclusive",
         "RandomU15",
         "VarGet",
@@ -5194,15 +5291,7 @@ fn plain_integer_returns_are_explicitly_numeric_or_dynamically_typed() {
         let callables =
             parse_callable_table_with_scope(callables_source, &options, &constants).unwrap();
         let mut expected = shared_expected.to_vec();
-        if target.starts_with("MARY_MFOMT_") {
-            expected.extend([
-                "CountFestivalWinningAnimals",
-                "GetFishCatchCount",
-                "GetLargestCaughtFishSize",
-                "GetToolExperience",
-            ]);
-            expected.sort_unstable();
-        }
+        expected.sort_unstable();
         let mut actual = callables
             .scope
             .callable_map()
@@ -5228,42 +5317,100 @@ fn plain_integer_returns_are_explicitly_numeric_or_dynamically_typed() {
 }
 
 #[test]
+fn semantic_scalar_returns_keep_distinct_types_without_output_wrappers() {
+    let constants_source = include_str!("../goodies/mary_constants.mary.h");
+    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let shared = [
+        ("GetNpcFriendship", "MaryNpcFriendshipValue"),
+        (
+            "GetDaysSinceLastSpokenToNpc",
+            "MaryDaysSinceNpcConversation",
+        ),
+        ("GetCharacterLove", "MaryCharacterLoveValue"),
+        ("GetIncubatorCapacity", "MaryIncubatorCapacity"),
+        ("GetPregnancyStallCapacity", "MaryPregnancyStallCapacity"),
+        ("GetHarvestSpriteWorkDaysLeft", "MaryHarvestSpriteWorkDays"),
+        (
+            "GetHarvestSpriteTaskExperience",
+            "MaryHarvestSpriteTaskExperience",
+        ),
+        ("GetTotalFishCaught", "MaryFishCount"),
+        ("GetMoney", "MaryMoneyBalance"),
+        ("GetWaitingLetterCount", "MaryLetterCount"),
+        ("GetSavedLetterCount", "MaryLetterCount"),
+        (
+            "GetAnimalHealthyPregnancyDays",
+            "MaryAnimalHealthyPregnancyDays",
+        ),
+        ("GetAnimalAge", "MaryAnimalAgeDays"),
+        ("GetAnimalAffection", "MaryAnimalAffectionValue"),
+        ("CountAnimalsByLifeState", "MaryAnimalCount"),
+        ("GetCowCount", "MaryAnimalCount"),
+        ("GetSheepCount", "MaryAnimalCount"),
+        ("GetChickenCount", "MaryAnimalCount"),
+        ("GetCaughtFishSize", "MaryFishSize"),
+        ("GetAmountShipped", "MaryProductShippedCount"),
+        ("GetKnownRecipeCount", "MaryKnownRecipeCount"),
+    ];
+    let mfomt_only = [
+        ("GetFishCatchCount", "MaryFishCount"),
+        ("GetLargestCaughtFishSize", "MaryFishSize"),
+        ("GetToolExperience", "MaryToolExperienceValue"),
+        (
+            "CountFestivalWinningAnimals",
+            "MaryFestivalWinningAnimalCount",
+        ),
+    ];
+
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(constants_source, &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(callables_source, &options, &constants).unwrap();
+        for &(name, type_name) in &shared {
+            assert_eq!(
+                callables.scope.callable_map()[name].1.return_type(),
+                mary::ir::ValueType::UserType(constants.user_type(type_name).unwrap()),
+                "{target}: {name}"
+            );
+        }
+        if target.starts_with("MARY_MFOMT_") {
+            for &(name, type_name) in &mfomt_only {
+                assert_eq!(
+                    callables.scope.callable_map()[name].1.return_type(),
+                    mary::ir::ValueType::UserType(constants.user_type(type_name).unwrap()),
+                    "{target}: {name}"
+                );
+            }
+        }
+        assert!(!constants_source.contains("mary_typed_identity(MaryMoneyBalance"));
+        assert!(!constants_source.contains("mary_typed_identity(MaryAnimalAffectionValue"));
+        assert!(!constants_source.contains("mary_typed_identity(MaryFishCount"));
+    }
+}
+
+#[test]
 fn plain_integer_parameters_are_an_explicit_audited_allowlist() {
     let constants_source = include_str!("../goodies/mary_constants.mary.h");
     let callables_source = include_str!("../goodies/mary_callables.mary.h");
     let expected = [
-        "AddAffectionToAllFarmAnimals",
-        "AddAnimalAffection",
-        "AddArticleToRucksack",
-        "AddCharacterLove",
-        "AddFoodToRucksack",
-        "AddMoney",
-        "AddNpcFriendship",
-        "AddToolToRucksack",
-        "ChangePlayerStaminaAndFatigue",
-        "FlashScreenColor",
-        "GenerateMineFloorLayout",
         "NoOp014",
         "NoOpAnimalEventEntityInitialization",
         "NoOpTutorialEggDefinition",
         "NoOpTutorialEggSelection",
         "NoOpTutorialFieldObject",
         "NoOpTutorialFieldTile",
-        "OffsetEntityPosition",
-        "OpenNameEntry",
         "OpenRucksackMenu",
         "RandomIntInclusive",
         "RemoveFarmHorse",
-        "SetCharacterLove",
-        "SetGameTime",
-        "SetNpcFriendship",
-        "SetPlayerHeldTool",
         "SetTextVariableNumber",
         "SetTextVariableNumberFieldWidth",
-        "StartHarvestSpriteTask",
-        "SubtractMoney",
         "VarSet",
-        "WaitFrames",
     ];
 
     for target in [
@@ -5294,6 +5441,130 @@ fn plain_integer_parameters_are_an_explicit_audited_allowlist() {
             actual, expected,
             "{target}: a plain integer parameter was added, removed, or left without semantic typing"
         );
+    }
+}
+
+#[test]
+fn semantic_scalar_parameters_keep_distinct_types_without_output_wrappers() {
+    let constants_source = include_str!("../goodies/mary_constants.mary.h");
+    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let expected = [
+        ("WaitFrames", &["MaryFrameCount"][..]),
+        (
+            "ChangePlayerStaminaAndFatigue",
+            &["MaryStaminaDelta", "MaryFatigueDelta"][..],
+        ),
+        (
+            "AddNpcFriendship",
+            &["MaryCharacterId", "MaryNpcFriendshipDelta"][..],
+        ),
+        (
+            "SetNpcFriendship",
+            &["MaryCharacterId", "MaryNpcFriendshipValue"][..],
+        ),
+        (
+            "AddCharacterLove",
+            &["MaryCharacterId", "MaryCharacterLoveDelta"][..],
+        ),
+        (
+            "SetCharacterLove",
+            &["MaryCharacterId", "MaryCharacterLoveValue"][..],
+        ),
+        (
+            "StartHarvestSpriteTask",
+            &[
+                "MaryCharacterId",
+                "MaryHarvestSpriteTask",
+                "MaryHarvestSpriteWorkDays",
+            ][..],
+        ),
+        ("AddMoney", &["MaryMoneyAmount"][..]),
+        ("SubtractMoney", &["MaryMoneyAmount"][..]),
+        ("SetGameTime", &["MaryClockHour", "MaryClockMinute"][..]),
+        (
+            "AddAnimalAffection",
+            &[
+                "MaryAnimalKind",
+                "MaryAnimalSlotIndex",
+                "MaryAnimalAffectionDelta",
+            ][..],
+        ),
+        (
+            "AddAffectionToAllFarmAnimals",
+            &["MaryAnimalAffectionDelta"][..],
+        ),
+        (
+            "GenerateMineFloorLayout",
+            &["MaryMineKind", "MaryMineFloorIndex"][..],
+        ),
+        (
+            "SetTextVariableNumberFieldWidth",
+            &["MaryTextVariableSlot", "int", "MaryTextNumberFieldWidth"][..],
+        ),
+        (
+            "SetPlayerHeldTool",
+            &["MaryToolId", "MaryRequestedToolStackCount"][..],
+        ),
+        (
+            "AddArticleToRucksack",
+            &["MaryArticleId", "MaryRequestedInventoryCount"][..],
+        ),
+        (
+            "AddFoodToRucksack",
+            &["MaryFoodId", "MaryRequestedInventoryCount"][..],
+        ),
+        (
+            "AddToolToRucksack",
+            &["MaryToolId", "MaryRequestedInventoryCount"][..],
+        ),
+        (
+            "OpenNameEntry",
+            &["MaryNameEntryKind", "MaryNameEntryTargetIndex"][..],
+        ),
+        (
+            "FlashScreenColor",
+            &["MaryRgb5Channel", "MaryRgb5Channel", "MaryRgb5Channel"][..],
+        ),
+    ];
+
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(constants_source, &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(callables_source, &options, &constants).unwrap();
+
+        for &(name, type_names) in &expected {
+            let actual = callables.scope.callable_map()[name]
+                .1
+                .parameter_types()
+                .to_vec();
+            let wanted = type_names
+                .iter()
+                .map(|type_name| {
+                    if *type_name == "int" {
+                        mary::ir::ValueType::Integer
+                    } else {
+                        mary::ir::ValueType::UserType(constants.user_type(type_name).unwrap())
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, wanted, "{target}: {name}");
+        }
+
+        assert_ne!(
+            constants.user_type("MaryRequestedToolStackCount").unwrap(),
+            constants.user_type("MaryHeldToolStackCount").unwrap(),
+            "{target}: setter input and getter result domains must remain distinct"
+        );
+
+        assert!(!constants_source.contains("mary_typed_identity(MaryFrameCount"));
+        assert!(!constants_source.contains("mary_typed_identity(MaryClockHour"));
+        assert!(!constants_source.contains("mary_typed_identity(MaryAnimalAffectionDelta"));
     }
 }
 
@@ -6645,21 +6916,21 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
             );
         }
         for (id, expected) in [
-            (45, "ENTITY_45"),
-            (70, "ENTITY_70"),
-            (71, "ENTITY_71"),
-            (72, "ENTITY_72"),
-            (73, "ENTITY_73"),
-            (75, "ENTITY_75"),
-            (94, "ENTITY_94"),
-            (95, "ENTITY_95"),
-            (96, "ENTITY_96"),
-            (97, "ENTITY_97"),
+            (45, "ENTITY_FRISBEE"),
+            (70, "ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0"),
+            (71, "ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_1"),
+            (72, "ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_2"),
+            (73, "ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_3"),
+            (75, "ENTITY_BALL"),
+            (94, "ENTITY_TUTORIAL_PLAYER"),
+            (95, "ENTITY_TUTORIAL_ADULT_ANIMAL_SLOT_1"),
+            (96, "ENTITY_TUTORIAL_ADULT_ANIMAL_SLOT_2"),
+            (97, "ENTITY_TUTORIAL_YOUNG_ANIMAL"),
         ] {
             assert_eq!(
                 constants.typed_int_const_name(entity_type, id),
                 Some(expected),
-                "{target}: unproven dynamic entity ID {id} must keep a stable placeholder"
+                "{target}: dynamic entity ID {id} has the wrong stable symbol"
             );
         }
 
@@ -6672,7 +6943,7 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
         let script_table =
             parse_script_table("mary_script_table { TestEntities, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
-            "void TestEntities(void) { int animal_slot = 3; SetEntityPosition(0, 10, 20, 0); SetEntityFacing(25, 1); SetEntityAnim(42, 0); HideEntity(43); HideEntity(44); HideEntity(46); HideEntity(53); HideEntity(54); HideEntity(69); HideEntity(54 + animal_slot); HideEntity(74); HideEntity(70); }\n",
+            "void TestEntities(void) { int animal_slot = 3; SetEntityPosition(0, 10, 20, 0); SetEntityFacing(25, 1); SetEntityAnim(42, 0); HideEntity(43); HideEntity(44); HideEntity(46); HideEntity(53); HideEntity(54); HideEntity(69); HideEntity(54 + animal_slot); HideEntity(74); HideEntity(75); HideEntity(70); HideEntity(94); HideEntity(95); HideEntity(96); HideEntity(97); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -6694,7 +6965,12 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
             "HideEntity(ENTITY_BARN_ANIMAL_SLOT_16)",
             "HideEntity(ENTITY_BARN_ANIMAL_SLOT_1 + var_0)",
             "HideEntity(ENTITY_BASKET)",
-            "HideEntity(ENTITY_70)",
+            "HideEntity(ENTITY_BALL)",
+            "HideEntity(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0)",
+            "HideEntity(ENTITY_TUTORIAL_PLAYER)",
+            "HideEntity(ENTITY_TUTORIAL_ADULT_ANIMAL_SLOT_1)",
+            "HideEntity(ENTITY_TUTORIAL_ADULT_ANIMAL_SLOT_2)",
+            "HideEntity(ENTITY_TUTORIAL_YOUNG_ANIMAL)",
         ] {
             assert!(
                 source.contains(expected),
@@ -6707,6 +6983,35 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
             encode_script(&numeric.scripts[0].2),
             encode_script(&symbolic.scripts[0].2),
             "{target}: entity symbols changed emitted bytecode"
+        );
+    }
+}
+
+#[test]
+fn only_open_coordinate_domains_use_typed_identity_wrappers() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let declarations = header
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("mary_typed_identity("))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        declarations,
+        [
+            "mary_typed_identity(MaryMapSpaceX, X);",
+            "mary_typed_identity(MaryMapSpaceY, Y);",
+        ],
+        "finite and observed ID domains must use ordinary constants; only open X/Y coordinates use identity wrappers"
+    );
+    for forbidden in [
+        "EVENT_ICON_SLOT(",
+        "EVENT_ICON_LAYER(",
+        "ENTITY_ID(",
+        "CAMERA_SPEED(",
+    ] {
+        assert!(
+            !header.contains(forbidden),
+            "non-coordinate function-style constant survived: {forbidden}"
         );
     }
 }
@@ -6737,8 +7042,8 @@ fn harvest_sprite_work_and_minigame_callables_round_trip_for_all_targets() {
              SetTalkNameplateCharacter(CHARACTER_CHILD);\n\
              SetTalkNameplateCharacter(CHARACTER_STAID);\n\
              SetTalkNameplateCharacter(CHARACTER_TIMID);\n\
-             if (IsHarvestSpriteWorkComplete(CHARACTER_NAPPY)) { return; }\n\
-             StopHarvestSpriteWorkForToday(CHARACTER_NAPPY);\n\
+             if (IsHarvestSpriteDailyWorkComplete(CHARACTER_NAPPY)) { return; }\n\
+             ScheduleHarvestSpriteTaskToEndAfterToday(CHARACTER_NAPPY);\n\
              RunHarvestSpriteAnimalCareMinigame(CHARACTER_NAPPY);\n\
              RunHarvestSpriteHarvestingMinigame(CHARACTER_NAPPY);\n\
              RunHarvestSpriteWateringMinigame(CHARACTER_NAPPY);\n\
@@ -11236,6 +11541,15 @@ fn paired_npc_family_and_ann_cliff_rival_events_keep_event_scoped_texts() {
 
 #[test]
 fn numbered_script_symbols_are_textless_placeholder_slots() {
+    let fomt_numbered = [
+        4, 14, 15, 80, 81, 82, 83, 84, 570, 835, 836, 837, 838, 839, 840, 841, 868, 869, 870, 871,
+        872, 964, 965, 966, 967, 968, 1064, 1327, 1328,
+    ];
+    let mfomt_numbered = [
+        4, 14, 15, 88, 89, 90, 91, 92, 579, 844, 845, 846, 847, 848, 849, 850, 916, 935, 936, 937,
+        938, 939, 940, 1032, 1033, 1034, 1035, 1036, 1060, 1102, 1137, 1138, 1156, 1374, 1375,
+        1376, 1377, 1378, 1379, 1380, 1383, 1413, 1414, 1415,
+    ];
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -11249,17 +11563,56 @@ fn numbered_script_symbols_are_textless_placeholder_slots() {
         )
         .unwrap();
 
+        let mut actual_numbered = Vec::new();
         for id in 0..slot_count {
             let Some(name) = symbols.script_name(id) else {
                 continue;
             };
             let numbered_name = format!("EventScript_{id:04}");
             if name == numbered_name {
+                actual_numbered.push(id);
                 assert_eq!(
                     symbols.text_count(id),
                     0,
                     "{target} slot {id} still has text and therefore needs an event-level name"
                 );
+            }
+        }
+        let expected: &[usize] = if target.starts_with("MARY_FOMT_") {
+            &fomt_numbered
+        } else {
+            &mfomt_numbered
+        };
+        assert_eq!(
+            actual_numbered, expected,
+            "{target}: numbered script inventory changed without an evidence-backed audit update"
+        );
+    }
+}
+
+#[test]
+fn text_symbols_are_owned_by_only_one_script_per_target() {
+    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    for (target, slot_count) in [
+        ("MARY_FOMT_US", 1329),
+        ("MARY_FOMT_JP", 1329),
+        ("MARY_MFOMT_US", 1416),
+        ("MARY_MFOMT_JP", 1416),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let symbols = parse_text_name_table(&source, &options).unwrap();
+        let mut owners = HashMap::new();
+        for script_id in 0..slot_count {
+            for text_name in symbols
+                .names(script_id, symbols.text_count(script_id))
+                .into_iter()
+                .flatten()
+            {
+                if let Some(previous_id) = owners.insert(text_name.clone(), script_id) {
+                    panic!(
+                        "{target}: text symbol {text_name} is shared by scripts {previous_id} and {script_id}"
+                    );
+                }
             }
         }
     }
@@ -12371,7 +12724,7 @@ fn rival_wedding_event_families_match_fomt_and_mfomt_slots() {
 }
 
 #[test]
-fn supermarket_purchase_completion_callables_keep_target_ids() {
+fn supermarket_shelf_redraw_callables_keep_target_ids() {
     for (target, rucksack_id, feather_id) in [
         ("MARY_FOMT_US", 0x0C9, 0x0CA),
         ("MARY_FOMT_JP", 0x0C9, 0x0CA),
@@ -12391,14 +12744,17 @@ fn supermarket_purchase_completion_callables_keep_target_ids() {
         )
         .unwrap();
         let map = callables.scope.callable_map();
-        assert_eq!(map["CompleteRucksackUpgrade"].0 .0, rucksack_id, "{target}");
         assert_eq!(
-            map["CompleteBlueFeatherPurchase"].0 .0, feather_id,
+            map["RedrawRucksackShelfAfterPurchase"].0 .0, rucksack_id,
+            "{target}"
+        );
+        assert_eq!(
+            map["RedrawBlueFeatherShelfAfterPurchase"].0 .0, feather_id,
             "{target}"
         );
         let table = parse_script_table("mary_script_table { TestShop, };\n", &options).unwrap();
         let scripts = parse_named_scripts(
-            "void TestShop(void) { CompleteRucksackUpgrade(); CompleteBlueFeatherPurchase(); }\n",
+            "void TestShop(void) { RedrawRucksackShelfAfterPurchase(); RedrawBlueFeatherShelfAfterPurchase(); }\n",
             &options,
             &callables.scope,
             &table,
@@ -12408,11 +12764,11 @@ fn supermarket_purchase_completion_callables_keep_target_ids() {
             decompile_script_named(&scripts.scripts[0].2, &callables.scope, "TestShop").unwrap();
         let source = format_named_script("TestShop", &raised).unwrap();
         assert!(
-            source.contains("CompleteRucksackUpgrade()"),
+            source.contains("RedrawRucksackShelfAfterPurchase()"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("CompleteBlueFeatherPurchase()"),
+            source.contains("RedrawBlueFeatherShelfAfterPurchase()"),
             "{target}: {source}"
         );
     }
@@ -14171,7 +14527,10 @@ fn entity_seat_aux_render_profile_and_fade_alias_callables_follow_all_targets() 
         )
         .unwrap();
         let callable_map = callables.scope.callable_map();
-        assert_eq!(callable_map["SetEntitySeatState"].0 .0, 0x007, "{target}");
+        assert_eq!(
+            callable_map["SetEntitySpritePriority"].0 .0, 0x007,
+            "{target}"
+        );
         assert_eq!(
             callable_map["SetEntityAuxRenderProfile"].0 .0, 0x010,
             "{target}"
@@ -14185,8 +14544,10 @@ fn entity_seat_aux_render_profile_and_fade_alias_callables_follow_all_targets() 
             parse_script_table("mary_script_table { TestEntityState, };\n", &options).unwrap();
         let parsed = parse_named_scripts(
             "void TestEntityState(void) {\n\
-             SetEntitySeatState(41, ENTITY_SEAT_STATE_SEATED);\n\
-             SetEntitySeatState(41, ENTITY_SEAT_STATE_RELEASED);\n\
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_0);\n\
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_1);\n\
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_2);\n\
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_3);\n\
              SetEntityAuxRenderProfile(70, 0);\n\
              SetEntityAuxRenderProfile(70, 1);\n\
              SetEntityAuxRenderProfile(70, 2);\n\
@@ -14203,6 +14564,10 @@ fn entity_seat_aux_render_profile_and_fade_alias_callables_follow_all_targets() 
                 .unwrap();
         let source = format_named_script("TestEntityState", &raised).unwrap();
         for symbol in [
+            "ENTITY_SPRITE_PRIORITY_0",
+            "ENTITY_SPRITE_PRIORITY_1",
+            "ENTITY_SPRITE_PRIORITY_2",
+            "ENTITY_SPRITE_PRIORITY_3",
             "ENTITY_AUX_RENDER_SMALL_ANIMAL",
             "ENTITY_AUX_RENDER_DEFAULT",
             "ENTITY_AUX_RENDER_LIVESTOCK",
@@ -14381,7 +14746,9 @@ fn recovered_unreferenced_callable_handlers_have_stable_target_ids() {
             ("CanReceiveArticle", 0x071 + shift),
             ("GetRucksackUpgradeLevel", 0x075 + shift),
             ("SetCharacterLove", 0x088 + shift * 3),
-            ("HasHarvestSpriteTaskExperience", 0x0CF + shift * 3),
+            ("SetEntityEventScript", 0x089 + shift * 3),
+            ("ClearEntityEventScript", 0x08A + shift * 3),
+            ("HasHarvestSpriteMinigameExperience", 0x0CF + shift * 3),
             ("HasShippedOneOfEachProduct", 0x0EB + shift * 3),
             ("GetAnimalAge", 0x10B + shift * 3),
             ("GetArticleIconId", 0x13C + shift * 4),
@@ -14426,11 +14793,34 @@ fn audited_entity_and_tutorial_helpers_round_trip_on_all_targets() {
                      NoOpTutorialEggDefinition(190, 72, 0);\n\
                      NoOpTutorialEggSelection(0);\n\
                      NoOpAnimalEventEntityInitialization(95, 2, 12);\n\
+                     SetEntityEventScript(ENTITY_70, 0);\n\
+                     SetEntityEventScript(ENTITY_71, 65535);\n\
+                     SetEntityEventScript(ENTITY_72, 65536);\n\
+                     SetEntityEventScript(ENTITY_73, -1);\n\
+                     ClearEntityEventScript(ENTITY_70);\n\
+                     SetGameTime(6, 0);\n\
+                     SetGameTime(23, 59);\n\
+                     SetGameTime(24, 60);\n\
+                     SetGameTime(31, 63);\n\
+                     SetGameTime(32, 64);\n\
+                     SetGameTime(-1, -1);\n\
                      }\n";
         let parsed = parse_named_scripts(input, &options, &callables.scope, &script_table).unwrap();
         let raised =
             decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestHelpers").unwrap();
         let source = format_named_script("TestHelpers", &raised).unwrap();
+        // Codec-only coverage: unreachable clock targets must never be run
+        // in the game. Preserve raw operands rather than normalizing them.
+        for call in [
+            "SetGameTime(6, 0)",
+            "SetGameTime(23, 59)",
+            "SetGameTime(24, 60)",
+            "SetGameTime(31, 63)",
+            "SetGameTime(32, 64)",
+            "SetGameTime(-1, -1)",
+        ] {
+            assert!(source.contains(call), "{target}: missing {call}: {source}");
+        }
         let rebuilt =
             parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
         assert_eq!(
@@ -14641,13 +15031,32 @@ fn camera_movement_callables_keep_their_target_ids() {
             callable_map["WaitForCameraMovement"].0 .0, 0x018,
             "{target}"
         );
+        let camera_speed = constants.user_type("MaryCameraMoveSpeed").unwrap();
+        for (value, name) in [
+            (1, "CAMERA_MOVE_SPEED_NOMINAL_1_PIXEL_PER_UPDATE"),
+            (2, "CAMERA_MOVE_SPEED_NOMINAL_2_PIXELS_PER_UPDATE"),
+            (5, "CAMERA_MOVE_SPEED_NOMINAL_5_PIXELS_PER_UPDATE"),
+        ] {
+            assert_eq!(
+                constants.typed_int_const_name(camera_speed, value),
+                Some(name),
+                "{target}: camera speed {value}"
+            );
+        }
+        assert!(
+            constants.typed_int_const_name(camera_speed, 3).is_none(),
+            "{target}: unobserved camera speed 3 must remain numeric"
+        );
 
         let script_table =
             parse_script_table("mary_script_table { TestMapChange, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
             "void TestMapChange(void) {\n\
              ChangeMap(MAP_SPRING_MINE_FLOOR_58, 120, 192);\n\
+             PanCameraTo(40, 120, 1);\n\
              PanCameraTo(120, 192, 2);\n\
+             PanCameraTo(184, 164, 5);\n\
+             PanCameraTo(184, 164, 3);\n\
              WaitForCameraMovement();\n\
              }\n",
             &options,
@@ -14664,7 +15073,25 @@ fn camera_movement_callables_keep_their_target_ids() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("PanCameraTo(X(120), Y(192), CAMERA_MOVE_SPEED_2)"),
+            source.contains(
+                "PanCameraTo(X(40), Y(120), CAMERA_MOVE_SPEED_NOMINAL_1_PIXEL_PER_UPDATE)"
+            ),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains(
+                "PanCameraTo(X(120), Y(192), CAMERA_MOVE_SPEED_NOMINAL_2_PIXELS_PER_UPDATE)"
+            ),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains(
+                "PanCameraTo(X(184), Y(164), CAMERA_MOVE_SPEED_NOMINAL_5_PIXELS_PER_UPDATE)"
+            ),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("PanCameraTo(X(184), Y(164), 3)"),
             "{target}: {source}"
         );
         let symbolic =
@@ -15180,6 +15607,37 @@ fn event_icon_callables_keep_their_target_ids() {
 
         let script_table =
             parse_script_table("mary_script_table { TestEventIcon, };\n", &options).unwrap();
+        for layer in 0..=4 {
+            let numeric = parse_named_scripts(
+                &format!("void TestEventIcon(void) {{ CreateEventIcon(0, 10, 20, {layer}, 0); }}"),
+                &options,
+                &callables.scope,
+                &script_table,
+            )
+            .unwrap();
+            let raised =
+                decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestEventIcon")
+                    .unwrap();
+            let source = format_named_script("TestEventIcon", &raised).unwrap();
+            if layer < 4 {
+                assert!(
+                    source.contains(&format!("EVENT_ICON_LAYER_{layer}")),
+                    "{target}: {source}"
+                );
+            } else {
+                assert!(
+                    source.contains("Y(20), 4,"),
+                    "must not truncate bytecode to layer zero: {target}: {source}"
+                );
+            }
+            let rebuilt =
+                parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+            assert_eq!(
+                encode_script(&numeric.scripts[0].2),
+                encode_script(&rebuilt.scripts[0].2),
+                "{target}: layer {layer}"
+            );
+        }
         let numeric = parse_named_scripts(
             "void TestEventIcon(void) { CreateEventIcon(0, 288, 123, 2, GetFoodIconId(FOOD_CAKE)); RemoveEventIcon(1); }\n",
             &options,
@@ -15381,12 +15839,32 @@ fn reference_page_callable_keeps_its_target_id() {
 }
 
 #[test]
-fn reference_and_letter_page_ids_follow_the_gender_specific_tables() {
-    for (target, tea_party_id, credits_id) in [
-        ("MARY_FOMT_US", 134, 135),
-        ("MARY_FOMT_JP", 134, 135),
-        ("MARY_MFOMT_US", 187, 188),
-        ("MARY_MFOMT_JP", 187, 188),
+fn reference_pages_and_mailbox_letters_follow_their_distinct_domains() {
+    for (target, letter_id, letter_name, credits_id) in [
+        (
+            "MARY_FOMT_US",
+            134,
+            "LETTER_HARVEST_SPRITE_TEA_PARTY_INVITATION",
+            135,
+        ),
+        (
+            "MARY_FOMT_JP",
+            134,
+            "LETTER_HARVEST_SPRITE_TEA_PARTY_INVITATION",
+            135,
+        ),
+        (
+            "MARY_MFOMT_US",
+            187,
+            "LETTER_HARVEST_SPRITE_TEA_PARTY_INVITATION",
+            188,
+        ),
+        (
+            "MARY_MFOMT_JP",
+            187,
+            "LETTER_HARVEST_SPRITE_TEA_PARTY_INVITATION",
+            188,
+        ),
     ] {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(
@@ -15404,7 +15882,7 @@ fn reference_and_letter_page_ids_follow_the_gender_specific_tables() {
             parse_script_table("mary_script_table { TestPages, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
             &format!(
-                "void TestPages(void) {{ DeliverLetter({tea_party_id}); ShowReferencePage({credits_id}); }}\n"
+                "void TestPages(void) {{ DeliverLetter({letter_id}); ShowReferencePage({credits_id}); }}\n"
             ),
             &options,
             &callables.scope,
@@ -15415,7 +15893,7 @@ fn reference_and_letter_page_ids_follow_the_gender_specific_tables() {
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestPages").unwrap();
         let source = format_named_script("TestPages", &raised).unwrap();
         assert!(
-            source.contains("DeliverLetter(REFERENCE_PAGE_HARVEST_SPRITE_TEA_PARTY_INVITATION)"),
+            source.contains(&format!("DeliverLetter({letter_name})")),
             "{target}: {source}"
         );
         assert!(
@@ -15429,6 +15907,104 @@ fn reference_and_letter_page_ids_follow_the_gender_specific_tables() {
             encode_script(&symbolic.scripts[0].2),
             "{target}"
         );
+    }
+}
+
+#[test]
+fn mailbox_callables_use_the_bounded_letter_id_domain() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let letter_type =
+            mary::ir::ValueType::UserType(constants.user_type("MaryLetterId").unwrap());
+        for name in [
+            "IsLetterWaiting",
+            "HasReceivedLetter",
+            "DeliverLetter",
+            "MarkLetterRead",
+        ] {
+            assert_eq!(
+                callables.scope.callable_map()[name].1.parameter_types(),
+                &[letter_type],
+                "{target} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mailbox_letter_symbols_cover_each_native_boundary_without_crossing_it() {
+    for (target, last_id, last_name, out_of_range) in [
+        ("MARY_FOMT_US", 136, "LETTER_USEFUL_CONTROLS", Some(137)),
+        ("MARY_FOMT_JP", 136, "LETTER_USEFUL_CONTROLS", Some(137)),
+        ("MARY_MFOMT_US", 189, "LETTER_USEFUL_CONTROLS", None),
+        ("MARY_MFOMT_JP", 189, "LETTER_USEFUL_CONTROLS", None),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestLetterBoundary, };\n", &options).unwrap();
+        let numeric = parse_named_scripts(
+            &format!("void TestLetterBoundary(void) {{ DeliverLetter({last_id}); }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestLetterBoundary",
+        )
+        .unwrap();
+        let source = format_named_script("TestLetterBoundary", &raised).unwrap();
+        assert!(
+            source.contains(&format!("DeliverLetter({last_name})")),
+            "{target}: {source}"
+        );
+
+        if let Some(value) = out_of_range {
+            let numeric = parse_named_scripts(
+                &format!("void TestLetterBoundary(void) {{ DeliverLetter({value}); }}\n"),
+                &options,
+                &callables.scope,
+                &script_table,
+            )
+            .unwrap();
+            let raised = decompile_script_named(
+                &numeric.scripts[0].2,
+                &callables.scope,
+                "TestLetterBoundary",
+            )
+            .unwrap();
+            let source = format_named_script("TestLetterBoundary", &raised).unwrap();
+            assert!(source.contains("DeliverLetter(137)"), "{target}: {source}");
+        }
     }
 }
 
@@ -15595,7 +16171,7 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
                 .unwrap();
         let source = format_named_script("TestNameEntry", &raised).unwrap();
         assert!(
-            source.contains("OpenNameEntry(NAME_ENTRY_HORSE, 0)"),
+            source.contains("OpenNameEntry(NAME_ENTRY_HORSE, NAME_ENTRY_SINGLETON_SLOT)"),
             "{target}: {source}"
         );
         let symbolic =
@@ -15617,7 +16193,7 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
             decompile_script_named(&child.scripts[0].2, &callables.scope, "TestNameEntry").unwrap();
         let source = format_named_script("TestNameEntry", &raised).unwrap();
         assert!(
-            source.contains("OpenNameEntry(NAME_ENTRY_CHILD, 0)"),
+            source.contains("OpenNameEntry(NAME_ENTRY_CHILD, NAME_ENTRY_SINGLETON_SLOT)"),
             "{target}: {source}"
         );
 
@@ -15646,7 +16222,7 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("OpenNameEntry(NAME_ENTRY_CHILD, 0)"),
+            source.contains("OpenNameEntry(NAME_ENTRY_CHILD, NAME_ENTRY_SINGLETON_SLOT)"),
             "{target}: {source}"
         );
         let symbolic =
@@ -15655,6 +16231,22 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
             encode_script(&dependent_slots.scripts[0].2),
             encode_script(&symbolic.scripts[0].2),
             "{target}"
+        );
+
+        let spouse = parse_named_scripts(
+            "void TestNameEntry(void) { OpenNameEntry(5, 0); }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&spouse.scripts[0].2, &callables.scope, "TestNameEntry")
+                .unwrap();
+        let source = format_named_script("TestNameEntry", &raised).unwrap();
+        assert!(
+            source.contains("OpenNameEntry(NAME_ENTRY_SPOUSE_NICKNAME, NAME_ENTRY_SINGLETON_SLOT)"),
+            "{target}: {source}"
         );
     }
 }
@@ -15910,7 +16502,7 @@ fn caught_fish_state_callables_keep_their_target_ids() {
         );
         assert_eq!(map["GetCaughtFishSize"].0 .0, size_id, "{target}");
         assert_eq!(map["IsCaughtFishMaximumSize"].0 .0, maximum_id, "{target}");
-        assert_eq!(map["IsCaughtFishRiverKing"].0 .0, king_id, "{target}");
+        assert_eq!(map["IsCaughtFishKing"].0 .0, king_id, "{target}");
     }
 }
 
@@ -16338,7 +16930,7 @@ fn create_player_child_entity_keeps_target_id_for_all_targets() {
 }
 
 #[test]
-fn select_next_cursed_tool_keeps_target_id_for_all_targets() {
+fn cycle_backward_to_non_cursed_tool_keeps_target_id_for_all_targets() {
     for (target, callable_id) in [
         ("MARY_FOMT_US", 0x146),
         ("MARY_FOMT_JP", 0x146),
@@ -16358,7 +16950,9 @@ fn select_next_cursed_tool_keeps_target_id_for_all_targets() {
         )
         .unwrap();
         assert_eq!(
-            callables.scope.callable_map()["SelectNextCursedTool"].0 .0,
+            callables.scope.callable_map()["CycleBackwardToNonCursedTool"]
+                .0
+                 .0,
             callable_id,
             "{target}"
         );
@@ -17276,9 +17870,7 @@ fn held_actor_graphic_callable_preserves_target_specific_animation_ids() {
                 .unwrap();
         let source = format_named_script("TestHoldActor", &raised).unwrap();
         assert!(
-            source.contains(&format!(
-                "BeginHoldingActorGraphic(ANIMATION_ID_{animation_id:04});"
-            )),
+            source.contains("BeginHoldingActorGraphic(ANIMATION_CHICKEN_HELD);"),
             "{target}: {source}"
         );
         let rebuilt =
@@ -17287,6 +17879,21 @@ fn held_actor_graphic_callable_preserves_target_specific_animation_ids() {
             encode_script(&parsed.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
+        );
+
+        let legacy = parse_named_scripts(
+            &format!(
+                "void TestHoldActor(void) {{ BeginHoldingActorGraphic(ANIMATION_ID_{animation_id:04}); }}\n"
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy alias"
         );
     }
 }
@@ -17405,6 +18012,253 @@ fn fixed_field_width_text_number_callable_follows_all_targets() {
 }
 
 #[test]
+fn relationship_numeric_boundaries_are_not_folded_or_truncated() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let table =
+            parse_script_table("mary_script_table { TestRelationshipBoundary, };", &options)
+                .unwrap();
+        // The source uses an invalid character as well: round-tripping is not
+        // permission to execute it, nor an excuse to optimize away the call.
+        let values = [-2147483648i32, -1, 0, 255, 256, 65535, 65536, 2147483647];
+        let mut calls = Vec::new();
+        for callable in [
+            "AddNpcFriendship",
+            "SetNpcFriendship",
+            "AddCharacterLove",
+            "SetCharacterLove",
+        ] {
+            for value in values {
+                calls.push(format!("{callable}(CHARACTER_KAREN, {value});"));
+            }
+            calls.push(format!("{callable}(65536, -1);"));
+        }
+        let parsed = parse_named_scripts(
+            &format!(
+                "void TestRelationshipBoundary(void) {{ {} }}",
+                calls.join("\n")
+            ),
+            &options,
+            &callables.scope,
+            &table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &parsed.scripts[0].2,
+            &callables.scope,
+            "TestRelationshipBoundary",
+        )
+        .unwrap();
+        let source = format_named_script("TestRelationshipBoundary", &raised).unwrap();
+        for call in calls {
+            assert!(source.contains(&call), "{target}: missing {call}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+    }
+}
+
+#[test]
+fn random_range_operands_preserve_native_boundaries() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let table =
+            parse_script_table("mary_script_table { TestRandomBoundary, };", &options).unwrap();
+        // Compilation is lossless, not execution or parameter sanitization:
+        // retain inverted and overflowing ranges too, without folding calls
+        // or adding the mask belonging only to RandomU15.
+        let calls = [
+            "RandomIntInclusive(-10, 10)",
+            "RandomIntInclusive(0, 65535)",
+            "RandomIntInclusive(7, 7)",
+            "RandomIntInclusive(10, -10)",
+            "RandomIntInclusive(0, 2147483647)",
+            "RandomIntInclusive(-2147483648, 2147483647)",
+            "RandomU15()",
+        ];
+        let body = calls
+            .iter()
+            .map(|call| format!("VarSet(0, {call});"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed = parse_named_scripts(
+            &format!("void TestRandomBoundary(void) {{ {body} }}"),
+            &options,
+            &callables.scope,
+            &table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestRandomBoundary")
+                .unwrap();
+        let source = format_named_script("TestRandomBoundary", &raised).unwrap();
+        for call in calls {
+            assert!(source.contains(call), "{target}: missing {call}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+    }
+}
+
+#[test]
+fn audio_out_of_domain_values_are_not_normalized() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let table =
+            parse_script_table("mary_script_table { TestAudioBoundary, };", &options).unwrap();
+        let parsed = parse_named_scripts("void TestAudioBoundary(void) { PlaySong(3, 65536); PlaySong(-1, -1); PlaySong(65536, 211); }", &options, &callables.scope, &table).unwrap();
+        let raised =
+            decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestAudioBoundary")
+                .unwrap();
+        let source = format_named_script("TestAudioBoundary", &raised).unwrap();
+        for expected in [
+            "PlaySong(3, 65536);",
+            "PlaySong(-1, -1);",
+            "PlaySong(65536, 211);",
+        ] {
+            assert!(source.contains(expected), "{target}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+        let reused = parse_named_scripts(
+            "void TestAudioBoundary(void) { int value; if (IsPlayerHoldingNothing()) { value = 1; } else { value = 2; } WaitFrames(1); PlaySong(value, 6); value = 6; WaitFrames(1); PlaySong(0, value); value = 65536; PlaySong(0, value); }",
+            &options, &callables.scope, &table,
+        ).unwrap();
+        let raised =
+            decompile_script_named(&reused.scripts[0].2, &callables.scope, "TestAudioBoundary")
+                .unwrap();
+        let source = format_named_script("TestAudioBoundary", &raised).unwrap();
+        for expected in [
+            "= AUDIO_START_WEAK;",
+            "= AUDIO_START_OR_CONTINUE;",
+            "= AUDIO_BGM_WEDDING;",
+            "= 65536;",
+        ] {
+            assert!(source.contains(expected), "{target}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&reused.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+        let conflicted = parse_named_scripts(
+            "void TestAudioBoundary(void) { int value; if (IsPlayerHoldingNothing()) { value = 1; } else { value = 2; } WaitFrames(1); PlaySong(value, value); value = 1; PlaySong(value, 6); }",
+            &options, &callables.scope, &table,
+        ).unwrap();
+        let raised = decompile_script_named(
+            &conflicted.scripts[0].2,
+            &callables.scope,
+            "TestAudioBoundary",
+        )
+        .unwrap();
+        let source = format_named_script("TestAudioBoundary", &raised).unwrap();
+        // Both incoming definitions have conflicting uses. The later fresh
+        // definition has only mode uses and must regain its precise domain.
+        for expected in ["= 1;", "= 2;", "= AUDIO_START_WEAK;"] {
+            assert!(source.contains(expected), "{target}: {source}");
+        }
+        assert!(
+            !source.contains("= AUDIO_START_OR_CONTINUE;"),
+            "{target}: {source}"
+        );
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&conflicted.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+        let switched = parse_named_scripts(
+            "void TestAudioBoundary(void) { int mode; switch (GetEntityFacing(0)) { case 0: mode = 0; break; case 1: if (IsPlayerHoldingNothing()) { mode = 1; } else { mode = 2; } break; default: mode = 3; break; } WaitFrames(1); switch (mode) { case 1: WaitFrames(2); break; case 2: WaitFrames(3); break; default: break; } PlaySong(mode, 6); }",
+            &options, &callables.scope, &table,
+        ).unwrap();
+        let raised = decompile_script_named(
+            &switched.scripts[0].2,
+            &callables.scope,
+            "TestAudioBoundary",
+        )
+        .unwrap();
+        let source = format_named_script("TestAudioBoundary", &raised).unwrap();
+        for expected in [
+            "= AUDIO_START;",
+            "= AUDIO_START_WEAK;",
+            "= AUDIO_START_OR_CONTINUE;",
+            "= 3;",
+            "case AUDIO_START_WEAK:",
+            "case AUDIO_START_OR_CONTINUE:",
+        ] {
+            assert!(source.contains(expected), "{target}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&switched.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+    }
+}
+
+#[test]
 fn relative_entity_position_callable_follows_all_targets() {
     for target in [
         "MARY_FOMT_US",
@@ -17443,7 +18297,7 @@ fn relative_entity_position_callable_follows_all_targets() {
             decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestOffset").unwrap();
         let source = format_named_script("TestOffset", &raised).unwrap();
         assert!(
-            source.contains("OffsetEntityPosition(ENTITY_STAID, -8, 16);"),
+            source.contains("OffsetEntityPosition(ENTITY_STAID, X(-8), Y(16));"),
             "{target}: {source}"
         );
         let rebuilt =
@@ -17452,6 +18306,43 @@ fn relative_entity_position_callable_follows_all_targets() {
             encode_script(&parsed.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
+        );
+        let staged = parse_named_scripts(
+            "void TestOffset(void) { int delta; if (GetEntityFacing(0) == 0) { delta = -8; } else { delta = -16; } WaitFrames(1); OffsetEntityPosition(36, delta, 0); delta = 16; OffsetEntityPosition(36, 0, delta); }",
+            &options, &callables.scope, &script_table,
+        ).unwrap();
+        let raised =
+            decompile_script_named(&staged.scripts[0].2, &callables.scope, "TestOffset").unwrap();
+        let source = format_named_script("TestOffset", &raised).unwrap();
+        for expected in ["X(-8)", "X(-16)", "Y(16)"] {
+            assert!(
+                source.contains(expected),
+                "{target}: missing {expected} after branch/reassignment:\n{source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&staged.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: delayed axis reuse"
+        );
+        let conflicted = parse_named_scripts(
+            "void TestOffset(void) { int delta; delta = 16; OffsetEntityPosition(36, delta, delta); }",
+            &options, &callables.scope, &script_table,
+        ).unwrap();
+        let raised =
+            decompile_script_named(&conflicted.scripts[0].2, &callables.scope, "TestOffset")
+                .unwrap();
+        let source = format_named_script("TestOffset", &raised).unwrap();
+        assert!(!source.contains("X(16)") && !source.contains("Y(16)"),
+            "{target}: one definition shared by both axes must not acquire a guessed axis:\n{source}");
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&conflicted.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: conflicting axis uses"
         );
     }
 }
@@ -17544,7 +18435,7 @@ fn farm_horse_lifecycle_callables_follow_all_targets() {
         let script_table =
             parse_script_table("mary_script_table { TestHorse, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
-            "void TestHorse(void) { CreateFarmHorse(0, 1, 2, 196, 145); RemoveFarmHorse(0, 0); }\n",
+            "void TestHorse(void) { CreateFarmHorse(0, 1, 2, 196, 145); CreateFarmHorse(1, 1, 2, 196, 145); CreateFarmHorse(2, 1, 2, 196, 145); RemoveFarmHorse(0, 0); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -17558,6 +18449,19 @@ fn farm_horse_lifecycle_callables_follow_all_targets() {
             "{target}: {source}"
         );
         assert!(source.contains("MAP_FARM"), "{target}: {source}");
+        assert!(
+            source.contains("CreateFarmHorse(FALSE,"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("CreateFarmHorse(TRUE,"),
+            "{target}: {source}"
+        );
+        assert!(source.contains("CreateFarmHorse(2,"), "{target}: {source}");
+        assert!(
+            !source.contains("CreateFarmHorse(FACING_"),
+            "{target}: {source}"
+        );
         assert!(
             source.contains("RemoveFarmHorse(FALSE, 0)"),
             "{target}: {source}"
@@ -17684,6 +18588,2086 @@ fn complete_animation_table_preserves_every_physical_slot() {
             error.to_string().contains(&out_of_range_symbol),
             "{target}: {error}"
         );
+    }
+}
+
+#[test]
+fn player_fishing_rod_animation_group_is_canonical_on_all_targets() {
+    let animations = [
+        (82, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_1"),
+        (86, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_2"),
+        (90, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_3"),
+        (94, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_4"),
+        (98, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_5"),
+        (102, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_6"),
+        (106, "ANIMATION_PLAYER_FISHING_ROD_CHARGE_STAGE_7"),
+        (110, "ANIMATION_PLAYER_FISHING_ROD_CATCH"),
+        (114, "ANIMATION_PLAYER_FISHING_ROD_COLLECT_FISH"),
+        (118, "ANIMATION_PLAYER_FISHING_ROD_WAITING"),
+    ];
+
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestFishingAnimations, };\n", &options)
+                .unwrap();
+        let animation_type = constants.user_type("MaryAnimationId").unwrap();
+
+        for (id, symbol) in animations {
+            assert_eq!(
+                constants.typed_int_const_name(animation_type, id),
+                Some(symbol),
+                "{target}: animation {id} canonical name"
+            );
+
+            let numeric = parse_named_scripts(
+                &format!(
+                    "void TestFishingAnimations(void) {{ SetEntityAnim(ENTITY_PLAYER, {id}); }}\n"
+                ),
+                &options,
+                &callables.scope,
+                &script_table,
+            )
+            .unwrap();
+            let raised = decompile_script_named(
+                &numeric.scripts[0].2,
+                &callables.scope,
+                "TestFishingAnimations",
+            )
+            .unwrap();
+            let source = format_named_script("TestFishingAnimations", &raised).unwrap();
+            assert!(source.contains(symbol), "{target}: {source}");
+            let rebuilt =
+                parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+            assert_eq!(
+                encode_script(&numeric.scripts[0].2),
+                encode_script(&rebuilt.scripts[0].2),
+                "{target}: {symbol}"
+            );
+
+            let legacy = parse_named_scripts(
+                &format!(
+                    "void TestFishingAnimations(void) {{ SetEntityAnim(ENTITY_PLAYER, ANIMATION_ID_{id:04}); }}\n"
+                ),
+                &options,
+                &callables.scope,
+                &script_table,
+            )
+            .unwrap();
+            assert_eq!(
+                encode_script(&numeric.scripts[0].2),
+                encode_script(&legacy.scripts[0].2),
+                "{target}: legacy animation alias {id}"
+            );
+        }
+    }
+}
+
+#[test]
+fn proven_player_hold_state_animations_are_canonical_on_all_targets() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestAnimations, };\n", &options).unwrap();
+        let numeric = parse_named_scripts(
+            "void TestAnimations(void) { SetEntityAnim(0, 326); SetEntityAnim(0, 402); SetEntityAnim(0, 338); SetEntityAnim(0, 454); SetEntityAnim(0, 342); }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestAnimations")
+                .unwrap();
+        let source = format_named_script("TestAnimations", &raised).unwrap();
+        for symbol in [
+            "ANIMATION_PLAYER_PREPARE_TO_HOLD_ITEM",
+            "ANIMATION_PLAYER_IDLE_EMPTY_HANDED",
+            "ANIMATION_PLAYER_IDLE_HOLDING_ITEM",
+            "ANIMATION_PLAYER_WALK_EMPTY_HANDED",
+            "ANIMATION_PLAYER_WALK_HOLDING_ITEM",
+        ] {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+
+        let legacy = parse_named_scripts(
+            "void TestAnimations(void) { SetEntityAnim(0, ANIMATION_ID_0326); SetEntityAnim(0, ANIMATION_ID_0402); SetEntityAnim(0, ANIMATION_ID_0338); SetEntityAnim(0, ANIMATION_ID_0454); SetEntityAnim(0, ANIMATION_ID_0342); }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+}
+
+#[test]
+fn rick_idle_walk_animations_are_shared_by_all_targets() {
+    let values = [531, 535];
+    let symbols = ["ANIMATION_RICK_IDLE", "ANIMATION_RICK_WALK"];
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestNpcAnimations, };\n", &options).unwrap();
+        let numeric_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, {value});"))
+            .collect::<String>();
+        let numeric_source = format!("void TestNpcAnimations(void) {{ {numeric_body} }}\n");
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestNpcAnimations")
+                .unwrap();
+        let source = format_named_script("TestNpcAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy_source = format!("void TestNpcAnimations(void) {{ {legacy_body} }}\n");
+        let legacy =
+            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+}
+
+#[test]
+fn child_growth_animation_slots_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [8, 12, 615, 619, 623, 631]),
+        ("MARY_FOMT_JP", [8, 12, 615, 619, 623, 631]),
+        ("MARY_MFOMT_US", [8, 12, 627, 631, 635, 643]),
+        ("MARY_MFOMT_JP", [8, 12, 627, 631, 635, 643]),
+    ] {
+        let symbols = [
+            "ANIMATION_CHILD_NEWBORN",
+            "ANIMATION_CHILD_INFANT_SLEEPING",
+            "ANIMATION_CHILD_WALKING_IDLE",
+            "ANIMATION_CHILD_PRE_WALKING_IDLE",
+            "ANIMATION_CHILD_FIRST_STEPS_WALK",
+            "ANIMATION_CHILD_SLEEPING",
+        ];
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestChildAnimations, };\n", &options).unwrap();
+        let body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_CHILD, {value});"))
+            .collect::<String>();
+        let parsed = parse_named_scripts(
+            &format!("void TestChildAnimations(void) {{ {body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &parsed.scripts[0].2,
+            &callables.scope,
+            "TestChildAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestChildAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_CHILD, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy = parse_named_scripts(
+            &format!("void TestChildAnimations(void) {{ {legacy_body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&parsed.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+}
+
+#[test]
+fn chicken_idle_walk_animations_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [1820, 1824]),
+        ("MARY_FOMT_JP", [1820, 1824]),
+        ("MARY_MFOMT_US", [1868, 1872]),
+        ("MARY_MFOMT_JP", [1868, 1872]),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestChickenAnimations, };\n", &options)
+                .unwrap();
+        let numeric = parse_named_scripts(
+            &format!(
+                "void TestChickenAnimations(void) {{ SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); }}\n",
+                values[0], values[1]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestChickenAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestChickenAnimations", &raised).unwrap();
+        assert!(
+            source.contains("ANIMATION_CHICKEN_IDLE"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("ANIMATION_CHICKEN_WALK"),
+            "{target}: {source}"
+        );
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy = parse_named_scripts(
+            &format!(
+                "void TestChickenAnimations(void) {{ SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); }}\n",
+                values[0], values[1]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn farm_dog_idle_walk_animations_follow_each_game_family() {
+    for (target, values, sick_symbol) in [
+        ("MARY_FOMT_US", [824, 828, 942], None),
+        ("MARY_FOMT_JP", [824, 828, 942], None),
+        (
+            "MARY_MFOMT_US",
+            [860, 864, 978],
+            Some("ANIMATION_FARM_DOG_SICK_IDLE"),
+        ),
+        (
+            "MARY_MFOMT_JP",
+            [860, 864, 978],
+            Some("ANIMATION_FARM_DOG_SICK_IDLE"),
+        ),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestDogAnimations, };\n", &options).unwrap();
+        let numeric = parse_named_scripts(
+            &format!(
+                "void TestDogAnimations(void) {{ SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); }}\n",
+                values[0], values[1], values[2]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestDogAnimations")
+                .unwrap();
+        let source = format_named_script("TestDogAnimations", &raised).unwrap();
+        assert!(
+            source.contains("ANIMATION_FARM_DOG_IDLE"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("ANIMATION_FARM_DOG_WALK"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("ANIMATION_FARM_DOG_YOUNG_IDLE"),
+            "{target}: {source}"
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_FARM_DOG_SICK_IDLE"),
+            sick_symbol.map(|_| 892),
+            "{target}: sickness slot must remain target-local"
+        );
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy = parse_named_scripts(
+            &format!(
+                "void TestDogAnimations(void) {{ SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); }}\n",
+                values[0], values[1], values[2]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn cliff_hospital_and_collapse_animations_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [659, 663, 667]),
+        ("MARY_FOMT_JP", [659, 663, 667]),
+        ("MARY_MFOMT_US", [671, 675, 679]),
+        ("MARY_MFOMT_JP", [671, 675, 679]),
+    ] {
+        let symbols = [
+            "ANIMATION_CLIFF_HOSPITAL_BED_IDLE",
+            "ANIMATION_CLIFF_HOSPITAL_BED_REACT",
+            "ANIMATION_CLIFF_COLLAPSE_FORWARD",
+        ];
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestCliffAnimations, };\n", &options).unwrap();
+        let body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_CLIFF, {value});"))
+            .collect::<String>();
+        let numeric = parse_named_scripts(
+            &format!("void TestCliffAnimations(void) {{ {body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestCliffAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestCliffAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn cow_and_sheep_idle_walk_animations_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [684, 688, 2333, 2337]),
+        ("MARY_FOMT_JP", [684, 688, 2333, 2337]),
+        ("MARY_MFOMT_US", [708, 712, 2405, 2409]),
+        ("MARY_MFOMT_JP", [708, 712, 2405, 2409]),
+    ] {
+        let symbols = [
+            "ANIMATION_COW_IDLE",
+            "ANIMATION_COW_WALK",
+            "ANIMATION_SHEEP_IDLE",
+            "ANIMATION_SHEEP_WALK",
+        ];
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table = parse_script_table(
+            "mary_script_table { TestLivestockAnimations, };\n",
+            &options,
+        )
+        .unwrap();
+        let body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_70, {value});"))
+            .collect::<String>();
+        let numeric = parse_named_scripts(
+            &format!("void TestLivestockAnimations(void) {{ {body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestLivestockAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestLivestockAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_70, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy = parse_named_scripts(
+            &format!("void TestLivestockAnimations(void) {{ {legacy_body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn young_livestock_idle_animations_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [1845, 764, 2413]),
+        ("MARY_FOMT_JP", [1845, 764, 2413]),
+        ("MARY_MFOMT_US", [1893, 788, 2485]),
+        ("MARY_MFOMT_JP", [1893, 788, 2485]),
+    ] {
+        let symbols = [
+            "ANIMATION_CHICK_IDLE",
+            "ANIMATION_CALF_IDLE",
+            "ANIMATION_LAMB_IDLE",
+        ];
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table = parse_script_table(
+            "mary_script_table { TestYoungAnimalAnimations, };\n",
+            &options,
+        )
+        .unwrap();
+        let body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_97, {value});"))
+            .collect::<String>();
+        let numeric = parse_named_scripts(
+            &format!("void TestYoungAnimalAnimations(void) {{ {body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestYoungAnimalAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestYoungAnimalAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(ENTITY_97, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy = parse_named_scripts(
+            &format!("void TestYoungAnimalAnimations(void) {{ {legacy_body} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn foal_idle_walk_animations_follow_each_game_family() {
+    for (target, values) in [
+        ("MARY_FOMT_US", [1946, 1950]),
+        ("MARY_FOMT_JP", [1946, 1950]),
+        ("MARY_MFOMT_US", [1994, 1998]),
+        ("MARY_MFOMT_JP", [1994, 1998]),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestFoalAnimations, };\n", &options).unwrap();
+        let numeric = parse_named_scripts(
+            &format!(
+                "void TestFoalAnimations(void) {{ SetEntityAnim(ENTITY_FARM_HORSE, {}); SetEntityAnim(ENTITY_FARM_HORSE, {}); }}\n",
+                values[0], values[1]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestFoalAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestFoalAnimations", &raised).unwrap();
+        assert!(source.contains("ANIMATION_FOAL_IDLE"), "{target}: {source}");
+        assert!(source.contains("ANIMATION_FOAL_WALK"), "{target}: {source}");
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy = parse_named_scripts(
+            &format!(
+                "void TestFoalAnimations(void) {{ SetEntityAnim(ENTITY_FARM_HORSE, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_FARM_HORSE, ANIMATION_ID_{:04}); }}\n",
+                values[0], values[1]
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn sheared_sheep_idle_animation_follows_each_game_family() {
+    for (target, value) in [
+        ("MARY_FOMT_US", 2361),
+        ("MARY_FOMT_JP", 2361),
+        ("MARY_MFOMT_US", 2433),
+        ("MARY_MFOMT_JP", 2433),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table = parse_script_table(
+            "mary_script_table { TestShearedSheepAnimation, };\n",
+            &options,
+        )
+        .unwrap();
+        let numeric = parse_named_scripts(
+            &format!(
+                "void TestShearedSheepAnimation(void) {{ SetEntityAnim(ENTITY_96, {value}); }}\n"
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestShearedSheepAnimation",
+        )
+        .unwrap();
+        let source = format_named_script("TestShearedSheepAnimation", &raised).unwrap();
+        assert!(
+            source.contains("ANIMATION_SHEEP_SHEARED_IDLE"),
+            "{target}: {source}"
+        );
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2)
+        );
+
+        let legacy = parse_named_scripts(
+            &format!(
+                "void TestShearedSheepAnimation(void) {{ SetEntityAnim(ENTITY_96, ANIMATION_ID_{value:04}); }}\n"
+            ),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2)
+        );
+    }
+}
+
+#[test]
+fn gender_specific_npc_animation_pairs_follow_each_physical_table() {
+    let symbols = [
+        "ANIMATION_POPURI_IDLE",
+        "ANIMATION_POPURI_WALK",
+        "ANIMATION_LILLIA_IDLE",
+        "ANIMATION_LILLIA_WALK",
+        "ANIMATION_HARVEST_GODDESS_IDLE",
+        "ANIMATION_HARVEST_GODDESS_LEVITATE",
+        "ANIMATION_ELLEN_IDLE",
+        "ANIMATION_SASHA_IDLE",
+        "ANIMATION_SASHA_WALK",
+        "ANIMATION_DOUG_IDLE",
+        "ANIMATION_DOUG_WALK",
+        "ANIMATION_ANNA_IDLE",
+        "ANIMATION_ANNA_WALK",
+        "ANIMATION_THOMAS_IDLE",
+        "ANIMATION_THOMAS_WALK",
+        "ANIMATION_DUKE_IDLE",
+        "ANIMATION_DUKE_WALK",
+        "ANIMATION_ZACK_IDLE",
+        "ANIMATION_ZACK_WALK",
+        "ANIMATION_DOCTOR_IDLE",
+        "ANIMATION_DOCTOR_WALK",
+        "ANIMATION_KAREN_IDLE",
+        "ANIMATION_KAREN_WALK",
+        "ANIMATION_ANN_IDLE",
+        "ANIMATION_ANN_WALK",
+        "ANIMATION_MARY_IDLE",
+        "ANIMATION_MARY_WALK",
+        "ANIMATION_ELLI_IDLE",
+        "ANIMATION_ELLI_WALK",
+        "ANIMATION_GOURMET_IDLE",
+        "ANIMATION_GOURMET_WALK",
+        "ANIMATION_GOURMET_TASTE_FOOD",
+        "ANIMATION_JEFF_IDLE",
+        "ANIMATION_JEFF_WALK",
+        "ANIMATION_BASIL_IDLE",
+        "ANIMATION_BASIL_WALK",
+        "ANIMATION_STU_IDLE",
+        "ANIMATION_STU_WALK",
+        "ANIMATION_MANNA_IDLE",
+        "ANIMATION_MANNA_WALK",
+        "ANIMATION_CARTER_IDLE",
+        "ANIMATION_CARTER_WALK",
+        "ANIMATION_KAI_IDLE",
+        "ANIMATION_KAI_WALK",
+        "ANIMATION_GRAY_IDLE",
+        "ANIMATION_GRAY_WALK",
+        "ANIMATION_SAIBARA_IDLE",
+        "ANIMATION_SAIBARA_WALK",
+        "ANIMATION_CLIFF_IDLE",
+        "ANIMATION_CLIFF_WALK",
+        "ANIMATION_FARM_HORSE_IDLE",
+        "ANIMATION_FARM_HORSE_WALK",
+        "ANIMATION_WON_IDLE",
+        "ANIMATION_WON_WALK",
+        "ANIMATION_HARRIS_IDLE",
+        "ANIMATION_HARRIS_WALK",
+        "ANIMATION_GOTZ_IDLE",
+        "ANIMATION_GOTZ_WALK",
+        "ANIMATION_MAY_IDLE",
+        "ANIMATION_MAY_WALK",
+        "ANIMATION_BARLEY_IDLE",
+        "ANIMATION_BARLEY_WALK",
+        "ANIMATION_STAID_IDLE",
+        "ANIMATION_TIMID_IDLE",
+        "ANIMATION_NAPPY_IDLE",
+        "ANIMATION_BOLD_IDLE",
+        "ANIMATION_CHEF_IDLE",
+        "ANIMATION_AQUA_IDLE",
+        "ANIMATION_HOGGY_IDLE",
+        "ANIMATION_TIMID_SLEEPING",
+        "ANIMATION_AQUA_SINGING",
+        "ANIMATION_KAPPA_IDLE",
+        "ANIMATION_KAPPA_HANDS_TOGETHER",
+    ];
+    for (target, values) in [
+        (
+            "MARY_FOMT_US",
+            [
+                559, 563, 607, 611, 1641, 1653, 1669, 1733, 1737, 1970, 1974, 2123, 2127, 2143,
+                2147, 2240, 2244, 792, 796, 800, 804, 1681, 1685, 1982, 1986, 2067, 2071, 2180,
+                2184, 1657, 1661, 1665, 1673, 1677, 2059, 2063, 2232, 2236, 2256, 2260, 2284, 2288,
+                2306, 2310, 2441, 2445, 2465, 2469, 635, 639, 1914, 1918, 2135, 2139, 2276, 2280,
+                2515, 2519, 2535, 2539, 2543, 2547, 992, 1076, 1160, 1244, 1328, 1412, 1496, 1084,
+                1424, 2046, 2050,
+            ],
+        ),
+        (
+            "MARY_FOMT_JP",
+            [
+                559, 563, 607, 611, 1641, 1653, 1669, 1733, 1737, 1970, 1974, 2123, 2127, 2143,
+                2147, 2240, 2244, 792, 796, 800, 804, 1681, 1685, 1982, 1986, 2067, 2071, 2180,
+                2184, 1657, 1661, 1665, 1673, 1677, 2059, 2063, 2232, 2236, 2256, 2260, 2284, 2288,
+                2306, 2310, 2441, 2445, 2465, 2469, 635, 639, 1914, 1918, 2135, 2139, 2276, 2280,
+                2515, 2519, 2535, 2539, 2543, 2547, 992, 1076, 1160, 1244, 1328, 1412, 1496, 1084,
+                1424, 2046, 2050,
+            ],
+        ),
+        (
+            "MARY_MFOMT_US",
+            [
+                571, 575, 619, 623, 1677, 1689, 1717, 1781, 1785, 2018, 2022, 2171, 2175, 2203,
+                2207, 2300, 2304, 816, 820, 824, 828, 1729, 1733, 2030, 2034, 2115, 2119, 2240,
+                2244, 1693, 1697, 1701, 1721, 1725, 2107, 2111, 2292, 2296, 2316, 2320, 2344, 2348,
+                2366, 2370, 2513, 2517, 2549, 2553, 647, 651, 1962, 1966, 2183, 2187, 2336, 2340,
+                2599, 2603, 2619, 2623, 2627, 2631, 1028, 1112, 1196, 1280, 1364, 1448, 1532, 1120,
+                1460, 2094, 2098,
+            ],
+        ),
+        (
+            "MARY_MFOMT_JP",
+            [
+                571, 575, 619, 623, 1677, 1689, 1717, 1781, 1785, 2018, 2022, 2171, 2175, 2203,
+                2207, 2300, 2304, 816, 820, 824, 828, 1729, 1733, 2030, 2034, 2115, 2119, 2240,
+                2244, 1693, 1697, 1701, 1721, 1725, 2107, 2111, 2292, 2296, 2316, 2320, 2344, 2348,
+                2366, 2370, 2513, 2517, 2549, 2553, 647, 651, 1962, 1966, 2183, 2187, 2336, 2340,
+                2599, 2603, 2619, 2623, 2627, 2631, 1028, 1112, 1196, 1280, 1364, 1448, 1532, 1120,
+                1460, 2094, 2098,
+            ],
+        ),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestShiftedAnimations, };\n", &options)
+                .unwrap();
+        let semantic_body = symbols
+            .iter()
+            .map(|symbol| format!("SetEntityAnim(0, {symbol});"))
+            .collect::<String>();
+        let semantic_source = format!("void TestShiftedAnimations(void) {{ {semantic_body} }}\n");
+        let semantic =
+            parse_named_scripts(&semantic_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        let numeric_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, {value});"))
+            .collect::<String>();
+        let numeric_source = format!("void TestShiftedAnimations(void) {{ {numeric_body} }}\n");
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        assert_eq!(
+            encode_script(&semantic.scripts[0].2),
+            encode_script(&numeric.scripts[0].2),
+            "{target} physical IDs"
+        );
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestShiftedAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestShiftedAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy_source = format!("void TestShiftedAnimations(void) {{ {legacy_body} }}\n");
+        let legacy =
+            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+}
+
+fn assert_animation_pair_round_trip(
+    target: &str,
+    idle: i64,
+    walk: i64,
+    idle_symbol: &str,
+    walk_symbol: &str,
+) {
+    let options = Options::default().define(target).unwrap();
+    let constants = parse_constant_header(
+        &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(constants.const_int_value(idle_symbol), Some(idle));
+    assert_eq!(constants.const_int_value(walk_symbol), Some(walk));
+    let callables = parse_callable_table_with_scope(
+        &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table =
+        parse_script_table("mary_script_table { TestAnimationPair, };\n", &options).unwrap();
+    let numeric_source = format!(
+        "void TestAnimationPair(void) {{ SetEntityAnim(0, {idle}); SetEntityAnim(0, {walk}); }}\n"
+    );
+    let numeric =
+        parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table).unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestAnimationPair")
+            .unwrap();
+    let source = format_named_script("TestAnimationPair", &raised).unwrap();
+    assert!(source.contains(idle_symbol), "{target}: {source}");
+    assert!(source.contains(walk_symbol), "{target}: {source}");
+    let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&rebuilt.scripts[0].2)
+    );
+
+    let legacy_source = format!(
+        "void TestAnimationPair(void) {{ SetEntityAnim(0, ANIMATION_ID_{idle:04}); SetEntityAnim(0, ANIMATION_ID_{walk:04}); }}\n"
+    );
+    let legacy =
+        parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&legacy.scripts[0].2)
+    );
+}
+
+#[test]
+fn van_idle_walk_animations_follow_each_game_family() {
+    for (target, idle, walk) in [
+        ("MARY_FOMT_US", 2264, 2268),
+        ("MARY_FOMT_JP", 2264, 2268),
+        ("MARY_MFOMT_US", 2324, 2328),
+        ("MARY_MFOMT_JP", 2324, 2328),
+    ] {
+        assert_animation_pair_round_trip(
+            target,
+            idle,
+            walk,
+            "ANIMATION_VAN_IDLE",
+            "ANIMATION_VAN_WALK",
+        );
+    }
+}
+
+#[test]
+fn lou_or_ruby_idle_walk_animations_follow_each_game_family() {
+    for (target, idle, walk) in [
+        ("MARY_FOMT_US", 2034, 2038),
+        ("MARY_FOMT_JP", 2034, 2038),
+        ("MARY_MFOMT_US", 2082, 2086),
+        ("MARY_MFOMT_JP", 2082, 2086),
+    ] {
+        assert_animation_pair_round_trip(
+            target,
+            idle,
+            walk,
+            "ANIMATION_LOU_OR_RUBY_IDLE",
+            "ANIMATION_LOU_OR_RUBY_WALK",
+        );
+    }
+}
+
+#[test]
+fn ann_and_elli_gestures_follow_each_game_family() {
+    for (target, ann_gesture, elli_gesture) in [
+        ("MARY_FOMT_US", 1990, 2188),
+        ("MARY_FOMT_JP", 1990, 2188),
+        ("MARY_MFOMT_US", 2038, 2248),
+        ("MARY_MFOMT_JP", 2038, 2248),
+    ] {
+        assert_animation_pair_round_trip(
+            target,
+            ann_gesture,
+            elli_gesture,
+            "ANIMATION_ANN_GESTURE",
+            "ANIMATION_ELLI_GESTURE",
+        );
+    }
+}
+
+#[test]
+fn doctor_karen_mary_and_gray_gestures_follow_each_game_family() {
+    for (target, doctor, karen, mary, gray) in [
+        ("MARY_FOMT_US", 808, 1689, 2075, 2449),
+        ("MARY_FOMT_JP", 808, 1689, 2075, 2449),
+        ("MARY_MFOMT_US", 832, 1737, 2123, 2521),
+        ("MARY_MFOMT_JP", 832, 1737, 2123, 2521),
+    ] {
+        assert_animation_pair_round_trip(
+            target,
+            doctor,
+            karen,
+            "ANIMATION_DOCTOR_GESTURE",
+            "ANIMATION_KAREN_GESTURE",
+        );
+        assert_animation_pair_round_trip(
+            target,
+            mary,
+            gray,
+            "ANIMATION_MARY_GESTURE",
+            "ANIMATION_GRAY_GESTURE",
+        );
+    }
+}
+
+#[test]
+fn popuri_item_and_reaction_animations_are_not_conflated() {
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            567,
+            579,
+            "ANIMATION_POPURI_HAND_OVER_ITEM",
+            "ANIMATION_POPURI_REACTION",
+        );
+    }
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_POPURI_HAND_OVER_ITEM"),
+            None,
+            "{target} must not assign Popuri semantics to Rick's animation 567"
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_POPURI_REACTION"),
+            Some(579)
+        );
+    }
+}
+
+#[test]
+fn spouse_in_bed_animations_follow_each_game_family() {
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        for (first, second, first_symbol, second_symbol) in [
+            (
+                575,
+                1697,
+                "ANIMATION_POPURI_IN_BED",
+                "ANIMATION_KAREN_IN_BED",
+            ),
+            (2002, 2087, "ANIMATION_ANN_IN_BED", "ANIMATION_MARY_IN_BED"),
+            (
+                2204,
+                575,
+                "ANIMATION_ELLI_IN_BED",
+                "ANIMATION_POPURI_IN_BED",
+            ),
+        ] {
+            assert_animation_pair_round_trip(target, first, second, first_symbol, second_symbol);
+        }
+    }
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        for (first, second, first_symbol, second_symbol) in [
+            (559, 848, "ANIMATION_RICK_IN_BED", "ANIMATION_DOCTOR_IN_BED"),
+            (687, 2390, "ANIMATION_CLIFF_IN_BED", "ANIMATION_KAI_IN_BED"),
+            (2537, 559, "ANIMATION_GRAY_IN_BED", "ANIMATION_RICK_IN_BED"),
+        ] {
+            assert_animation_pair_round_trip(target, first, second, first_symbol, second_symbol);
+        }
+    }
+}
+
+#[test]
+fn spouse_bed_dialogue_and_settle_animations_follow_each_game_family() {
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        for (awake, settle, awake_symbol, settle_symbol) in [
+            (
+                579,
+                603,
+                "ANIMATION_POPURI_REACTION",
+                "ANIMATION_POPURI_SETTLE_IN_BED",
+            ),
+            (
+                1701,
+                1729,
+                "ANIMATION_KAREN_IN_BED_AWAKE",
+                "ANIMATION_KAREN_SETTLE_IN_BED",
+            ),
+            (
+                2006,
+                2030,
+                "ANIMATION_ANN_IN_BED_AWAKE",
+                "ANIMATION_ANN_SETTLE_IN_BED",
+            ),
+            (
+                2091,
+                2115,
+                "ANIMATION_MARY_IN_BED_AWAKE",
+                "ANIMATION_MARY_SETTLE_IN_BED",
+            ),
+            (
+                2208,
+                2228,
+                "ANIMATION_ELLI_IN_BED_AWAKE",
+                "ANIMATION_ELLI_SETTLE_IN_BED",
+            ),
+        ] {
+            assert_animation_pair_round_trip(target, awake, settle, awake_symbol, settle_symbol);
+        }
+    }
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        for (awake, settle, awake_symbol, settle_symbol) in [
+            (
+                563,
+                567,
+                "ANIMATION_RICK_IN_BED_AWAKE",
+                "ANIMATION_RICK_SETTLE_IN_BED",
+            ),
+            (
+                691,
+                695,
+                "ANIMATION_CLIFF_IN_BED_AWAKE",
+                "ANIMATION_CLIFF_SETTLE_IN_BED",
+            ),
+            (
+                852,
+                856,
+                "ANIMATION_DOCTOR_IN_BED_AWAKE",
+                "ANIMATION_DOCTOR_SETTLE_IN_BED",
+            ),
+            (
+                2394,
+                2398,
+                "ANIMATION_KAI_IN_BED_AWAKE",
+                "ANIMATION_KAI_SETTLE_IN_BED",
+            ),
+            (
+                2541,
+                2545,
+                "ANIMATION_GRAY_IN_BED_AWAKE",
+                "ANIMATION_GRAY_SETTLE_IN_BED",
+            ),
+        ] {
+            assert_animation_pair_round_trip(target, awake, settle, awake_symbol, settle_symbol);
+        }
+    }
+}
+
+#[test]
+fn mfomt_mary_wedding_and_kai_gesture_animations_are_target_scoped() {
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            2151,
+            2155,
+            "ANIMATION_MARY_WEDDING_IDLE",
+            "ANIMATION_MARY_WEDDING_WALK",
+        );
+        assert_animation_pair_round_trip(
+            target,
+            2159,
+            2374,
+            "ANIMATION_MARY_WEDDING_KISS",
+            "ANIMATION_KAI_GESTURE",
+        );
+    }
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(constants.const_int_value("ANIMATION_KAI_GESTURE"), None);
+        assert_eq!(
+            constants.const_int_value("ANIMATION_MARY_WEDDING_IDLE"),
+            Some(2103)
+        );
+    }
+}
+
+#[test]
+fn mfomt_mary_bad_dream_idle_walk_pair_is_target_scoped() {
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            2143,
+            2147,
+            "ANIMATION_MARY_BAD_DREAM_IDLE",
+            "ANIMATION_MARY_BAD_DREAM_WALK",
+        );
+    }
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_MARY_BAD_DREAM_IDLE"),
+            None
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_THOMAS_IDLE"),
+            Some(2143)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_THOMAS_WALK"),
+            Some(2147)
+        );
+    }
+}
+
+#[test]
+fn mfomt_transformation_effect_parts_are_target_scoped() {
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            1272,
+            1608,
+            "ANIMATION_TRANSFORMATION_EFFECT_PART_1",
+            "ANIMATION_TRANSFORMATION_EFFECT_PART_2",
+        );
+        assert_animation_pair_round_trip(
+            target,
+            1188,
+            1104,
+            "ANIMATION_TRANSFORMATION_EFFECT_PART_3",
+            "ANIMATION_TRANSFORMATION_EFFECT_PART_4",
+        );
+    }
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_TRANSFORMATION_EFFECT_PART_1"),
+            None
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1272"), Some(1272));
+    }
+}
+
+#[test]
+fn sick_livestock_idle_animations_follow_game_family_offsets() {
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            696,
+            1836,
+            "ANIMATION_COW_SICK_IDLE",
+            "ANIMATION_CHICKEN_SICK_IDLE",
+        );
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_SHEEP_SICK_IDLE"),
+            Some(2345)
+        );
+    }
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        assert_animation_pair_round_trip(
+            target,
+            720,
+            1884,
+            "ANIMATION_COW_SICK_IDLE",
+            "ANIMATION_CHICKEN_SICK_IDLE",
+        );
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_SHEEP_SICK_IDLE"),
+            Some(2417)
+        );
+    }
+    assert_animation_pair_round_trip(
+        "MARY_FOMT_US",
+        2345,
+        696,
+        "ANIMATION_SHEEP_SICK_IDLE",
+        "ANIMATION_COW_SICK_IDLE",
+    );
+    assert_animation_pair_round_trip(
+        "MARY_MFOMT_US",
+        2417,
+        720,
+        "ANIMATION_SHEEP_SICK_IDLE",
+        "ANIMATION_COW_SICK_IDLE",
+    );
+}
+
+#[test]
+fn colliding_npc_animation_slots_are_target_scoped() {
+    let values = [1733, 2240, 2244, 2248];
+    let symbols = [
+        "ANIMATION_SASHA_IDLE",
+        "ANIMATION_DUKE_IDLE",
+        "ANIMATION_DUKE_WALK",
+        "ANIMATION_DUKE_COLLAPSED",
+    ];
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestFoMTAnimations, };\n", &options).unwrap();
+        let numeric_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, {value});"))
+            .collect::<String>();
+        let numeric_source = format!("void TestFoMTAnimations(void) {{ {numeric_body} }}\n");
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestFoMTAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestFoMTAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy_source = format!("void TestFoMTAnimations(void) {{ {legacy_body} }}\n");
+        let legacy =
+            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_SASHA_IDLE"),
+            Some(1781)
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_DUKE_IDLE"), Some(2300));
+        assert_eq!(constants.const_int_value("ANIMATION_DUKE_WALK"), Some(2304));
+        assert_eq!(
+            constants.const_int_value("ANIMATION_DUKE_COLLAPSED"),
+            Some(2308)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_KAREN_WALK"),
+            Some(1733)
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ELLI_IDLE"), Some(2240));
+        assert_eq!(constants.const_int_value("ANIMATION_ELLI_WALK"), Some(2244));
+        assert_eq!(
+            constants.const_int_value("ANIMATION_ELLI_GESTURE"),
+            Some(2248)
+        );
+    }
+}
+
+#[test]
+fn wedding_animation_groups_are_target_scoped() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_RICK_WEDDING_IDLE"),
+            Some(547)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_RICK_WEDDING_WALK"),
+            Some(551)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_RICK_WEDDING_KISS"),
+            Some(555)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_PLAYER_WEDDING_IDLE"),
+            Some(130)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_PLAYER_WEDDING_WALK"),
+            Some(134)
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_PLAYER_WEDDING_KISS"),
+            Some(126)
+        );
+        let mut values = vec![547, 551, 555, 130, 134, 126];
+        let mut symbols = vec![
+            "ANIMATION_RICK_WEDDING_IDLE",
+            "ANIMATION_RICK_WEDDING_WALK",
+            "ANIMATION_RICK_WEDDING_KISS",
+            "ANIMATION_PLAYER_WEDDING_IDLE",
+            "ANIMATION_PLAYER_WEDDING_WALK",
+            "ANIMATION_PLAYER_WEDDING_KISS",
+        ];
+        if target.contains("FOMT_") && !target.contains("MFOMT_") {
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_IDLE"),
+                Some(647)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_WALK"),
+                Some(651)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_KISS"),
+                Some(655)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_IDLE"),
+                Some(2453)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_WALK"),
+                Some(2457)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_KISS"),
+                Some(2461)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_IDLE"),
+                Some(1717)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_WALK"),
+                Some(1721)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_KISS"),
+                Some(1725)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_WALK"),
+                Some(595)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_KISS"),
+                Some(599)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_IDLE"),
+                Some(591)
+            );
+            values.extend([
+                647, 651, 655, 2453, 2457, 2461, 1717, 1721, 1725, 591, 595, 599,
+            ]);
+            symbols.extend([
+                "ANIMATION_CLIFF_WEDDING_IDLE",
+                "ANIMATION_CLIFF_WEDDING_WALK",
+                "ANIMATION_CLIFF_WEDDING_KISS",
+                "ANIMATION_GRAY_WEDDING_IDLE",
+                "ANIMATION_GRAY_WEDDING_WALK",
+                "ANIMATION_GRAY_WEDDING_KISS",
+                "ANIMATION_KAREN_WEDDING_IDLE",
+                "ANIMATION_KAREN_WEDDING_WALK",
+                "ANIMATION_KAREN_WEDDING_KISS",
+                "ANIMATION_POPURI_WEDDING_IDLE",
+                "ANIMATION_POPURI_WEDDING_WALK",
+                "ANIMATION_POPURI_WEDDING_KISS",
+            ]);
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_IDLE"),
+                Some(2103)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_WALK"),
+                Some(2107)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_KISS"),
+                Some(2111)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_IDLE"),
+                Some(2216)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_WALK"),
+                Some(2220)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_KISS"),
+                Some(2224)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_IDLE"),
+                Some(2318)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_WALK"),
+                Some(2322)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_KISS"),
+                Some(2326)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_IDLE"),
+                Some(812)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_WALK"),
+                Some(816)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_KISS"),
+                Some(820)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_IDLE"),
+                Some(2018)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_WALK"),
+                Some(2022)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_KISS"),
+                Some(2026)
+            );
+            values.extend([
+                2103, 2107, 2111, 2216, 2220, 2224, 2318, 2322, 2326, 812, 816, 820, 2018, 2022,
+                2026,
+            ]);
+            symbols.extend([
+                "ANIMATION_MARY_WEDDING_IDLE",
+                "ANIMATION_MARY_WEDDING_WALK",
+                "ANIMATION_MARY_WEDDING_KISS",
+                "ANIMATION_ELLI_WEDDING_IDLE",
+                "ANIMATION_ELLI_WEDDING_WALK",
+                "ANIMATION_ELLI_WEDDING_KISS",
+                "ANIMATION_KAI_WEDDING_IDLE",
+                "ANIMATION_KAI_WEDDING_WALK",
+                "ANIMATION_KAI_WEDDING_KISS",
+                "ANIMATION_DOCTOR_WEDDING_IDLE",
+                "ANIMATION_DOCTOR_WEDDING_WALK",
+                "ANIMATION_DOCTOR_WEDDING_KISS",
+                "ANIMATION_ANN_WEDDING_IDLE",
+                "ANIMATION_ANN_WEDDING_WALK",
+                "ANIMATION_ANN_WEDDING_KISS",
+            ]);
+        } else {
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_IDLE"),
+                Some(659)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_WALK"),
+                Some(663)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_CLIFF_WEDDING_KISS"),
+                Some(667)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_IDLE"),
+                Some(1765)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_WALK"),
+                Some(1769)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAREN_WEDDING_KISS"),
+                Some(1773)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLEN_IDLE"),
+                Some(1717)
+            );
+            assert_eq!(constants.const_int_value("ANIMATION_JEFF_IDLE"), Some(1721));
+            assert_eq!(constants.const_int_value("ANIMATION_JEFF_WALK"), Some(1725));
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_IDLE"),
+                Some(2151)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_WALK"),
+                Some(2155)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_MARY_WEDDING_KISS"),
+                Some(2159)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_BASIL_IDLE"),
+                Some(2107)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_BASIL_WALK"),
+                Some(2111)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_IDLE"),
+                Some(2525)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_WALK"),
+                Some(2529)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_GRAY_WEDDING_KISS"),
+                Some(2533)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_IDLE"),
+                Some(2276)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_WALK"),
+                Some(2280)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ELLI_WEDDING_KISS"),
+                Some(2284)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_IDLE"),
+                Some(2378)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_WALK"),
+                Some(2382)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_KAI_WEDDING_KISS"),
+                Some(2386)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_IDLE"),
+                Some(836)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_WALK"),
+                Some(840)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_DOCTOR_WEDDING_KISS"),
+                Some(844)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_IDLE"),
+                Some(2066)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_WALK"),
+                Some(2070)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_ANN_WEDDING_KISS"),
+                Some(2074)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_WALK"),
+                Some(607)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_KISS"),
+                Some(611)
+            );
+            assert_eq!(
+                constants.const_int_value("ANIMATION_POPURI_WEDDING_IDLE"),
+                Some(603)
+            );
+            values.extend([
+                603, 659, 663, 667, 2525, 2529, 2533, 2276, 2280, 2284, 2378, 2382, 2386, 836, 840,
+                844, 2066, 2070, 2074, 1765, 1769, 1773, 607, 611,
+            ]);
+            symbols.extend([
+                "ANIMATION_POPURI_WEDDING_IDLE",
+                "ANIMATION_CLIFF_WEDDING_IDLE",
+                "ANIMATION_CLIFF_WEDDING_WALK",
+                "ANIMATION_CLIFF_WEDDING_KISS",
+                "ANIMATION_GRAY_WEDDING_IDLE",
+                "ANIMATION_GRAY_WEDDING_WALK",
+                "ANIMATION_GRAY_WEDDING_KISS",
+                "ANIMATION_ELLI_WEDDING_IDLE",
+                "ANIMATION_ELLI_WEDDING_WALK",
+                "ANIMATION_ELLI_WEDDING_KISS",
+                "ANIMATION_KAI_WEDDING_IDLE",
+                "ANIMATION_KAI_WEDDING_WALK",
+                "ANIMATION_KAI_WEDDING_KISS",
+                "ANIMATION_DOCTOR_WEDDING_IDLE",
+                "ANIMATION_DOCTOR_WEDDING_WALK",
+                "ANIMATION_DOCTOR_WEDDING_KISS",
+                "ANIMATION_ANN_WEDDING_IDLE",
+                "ANIMATION_ANN_WEDDING_WALK",
+                "ANIMATION_ANN_WEDDING_KISS",
+                "ANIMATION_KAREN_WEDDING_IDLE",
+                "ANIMATION_KAREN_WEDDING_WALK",
+                "ANIMATION_KAREN_WEDDING_KISS",
+                "ANIMATION_POPURI_WEDDING_WALK",
+                "ANIMATION_POPURI_WEDDING_KISS",
+            ]);
+        }
+
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestWeddingAnimations, };\n", &options)
+                .unwrap();
+        let numeric_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, {value});"))
+            .collect::<String>();
+        let numeric_source = format!("void TestWeddingAnimations(void) {{ {numeric_body} }}\n");
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestWeddingAnimations",
+        )
+        .unwrap();
+        let source = format_named_script("TestWeddingAnimations", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+    }
+}
+
+#[test]
+fn proven_player_action_animations_are_canonical_on_all_targets() {
+    let values = [
+        66, 70, 78, 238, 242, 258, 262, 270, 282, 286, 290, 294, 298, 302, 306, 314, 398, 426, 434,
+        438, 442, 510, 26, 30, 34, 38, 42, 46, 50, 54, 58, 158, 162, 166, 186, 170, 174, 178, 182,
+        190, 194, 198, 202, 206, 210, 214, 218, 222, 250, 334, 350, 354, 358, 362, 366, 370, 374,
+        378, 382, 386, 394, 414, 418, 430, 446, 462, 466, 470, 474, 478, 482, 486, 490, 494, 498,
+        502,
+    ];
+    let symbols = [
+        "ANIMATION_PLAYER_RAISE_ARMS",
+        "ANIMATION_PLAYER_DRINK",
+        "ANIMATION_PLAYER_EAT",
+        "ANIMATION_PLAYER_RIDING_HORSE_WALK",
+        "ANIMATION_PLAYER_BACK_PAIN",
+        "ANIMATION_PLAYER_SWEAT",
+        "ANIMATION_PLAYER_HIGH_JUMP",
+        "ANIMATION_PLAYER_FAINT_FROM_EXHAUSTION",
+        "ANIMATION_PLAYER_COLLAPSE_HOLDING_HEAD",
+        "ANIMATION_PLAYER_HOLD_HEAD_IN_PAIN",
+        "ANIMATION_PLAYER_SHAKE_HEAD_NO",
+        "ANIMATION_PLAYER_BATHE_IN_HOT_SPRING",
+        "ANIMATION_PLAYER_ENTER_OR_EXIT_HOT_SPRING",
+        "ANIMATION_PLAYER_PLAY_OCARINA",
+        "ANIMATION_PLAYER_MOVE_ANIMAL",
+        "ANIMATION_PLAYER_RUCKSACK_DEPOSIT",
+        "ANIMATION_PLAYER_SLEEPING_IN_BED",
+        "ANIMATION_PLAYER_BRUSH_LIVESTOCK",
+        "ANIMATION_PLAYER_USE_CLIPPERS",
+        "ANIMATION_PLAYER_USE_MILKER",
+        "ANIMATION_PLAYER_SOW_SEEDS",
+        "ANIMATION_PLAYER_LOWER_HEAD",
+        "ANIMATION_PLAYER_AXE_PREPARE",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_1",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_2",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_3",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_4",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_5",
+        "ANIMATION_PLAYER_AXE_CHARGE_STAGE_6",
+        "ANIMATION_PLAYER_AXE_SWING",
+        "ANIMATION_PLAYER_AXE_CHARGED_SWING",
+        "ANIMATION_PLAYER_HAMMER_PREPARE",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_1",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_2",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_3",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_4",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_5",
+        "ANIMATION_PLAYER_HAMMER_CHARGE_STAGE_6",
+        "ANIMATION_PLAYER_HAMMER_SWING",
+        "ANIMATION_PLAYER_HAMMER_CHARGED_SWING",
+        "ANIMATION_PLAYER_HOE_PREPARE",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_1",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_2",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_3",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_4",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_5",
+        "ANIMATION_PLAYER_HOE_CHARGE_STAGE_6",
+        "ANIMATION_PLAYER_HOE_SWING",
+        "ANIMATION_PLAYER_COLLAPSE",
+        "ANIMATION_PLAYER_RUN_HOLDING_ITEM",
+        "ANIMATION_PLAYER_RUN_EMPTY_HANDED",
+        "ANIMATION_PLAYER_CLINIC_BED_SHADOW",
+        "ANIMATION_PLAYER_SICKLE_PREPARE",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_1",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_2",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_3",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_4",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_5",
+        "ANIMATION_PLAYER_SICKLE_CHARGE_STAGE_6",
+        "ANIMATION_PLAYER_SICKLE_CHARGED_SWING",
+        "ANIMATION_PLAYER_SICKLE_SWING",
+        "ANIMATION_PLAYER_PUT_AWAY_PRESENTED_ITEM",
+        "ANIMATION_PLAYER_USE_ANIMAL_MEDICINE",
+        "ANIMATION_PLAYER_USE_COW_MIRACLE_POTION",
+        "ANIMATION_PLAYER_USE_SHEEP_MIRACLE_POTION",
+        "ANIMATION_PLAYER_WATERING_CAN_PREPARE",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_1",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_2",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_3",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_4",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_5",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGE_STAGE_6",
+        "ANIMATION_PLAYER_REFILL_WATERING_CAN",
+        "ANIMATION_PLAYER_WATERING_CAN_POUR",
+        "ANIMATION_PLAYER_WATERING_CAN_CHARGED_POUR",
+        "ANIMATION_PLAYER_WATERING_CAN_MAX_CHARGE_POUR",
+    ];
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestPlayerActions, };\n", &options).unwrap();
+        let numeric_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, {value});"))
+            .collect::<String>();
+        let numeric_source = format!("void TestPlayerActions(void) {{ {numeric_body} }}\n");
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
+                .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestPlayerActions")
+                .unwrap();
+        let source = format_named_script("TestPlayerActions", &raised).unwrap();
+        for symbol in symbols {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+
+        let legacy_body = values
+            .iter()
+            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
+            .collect::<String>();
+        let legacy_source = format!("void TestPlayerActions(void) {{ {legacy_body} }}\n");
+        let legacy =
+            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&legacy.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+}
+
+#[test]
+fn harvest_goddess_appear_disappear_effect_is_fomt_scoped() {
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_HARVEST_GODDESS_APPEAR_DISAPPEAR_EFFECT"),
+            Some(1068),
+            "{target}"
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1068"), Some(1068));
+    }
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_HARVEST_GODDESS_APPEAR_DISAPPEAR_EFFECT"),
+            None,
+            "{target} must retain the unproven numbered symbol"
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1068"), Some(1068));
     }
 }
 
@@ -17828,6 +20812,63 @@ fn proven_audio_names_are_canonical_while_numbered_sources_remain_compatible() {
 }
 
 #[test]
+fn animal_state_to_counter_reuse_does_not_leak_boolean_symbols() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let table =
+            parse_script_table("mary_script_table { TestAnimalReuse, };", &options).unwrap();
+        let numeric = parse_named_scripts(
+            "void TestAnimalReuse(void) { int value; \
+             value = IsAnimalPregnant(1, 0); \
+             switch (value) { case 0: TalkClose(); break; case 1: TalkOpen(); break; } \
+             value = GetAnimalAge(1, 0); \
+             switch (value) { case 0: TalkClose(); break; case 1: TalkOpen(); break; } \
+             if (IsAnimalSick(1, 0)) { value = GetAnimalHealthyPregnancyDays(1, 0); } \
+             else { value = GetAnimalAge(1, 0); } \
+             switch (value) { case 0: TalkClose(); break; case 1: TalkOpen(); break; } }",
+            &options,
+            &callables.scope,
+            &table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestAnimalReuse")
+                .unwrap();
+        let source = format_named_script("TestAnimalReuse", &raised).unwrap();
+        for (pattern, count) in [
+            ("case FALSE:", 1),
+            ("case TRUE:", 1),
+            ("case 0:", 2),
+            ("case 1:", 2),
+        ] {
+            assert_eq!(source.matches(pattern).count(), count, "{target}: {source}");
+        }
+        let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}"
+        );
+    }
+}
+
+#[test]
 fn livestock_facility_slot_domains_preserve_every_physical_selector() {
     for target in [
         "MARY_FOMT_US",
@@ -17857,7 +20898,19 @@ fn livestock_facility_slot_domains_preserve_every_physical_selector() {
              switch (chicken_slot) { case 0: break; case 7: break; default: break; } \
              IsBarnFeedTroughFilled(17); FillBarnFeedTrough(17); \
              IsBarnAnimalReadyToGiveBirth(1); animal_slot = AttemptBarnAnimalBirth(1); \
-             switch (animal_slot) { case 0: break; case 15: break; default: break; } }\n",
+             if (animal_slot != -1) { \
+                 switch (animal_slot) { case 0: break; case 15: break; default: break; } \
+             } else { TalkClose(); } \
+             animal_slot = 1; IsBarnAnimalReadyToGiveBirth(animal_slot); \
+             if (IsPlayerHoldingNothing()) { animal_slot = AttemptBarnAnimalBirth(0); } \
+             else { animal_slot = AttemptEggHatch(0); } \
+             switch (animal_slot) { case 1: TalkClose(); break; default: break; } \
+             switch (IsPlayerHoldingNothing()) { \
+                 case 0: animal_slot = 0; break; \
+                 default: if (IsIncubatorOccupied(0)) { animal_slot = 1; } \
+                          else { animal_slot = 0; } break; \
+             } \
+             IsBarnAnimalReadyToGiveBirth(animal_slot); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -17867,15 +20920,30 @@ fn livestock_facility_slot_domains_preserve_every_physical_selector() {
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestFacilitySlots")
                 .unwrap();
         let source = format_named_script("TestFacilitySlots", &raised).unwrap();
+        assert!(
+            source.contains("= BARN_PREGNANCY_STALL_SOUTH;"),
+            "{target}: {source}"
+        );
+        // The merge has incompatible chicken/barn roster types. Do not choose
+        // either family merely because both physical domains contain value 1.
+        assert!(source.contains("case 1:"), "{target}: {source}");
+        // The later use determines literal assignments across a switch and a
+        // nested if/else, without contaminating the earlier conflicting merge.
+        assert_eq!(
+            source.matches("= BARN_PREGNANCY_STALL_NORTH;").count(),
+            2,
+            "{target}: {source}"
+        );
         for symbol in [
-            "CHICKEN_FEED_TROUGH_8",
-            "CHICKEN_INCUBATOR_2",
+            "CHICKEN_COOP_FEED_TROUGH_SLOT_08",
+            "CHICKEN_INCUBATOR_NORTH",
             "CHICKEN_SLOT_1",
             "CHICKEN_SLOT_8",
-            "BARN_PREGNANCY_FEED_TROUGH_2",
-            "BARN_PREGNANCY_STALL_2",
+            "BARN_PREGNANCY_FEED_TROUGH_SOUTH",
+            "BARN_PREGNANCY_STALL_SOUTH",
             "ANIMAL_SLOT_1",
             "ANIMAL_SLOT_16",
+            "ANIMAL_SLOT_NOT_SELECTED",
         ] {
             assert!(
                 source.contains(symbol),
@@ -17889,6 +20957,184 @@ fn livestock_facility_slot_domains_preserve_every_physical_selector() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
         );
+    }
+}
+
+#[test]
+fn chicken_coop_fixture_symbols_follow_physical_slots_on_all_targets() {
+    let expected = [
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_01",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_02",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_03",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_04",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_05",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_06",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_07",
+        "CHICKEN_COOP_FEED_TROUGH_SLOT_08",
+        "CHICKEN_INCUBATOR_SOUTH",
+        "CHICKEN_INCUBATOR_NORTH",
+    ];
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestChickenFixtures, };\n", &options).unwrap();
+        let calls = (0..8)
+            .map(|value| format!("IsChickenFeedTroughFilled({value});"))
+            .chain((0..2).map(|value| format!("IsIncubatorOccupied({value});")))
+            .collect::<String>();
+        let numeric = parse_named_scripts(
+            &format!("void TestChickenFixtures(void) {{ {calls} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestChickenFixtures",
+        )
+        .unwrap();
+        let source = format_named_script("TestChickenFixtures", &raised).unwrap();
+        for symbol in expected {
+            assert!(
+                source.contains(symbol),
+                "{target}: missing {symbol}: {source}"
+            );
+        }
+        let symbolic =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&symbolic.scripts[0].2),
+            "{target}"
+        );
+        parse_named_scripts(
+            "void TestChickenFixtures(void) { FillChickenFeedTrough(CHICKEN_FEED_TROUGH_1); BeginEggIncubation(CHICKEN_INCUBATOR_2); }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn barn_feed_trough_symbols_follow_the_physical_rows_on_all_targets() {
+    let troughs = [
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_01",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_02",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_03",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_04",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_01",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_02",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_03",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_04",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_05",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_06",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_07",
+        "BARN_FEED_TROUGH_NORTH_ROW_SLOT_08",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_05",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_06",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_07",
+        "BARN_FEED_TROUGH_SOUTH_ROW_SLOT_08",
+        "BARN_PREGNANCY_FEED_TROUGH_NORTH",
+        "BARN_PREGNANCY_FEED_TROUGH_SOUTH",
+    ];
+    let pregnancy_stalls = ["BARN_PREGNANCY_STALL_NORTH", "BARN_PREGNANCY_STALL_SOUTH"];
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestBarnTroughs, };\n", &options).unwrap();
+        let calls = (0..18)
+            .map(|value| format!("IsBarnFeedTroughFilled({value});"))
+            .chain((0..2).map(|value| format!("IsBarnAnimalReadyToGiveBirth({value});")))
+            .collect::<String>();
+        let numeric = parse_named_scripts(
+            &format!("void TestBarnTroughs(void) {{ {calls} }}\n"),
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestBarnTroughs")
+                .unwrap();
+        let source = format_named_script("TestBarnTroughs", &raised).unwrap();
+        let trough_positions = troughs
+            .iter()
+            .map(|symbol| {
+                source
+                    .find(&format!("IsBarnFeedTroughFilled({symbol});"))
+                    .unwrap_or_else(|| {
+                        panic!("{target}: wrong feed-trough mapping for {symbol}: {source}")
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            trough_positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "{target}: feed-trough symbols do not follow numeric selectors 0..17: {source}"
+        );
+        let pregnancy_positions = pregnancy_stalls
+            .iter()
+            .map(|symbol| {
+                source
+                    .find(&format!("IsBarnAnimalReadyToGiveBirth({symbol})"))
+                    .unwrap_or_else(|| {
+                        panic!("{target}: wrong pregnancy-stall mapping for {symbol}: {source}")
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            pregnancy_positions[0] < pregnancy_positions[1],
+            "{target}: pregnancy-stall symbols do not map north=0, south=1: {source}"
+        );
+        let symbolic =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&symbolic.scripts[0].2),
+            "{target}"
+        );
+        parse_named_scripts(
+            "void TestBarnTroughs(void) { IsBarnFeedTroughFilled(BARN_FEED_TROUGH_5); FillBarnFeedTrough(BARN_PREGNANCY_FEED_TROUGH_2); IsBarnAnimalReadyToGiveBirth(BARN_PREGNANCY_STALL_2); }\n",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
     }
 }
 
@@ -18136,14 +21382,14 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
         }
         for (id, expected) in [
             (0x15, "FOOD_SPA_BOILED_EGG"),
-            (0x38, "FOOD_MYSTERY_FLOWER"),
+            (0x38, "FOOD_QUEEN_OF_THE_NIGHT_OR_MYSTERY_FLOWER"),
             (0x42, "FOOD_FLOUR"),
-            (0x44, "FOOD_RICE_FLOUR"),
-            (0x6B, "FOOD_JAPANESE_OMELET"),
+            (0x44, "FOOD_MUFFIN_MIX_OR_RICE_FLOUR"),
+            (0x6B, "FOOD_SCRAMBLED_EGGS_OR_JAPANESE_OMELET"),
             (0x75, "FOOD_APPLE_SOUFFLE"),
             (0x7B, "FOOD_DINNER_ROLL"),
-            (0xA5, "FOOD_EGG_BOWL"),
-            (0xAA, "FOOD_CROQUETTE"),
+            (0xA5, "FOOD_EGG_OVER_RICE_OR_EGG_BOWL"),
+            (0xAA, "FOOD_POTATO_PANCAKES_OR_CROQUETTE"),
         ] {
             assert_eq!(
                 constants.typed_int_const_name(food_type, id),
@@ -18208,6 +21454,7 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
             (0x2D, "TOOL_FISHING_ROD_CURSED"),
             (0x2E, "TOOL_FISHING_ROD_BLESSED"),
             (0x2F, "TOOL_FISHING_ROD_MYTHIC"),
+            (0x48, "TOOL_CLIPPER_OR_CLIPPERS"),
             (0x4B, "TOOL_BLUE_FEATHER"),
         ] {
             assert_eq!(
@@ -18443,7 +21690,7 @@ fn complete_shipping_product_table_uses_physical_product_semantics() {
 }
 
 #[test]
-fn complete_map_table_covers_proven_maps_and_target_specific_none_sentinel() {
+fn complete_map_table_covers_every_physical_map_and_target_specific_none_sentinel() {
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -18794,11 +22041,11 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
                 35 => Some("AUDIO_BGM_TITLE_SCREEN"),
                 36 => Some("AUDIO_BGM_CREDITS"),
                 37 => Some("AUDIO_BGM_CHILDHOOD"),
-                38 => Some("AUDIO_RECORD_NEW_RECORD_1"),
-                39 => Some("AUDIO_RECORD_NEW_RECORD_2"),
-                40 => Some("AUDIO_RECORD_NEW_RECORD_3"),
-                41 => Some("AUDIO_RECORD_NEW_RECORD_4"),
-                42 => Some("AUDIO_RECORD_NEW_RECORD_5"),
+                38 if target.contains("MFOMT") => Some("AUDIO_RECORD_NEW_RECORD_1"),
+                39 if target.contains("MFOMT") => Some("AUDIO_RECORD_NEW_RECORD_2"),
+                40 if target.contains("MFOMT") => Some("AUDIO_RECORD_NEW_RECORD_3"),
+                41 if target.contains("MFOMT") => Some("AUDIO_RECORD_NEW_RECORD_4"),
+                42 if target.contains("MFOMT") => Some("AUDIO_RECORD_NEW_RECORD_5"),
                 101 => Some("AUDIO_SFX_EAT"),
                 102 => Some("AUDIO_SFX_DRINK"),
                 105 => Some("AUDIO_SFX_ENTER_HOT_SPRING"),
@@ -19368,12 +22615,12 @@ fn newly_audited_game_variable_domains_print_symbols_and_round_trip() {
     for (target, cooking_var, hidden_candidate) in [
         (
             "MARY_FOMT_US",
-            "VAR_COOKING_FESTIVAL_RESULT",
+            "VAR_COOKING_FESTIVAL_DISH_CATEGORY",
             "HIDDEN_MARRIAGE_CANDIDATE_HARVEST_GODDESS",
         ),
         (
             "MARY_FOMT_JP",
-            "VAR_COOKING_FESTIVAL_RESULT",
+            "VAR_COOKING_FESTIVAL_DISH_CATEGORY",
             "HIDDEN_MARRIAGE_CANDIDATE_HARVEST_GODDESS",
         ),
         (
@@ -19433,17 +22680,16 @@ fn newly_audited_game_variable_domains_print_symbols_and_round_trip() {
 
 #[test]
 fn harvest_adjacent_unknown_slot_uses_the_proven_boolean_domain_on_all_targets() {
-    for target in [
-        "MARY_FOMT_US",
-        "MARY_FOMT_JP",
-        "MARY_MFOMT_US",
-        "MARY_MFOMT_JP",
+    for (target, variable) in [
+        ("MARY_FOMT_US", "VAR_UNKNOWN_SLOT_423"),
+        ("MARY_FOMT_JP", "VAR_UNKNOWN_SLOT_423"),
+        ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_467"),
+        ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_467"),
+        ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_697"),
+        ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_697"),
+        ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_705"),
+        ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_705"),
     ] {
-        let variable = if target.starts_with("MARY_FOMT_") {
-            "VAR_UNKNOWN_SLOT_423"
-        } else {
-            "VAR_UNKNOWN_SLOT_467"
-        };
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(
             &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
@@ -19487,7 +22733,196 @@ fn harvest_adjacent_unknown_slot_uses_the_proven_boolean_domain_on_all_targets()
 }
 
 #[test]
-fn ellen_adjacent_unknown_slots_use_their_proven_physical_domains() {
+fn unknown_two_bit_state_preserves_unnamed_value_and_local_reuse() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts =
+            parse_script_table("mary_script_table { TestUnknownState, };", &options).unwrap();
+        let variables = if target.starts_with("MARY_MFOMT_") {
+            ["VAR_UNKNOWN_SLOT_232", "VAR_UNKNOWN_SLOT_233"]
+        } else {
+            ["VAR_UNKNOWN_SLOT_224", "VAR_UNKNOWN_SLOT_225"]
+        };
+        for variable in variables {
+            let input = format!("void TestUnknownState(void) {{ int state; state = VarGet({variable}); switch (state) {{ case 1: VarSet({variable}, 3); break; case 3: if (state == 3) {{ VarSet({variable}, 2); }} break; }} state = GetKnownRecipeCount(); if (state == 2) {{ return; }} }}");
+            let parsed = parse_named_scripts(&input, &options, &callables.scope, &scripts).unwrap();
+            let raised =
+                decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestUnknownState")
+                    .unwrap();
+            let output = format_named_script("TestUnknownState", &raised).unwrap();
+            assert!(output.contains("case 1:"), "{target}: {output}");
+            assert!(output.contains("case 3:"), "{target}: {output}");
+            assert!(
+                output.contains(&format!("VarSet({variable}, 3)")),
+                "{target}: {output}"
+            );
+            assert!(
+                output.contains(&format!("VarSet({variable}, 2)")),
+                "{target}: {output}"
+            );
+            assert!(!output.contains("EVENT_LIFECYCLE"), "{target}: {output}");
+            let quantity_phase = output.split("GetKnownRecipeCount();").nth(1).unwrap();
+            assert!(quantity_phase.contains("== 2"), "{target}: {output}");
+            assert!(
+                !quantity_phase.contains("EVENT_LIFECYCLE"),
+                "{target}: {output}"
+            );
+            let rebuilt =
+                parse_named_scripts(&output, &options, &callables.scope, &scripts).unwrap();
+            assert_eq!(
+                encode_script(&parsed.scripts[0].2),
+                encode_script(&rebuilt.scripts[0].2)
+            );
+        }
+    }
+}
+
+#[test]
+fn mfomt_unknown_booleans_propagate_through_delayed_local_use() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts =
+            parse_script_table("mary_script_table { TestUnknownBool, };", &options).unwrap();
+        for variable in ["VAR_UNKNOWN_SLOT_697", "VAR_UNKNOWN_SLOT_705"] {
+            let input = format!("void TestUnknownBool(void) {{ int state; state = VarGet({variable}); if (state == 1) {{ VarSet({variable}, 0); }} else {{ VarSet({variable}, 1); }} if (state == 0) {{ VarSet({variable}, 1); }} state = GetKnownRecipeCount(); if (state == 1) {{ return; }} }}");
+            let parsed = parse_named_scripts(&input, &options, &callables.scope, &scripts);
+            if target.starts_with("MARY_FOMT_") {
+                assert!(parsed.is_err(), "{target}: MFoMT-only symbol leaked");
+                continue;
+            }
+            let parsed = parsed.unwrap();
+            let raised =
+                decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestUnknownBool")
+                    .unwrap();
+            let output = format_named_script("TestUnknownBool", &raised).unwrap();
+            assert!(output.contains("== TRUE"), "{target}: {output}");
+            assert!(output.contains("== FALSE"), "{target}: {output}");
+            let quantity_phase = output.split("GetKnownRecipeCount();").nth(1).unwrap();
+            assert!(quantity_phase.contains("== 1"), "{target}: {output}");
+            assert!(!quantity_phase.contains("TRUE"), "{target}: {output}");
+            assert!(
+                output.contains(&format!("VarSet({variable}, FALSE)")),
+                "{output}"
+            );
+            assert!(
+                output.contains(&format!("VarSet({variable}, TRUE)")),
+                "{output}"
+            );
+            let rebuilt =
+                parse_named_scripts(&output, &options, &callables.scope, &scripts).unwrap();
+            assert_eq!(
+                encode_script(&parsed.scripts[0].2),
+                encode_script(&rebuilt.scripts[0].2)
+            );
+        }
+    }
+}
+
+#[test]
+fn mfomt_unknown_boolean_quantity_merge_does_not_invent_boolean_symbols() {
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts = parse_script_table("mary_script_table { TestMerge, };", &options).unwrap();
+        for variable in ["VAR_UNKNOWN_SLOT_697", "VAR_UNKNOWN_SLOT_705"] {
+            let input = format!("void TestMerge(void) {{ int state; state = VarGet({variable}); if (GetKnownRecipeCount() > 3) {{ state = GetKnownRecipeCount(); }} if (state == 1) {{ return; }} }}");
+            let parsed = parse_named_scripts(&input, &options, &callables.scope, &scripts).unwrap();
+            let raised =
+                decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestMerge")
+                    .unwrap();
+            let output = format_named_script("TestMerge", &raised).unwrap();
+            assert!(output.contains("== 1"), "{target}: {output}");
+            assert!(!output.contains("== TRUE"), "{target}: {output}");
+            let rebuilt =
+                parse_named_scripts(&output, &options, &callables.scope, &scripts).unwrap();
+            assert_eq!(
+                encode_script(&parsed.scripts[0].2),
+                encode_script(&rebuilt.scripts[0].2)
+            );
+        }
+    }
+}
+
+#[test]
+fn mfomt_raw_unknown_byte_does_not_inherit_normalizing_setter_type() {
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts = parse_script_table("mary_script_table { TestRawByte, };", &options).unwrap();
+        for body in [
+            "int state; VarSet(VAR_UNKNOWN_SLOT_053, 1); state = VarGet(VAR_UNKNOWN_SLOT_053); if (state == 1) { return; }",
+            "int state; state = VarGet(VAR_UNKNOWN_SLOT_053); switch (state) { case 0: TalkClose(); break; case 1: TalkOpen(); break; case 255: return; }",
+        ] {
+            let input = format!("void TestRawByte(void) {{ {body} }}");
+            let parsed = parse_named_scripts(&input, &options, &callables.scope, &scripts).unwrap();
+            let raised = decompile_script_named(&parsed.scripts[0].2, &callables.scope, "TestRawByte").unwrap();
+            let output = format_named_script("TestRawByte", &raised).unwrap();
+            assert!(!output.contains("TRUE") && !output.contains("FALSE"), "{target}: {output}");
+            if body.contains("case 255") {
+                assert!(output.contains("case 255:"), "{target}: {output}");
+            } else {
+                assert!(output.contains("== 1"), "{target}: {output}");
+            }
+            let rebuilt = parse_named_scripts(&output, &options, &callables.scope, &scripts).unwrap();
+            assert_eq!(encode_script(&parsed.scripts[0].2), encode_script(&rebuilt.scripts[0].2));
+        }
+    }
+}
+
+#[test]
+fn ellen_adjacent_unknown_slots_keep_only_the_proven_boolean_domain() {
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -19525,9 +22960,9 @@ fn ellen_adjacent_unknown_slots_use_their_proven_physical_domains() {
         let source = format_named_script("TestUnknownEvent", &raised).unwrap();
         for expected in [
             format!("VarSet({gate}, FALSE)"),
-            format!("VarSet({state}, EVENT_LIFECYCLE_COMPLETED)"),
+            format!("VarSet({state}, 2)"),
             format!("VarGet({gate}) == TRUE"),
-            format!("VarGet({state}) == EVENT_LIFECYCLE_IN_PROGRESS"),
+            format!("VarGet({state}) == 1"),
         ] {
             assert!(
                 source.contains(&expected),
@@ -19571,6 +23006,24 @@ fn backward_type_inference_decorates_switch_definitions_and_respects_conflicts()
                 "void TestSwitchBackprop(void) { int selector = RandomU15(); int value; switch (selector) { case 0: value = 0; break; case 1: value = 2; break; default: value = 15; break; } SetContestAnimal(ANIMAL_KIND_COW, value); }\n",
                 vec!["ANIMAL_SLOT_1", "ANIMAL_SLOT_3", "ANIMAL_SLOT_16"],
                 vec![],
+            ),
+            (
+                "TestBooleanQuantityBranchConflict",
+                "void TestBooleanQuantityBranchConflict(void) { int value; if (RandomU15()) { value = IsPlayerHoldingNothing(); } else { value = GetKnownRecipeCount(); } if (value == 1) { return; } }\n",
+                vec!["== 1"],
+                vec!["== TRUE", "== FALSE"],
+            ),
+            (
+                "TestBooleanQuantityLoopReassignment",
+                "void TestBooleanQuantityLoopReassignment(void) { int value = IsPlayerHoldingNothing(); do { value = GetKnownRecipeCount(); } while (RandomU15()); if (value == 1) { return; } }\n",
+                vec!["== 1"],
+                vec!["== TRUE", "== FALSE"],
+            ),
+            (
+                "TestBooleanQuantitySwitchConflict",
+                "void TestBooleanQuantitySwitchConflict(void) { int value; switch (RandomU15()) { case 0: value = IsPlayerHoldingNothing(); break; default: value = GetKnownRecipeCount(); break; } switch (value) { case 0: TalkOpen(); break; case 1: TalkClose(); break; default: break; } }\n",
+                vec!["case 0:", "case 1:"],
+                vec!["case TRUE:", "case FALSE:"],
             ),
             (
                 "TestReassignmentBackprop",
@@ -19650,6 +23103,179 @@ fn backward_type_inference_decorates_switch_definitions_and_respects_conflicts()
                 "{target}/{script_name}: inferred constants changed emitted bytecode"
             );
         }
+    }
+}
+
+#[test]
+fn switch_fallthrough_joins_only_real_exit_paths_for_local_types() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestFallthroughExitTypes, };", &options)
+                .unwrap();
+        let numeric = parse_named_scripts(
+            "void TestFallthroughExitTypes(void) { int value; switch (RandomU15()) { case 0: value = GetKnownRecipeCount(); case 1: value = IsPlayerHoldingNothing(); break; default: value = IsPlayerHoldingNothing(); break; } switch (value) { case 0: TalkOpen(); break; case 1: TalkClose(); break; default: break; } }",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestFallthroughExitTypes",
+        )
+        .unwrap();
+        let source = format_named_script("TestFallthroughExitTypes", &raised).unwrap();
+        for expected in ["case FALSE:", "case TRUE:"] {
+            assert!(
+                source.contains(expected),
+                "{target}: missing {expected} after a fully overwritten fallthrough path: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: fallthrough type decoration changed emitted bytecode"
+        );
+    }
+}
+
+#[test]
+fn grouped_switch_labels_merge_conflicting_related_return_domains() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestGroupedKinds, };", &options).unwrap();
+        let numeric = parse_named_scripts(
+            "void TestGroupedKinds(void) { int id = GetPresentedItemId(); switch (GetPresentedItemKind()) { case 0: case 1: switch (id) { case 0: TalkOpen(); break; default: break; } break; default: break; } }",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised =
+            decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestGroupedKinds")
+                .unwrap();
+        let source = format_named_script("TestGroupedKinds", &raised).unwrap();
+        for expected in ["case HELD_ITEM_KIND_FOOD:", "case HELD_ITEM_KIND_ARTICLE:"] {
+            assert!(
+                source.contains(expected),
+                "{target}: missing {expected}: {source}"
+            );
+        }
+        assert!(
+            source.contains("case 0:"),
+            "{target}: conflicting food/article entries must keep the shared item ID numeric: {source}"
+        );
+        for forbidden in ["case FOOD_TURNIP:", "case ARTICLE_FLOWER_MOON_DROP:"] {
+            assert!(
+                !source.contains(forbidden),
+                "{target}: grouped conflicting entries selected one arbitrary domain ({forbidden}): {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: grouped-label refinement changed emitted bytecode"
+        );
+    }
+}
+
+#[test]
+fn grouped_switch_labels_preserve_matching_related_return_domains() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        // This extra test-only relation models two discriminator values which
+        // intentionally share one semantic ID domain. Production metadata has
+        // no such pair yet, so construct it here instead of weakening the
+        // conflict test above.
+        constants_source.push_str(
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_DOG, MaryFoodId);\n",
+        );
+        let constants = parse_constant_header(&constants_source, &options).unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table =
+            parse_script_table("mary_script_table { TestGroupedMatchingKinds, };", &options)
+                .unwrap();
+        let numeric = parse_named_scripts(
+            "void TestGroupedMatchingKinds(void) { int id = GetPresentedItemId(); switch (GetPresentedItemKind()) { case 0: case 2: switch (id) { case 0: TalkOpen(); break; default: break; } break; default: break; } }",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestGroupedMatchingKinds",
+        )
+        .unwrap();
+        let source = format_named_script("TestGroupedMatchingKinds", &raised).unwrap();
+        for expected in [
+            "case HELD_ITEM_KIND_FOOD:",
+            "case HELD_ITEM_KIND_DOG:",
+            "case FOOD_TURNIP:",
+        ] {
+            assert!(
+                source.contains(expected),
+                "{target}: matching grouped-label domain lost {expected}: {source}"
+            );
+        }
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: matching grouped-label refinement changed emitted bytecode"
+        );
     }
 }
 
@@ -21320,7 +24946,7 @@ fn clinic_diagnosis_and_awl_profile_menu_domains_are_target_correct() {
             .constant_value_type("AWL_PROFILE_MENU_CONTINUE_BROWSING")
             .unwrap();
         let diagnosis_type = constants
-            .constant_value_type("CLINIC_DIAGNOSIS_HEALTHY")
+            .constant_value_type("CLINIC_EXAM_RESULT_HEALTHY")
             .unwrap();
         assert_eq!(
             symbols
@@ -21337,6 +24963,495 @@ fn clinic_diagnosis_and_awl_profile_menu_domains_are_target_correct() {
                 .get("var_1"),
             Some(&diagnosis_type),
             "{target} clinic diagnosis"
+        );
+    }
+}
+
+#[test]
+fn music_festival_performance_animations_follow_each_game_family() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+
+    for (target, expected) in [
+        (
+            "MARY_FOMT_US",
+            [
+                ("ANIMATION_KAREN_MUSIC_FESTIVAL_PERFORMANCE", 1705),
+                ("ANIMATION_ANN_MUSIC_FESTIVAL_PERFORMANCE", 2014),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_PERFORMANCE", 2083),
+                ("ANIMATION_ELLI_MUSIC_FESTIVAL_PERFORMANCE", 2212),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_IDLE", 2119),
+            ],
+        ),
+        (
+            "MARY_FOMT_JP",
+            [
+                ("ANIMATION_KAREN_MUSIC_FESTIVAL_PERFORMANCE", 1705),
+                ("ANIMATION_ANN_MUSIC_FESTIVAL_PERFORMANCE", 2014),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_PERFORMANCE", 2083),
+                ("ANIMATION_ELLI_MUSIC_FESTIVAL_PERFORMANCE", 2212),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_IDLE", 2119),
+            ],
+        ),
+        (
+            "MARY_MFOMT_US",
+            [
+                ("ANIMATION_KAREN_MUSIC_FESTIVAL_PERFORMANCE", 1753),
+                ("ANIMATION_ANN_MUSIC_FESTIVAL_PERFORMANCE", 2062),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_PERFORMANCE", 2131),
+                ("ANIMATION_ELLI_MUSIC_FESTIVAL_PERFORMANCE", 2272),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_IDLE", 2167),
+            ],
+        ),
+        (
+            "MARY_MFOMT_JP",
+            [
+                ("ANIMATION_KAREN_MUSIC_FESTIVAL_PERFORMANCE", 1753),
+                ("ANIMATION_ANN_MUSIC_FESTIVAL_PERFORMANCE", 2062),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_PERFORMANCE", 2131),
+                ("ANIMATION_ELLI_MUSIC_FESTIVAL_PERFORMANCE", 2272),
+                ("ANIMATION_MARY_MUSIC_FESTIVAL_IDLE", 2167),
+            ],
+        ),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in expected {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+            let mary::ir::ValueType::UserType(type_id) =
+                constants.constant_value_type(name).unwrap()
+            else {
+                panic!("{target} {name} must have an animation constant type");
+            };
+            assert_eq!(
+                constants.typed_int_const_name(type_id, value),
+                Some(name),
+                "{target} canonical {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn fomt_spouse_newborn_presentation_animations_are_target_scoped() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let expected = [
+        ("ANIMATION_POPURI_WITH_NEWBORN", 583),
+        ("ANIMATION_KAREN_WITH_NEWBORN", 1709),
+        ("ANIMATION_ANN_WITH_NEWBORN", 1994),
+        ("ANIMATION_MARY_WITH_NEWBORN", 2095),
+        ("ANIMATION_ELLI_WITH_NEWBORN", 2196),
+    ];
+
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in expected {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+        }
+    }
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, _) in expected {
+            assert_eq!(
+                constants.const_int_value(name),
+                None,
+                "{target} leaked {name}"
+            );
+        }
+        assert_eq!(constants.const_int_value("ANIMATION_FOAL_IDLE"), Some(1994));
+    }
+}
+
+#[test]
+fn harvest_sprite_wedding_ceremony_animations_follow_each_game_family() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let names = ["STAID", "TIMID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY"];
+
+    for (target, values) in [
+        ("MARY_FOMT_US", [1008, 1092, 1176, 1260, 1344, 1428, 1512]),
+        ("MARY_FOMT_JP", [1008, 1092, 1176, 1260, 1344, 1428, 1512]),
+        ("MARY_MFOMT_US", [1044, 1128, 1212, 1296, 1380, 1464, 1548]),
+        ("MARY_MFOMT_JP", [1044, 1128, 1212, 1296, 1380, 1464, 1548]),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in names.into_iter().zip(values) {
+            let symbol = format!("ANIMATION_{name}_WEDDING_CEREMONY");
+            assert_eq!(
+                constants.const_int_value(&symbol),
+                Some(value),
+                "{target} {symbol}"
+            );
+        }
+    }
+}
+
+#[test]
+fn harvest_sprite_tea_party_animations_follow_each_game_family() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let names = ["STAID", "TIMID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY"];
+
+    for (target, values) in [
+        ("MARY_FOMT_US", [1072, 1156, 1240, 1324, 1408, 1492, 1576]),
+        ("MARY_FOMT_JP", [1072, 1156, 1240, 1324, 1408, 1492, 1576]),
+        ("MARY_MFOMT_US", [1108, 1192, 1276, 1360, 1444, 1528, 1612]),
+        ("MARY_MFOMT_JP", [1108, 1192, 1276, 1360, 1444, 1528, 1612]),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in names.into_iter().zip(values) {
+            let symbol = format!("ANIMATION_{name}_TEA_PARTY");
+            assert_eq!(
+                constants.const_int_value(&symbol),
+                Some(value),
+                "{target} {symbol}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mfomt_rick_and_cliff_item_handover_animations_do_not_collide_with_fomt_wedding_slots() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in [
+            ("ANIMATION_RICK_HAND_OVER_ITEM", 539),
+            ("ANIMATION_CLIFF_HAND_OVER_ITEM", 655),
+            ("ANIMATION_CLIFF_WEDDING_KISS", 667),
+        ] {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+            let mary::ir::ValueType::UserType(type_id) =
+                constants.constant_value_type(name).unwrap()
+            else {
+                panic!("{target} {name} must have an animation constant type");
+            };
+            assert_eq!(
+                constants.typed_int_const_name(type_id, value),
+                Some(name),
+                "{target} canonical {name}"
+            );
+        }
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts =
+            parse_script_table("mary_script_table { TestHandOverItem, };", &options).unwrap();
+        let legacy = parse_named_scripts(
+            "void TestHandOverItem(void) { SetEntityAnim(0, ANIMATION_ID_0539); SetEntityAnim(0, ANIMATION_ID_0655); }",
+            &options,
+            &callables.scope,
+            &scripts,
+        )
+        .unwrap();
+        let semantic = parse_named_scripts(
+            "void TestHandOverItem(void) { SetEntityAnim(0, ANIMATION_RICK_HAND_OVER_ITEM); SetEntityAnim(0, ANIMATION_CLIFF_HAND_OVER_ITEM); }",
+            &options,
+            &callables.scope,
+            &scripts,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&legacy.scripts[0].2),
+            encode_script(&semantic.scripts[0].2),
+            "{target} legacy aliases"
+        );
+    }
+
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        assert_eq!(
+            constants.const_int_value("ANIMATION_CLIFF_WEDDING_KISS"),
+            Some(655)
+        );
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let scripts =
+            parse_script_table("mary_script_table { TestWeddingKiss, };", &options).unwrap();
+        let legacy = parse_named_scripts(
+            "void TestWeddingKiss(void) { SetEntityAnim(0, ANIMATION_ID_0655); }",
+            &options,
+            &callables.scope,
+            &scripts,
+        )
+        .unwrap();
+        let semantic = parse_named_scripts(
+            "void TestWeddingKiss(void) { SetEntityAnim(0, ANIMATION_CLIFF_WEDDING_KISS); }",
+            &options,
+            &callables.scope,
+            &scripts,
+        )
+        .unwrap();
+        assert_eq!(
+            encode_script(&legacy.scripts[0].2),
+            encode_script(&semantic.scripts[0].2),
+            "{target} legacy alias"
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_RICK_HAND_OVER_ITEM"),
+            None
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_CLIFF_HAND_OVER_ITEM"),
+            None
+        );
+    }
+}
+
+#[test]
+fn mfomt_big_bed_sleep_over_animation_stages_are_target_scoped() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let expected = [
+        ("ANIMATION_POPURI_BIG_BED_INITIAL_POSE", 587),
+        ("ANIMATION_POPURI_BIG_BED_DIALOGUE_POSE", 591),
+        ("ANIMATION_KAREN_BIG_BED_INITIAL_POSE", 1745),
+        ("ANIMATION_KAREN_BIG_BED_DIALOGUE_POSE", 1749),
+        ("ANIMATION_ANN_BIG_BED_INITIAL_POSE", 2050),
+        ("ANIMATION_ANN_BIG_BED_DIALOGUE_POSE", 2054),
+        ("ANIMATION_MARY_BIG_BED_INITIAL_POSE", 2135),
+        ("ANIMATION_MARY_BIG_BED_DIALOGUE_POSE", 2139),
+        ("ANIMATION_ELLI_BIG_BED_INITIAL_POSE", 2264),
+        ("ANIMATION_ELLI_BIG_BED_DIALOGUE_POSE", 2268),
+    ];
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in expected {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+            let mary::ir::ValueType::UserType(type_id) =
+                constants.constant_value_type(name).unwrap()
+            else {
+                panic!("{target} {name} must have an animation constant type");
+            };
+            assert_eq!(
+                constants.typed_int_const_name(type_id, value),
+                Some(name),
+                "{target} canonical {name}"
+            );
+        }
+    }
+
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, _) in expected {
+            assert_eq!(
+                constants.const_int_value(name),
+                None,
+                "{target} leaked {name}"
+            );
+        }
+        for (name, value) in [
+            ("ANIMATION_POPURI_WEDDING_IDLE", 591),
+            ("ANIMATION_KAPPA_HANDS_TOGETHER", 2050),
+            ("ANIMATION_WON_IDLE", 2135),
+            ("ANIMATION_WON_WALK", 2139),
+            ("ANIMATION_VAN_IDLE", 2264),
+            ("ANIMATION_VAN_WALK", 2268),
+        ] {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn special_spouse_and_harvest_goddess_event_animations_are_target_scoped() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in [
+            ("ANIMATION_HARVEST_GODDESS_WEDDING_WALK", 1645),
+            ("ANIMATION_HARVEST_GODDESS_HAND_OVER_ITEM", 1649),
+        ] {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+            let mary::ir::ValueType::UserType(type_id) =
+                constants.constant_value_type(name).unwrap()
+            else {
+                panic!("{target} {name} must have an animation constant type");
+            };
+            assert_eq!(constants.typed_int_const_name(type_id, value), Some(name));
+        }
+        for name in [
+            "ANIMATION_GOURMET_IN_BED",
+            "ANIMATION_GOURMET_IN_BED_AWAKE",
+            "ANIMATION_GOURMET_SETTLE_IN_BED",
+            "ANIMATION_WON_IN_BED",
+            "ANIMATION_WON_IN_BED_AWAKE",
+            "ANIMATION_WON_SETTLE_IN_BED",
+        ] {
+            assert_eq!(
+                constants.const_int_value(name),
+                None,
+                "{target} leaked {name}"
+            );
+        }
+        assert_eq!(
+            constants.const_int_value("ANIMATION_KAREN_MUSIC_FESTIVAL_PERFORMANCE"),
+            Some(1705)
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ID_2191"), Some(2191));
+    }
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        for (name, value) in [
+            ("ANIMATION_GOURMET_IN_BED", 1705),
+            ("ANIMATION_GOURMET_IN_BED_AWAKE", 1709),
+            ("ANIMATION_GOURMET_SETTLE_IN_BED", 1713),
+            ("ANIMATION_WON_IN_BED", 2191),
+            ("ANIMATION_WON_IN_BED_AWAKE", 2195),
+            ("ANIMATION_WON_SETTLE_IN_BED", 2199),
+        ] {
+            assert_eq!(
+                constants.const_int_value(name),
+                Some(value),
+                "{target} {name}"
+            );
+            let mary::ir::ValueType::UserType(type_id) =
+                constants.constant_value_type(name).unwrap()
+            else {
+                panic!("{target} {name} must have an animation constant type");
+            };
+            assert_eq!(constants.typed_int_const_name(type_id, value), Some(name));
+        }
+        assert_eq!(
+            constants.const_int_value("ANIMATION_HARVEST_GODDESS_WEDDING_WALK"),
+            None
+        );
+        assert_eq!(
+            constants.const_int_value("ANIMATION_HARVEST_GODDESS_HAND_OVER_ITEM"),
+            None
+        );
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1645"), Some(1645));
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1649"), Some(1649));
+    }
+}
+
+#[test]
+fn unresolved_variable_inventory_is_explicit_for_every_target() {
+    const FOMT_UNKNOWN_IDS: [i64; 26] = [
+        224, 225, 236, 237, 242, 275, 276, 314, 316, 317, 319, 320, 327, 333, 334, 335, 336, 343,
+        344, 381, 382, 383, 385, 423, 449, 536,
+    ];
+    const MFOMT_UNKNOWN_IDS: [i64; 44] = [
+        53, 86, 94, 96, 115, 232, 233, 244, 245, 250, 283, 284, 322, 324, 325, 327, 328, 335, 341,
+        343, 344, 351, 352, 411, 412, 413, 415, 467, 482, 484, 486, 488, 490, 584, 585, 586, 587,
+        588, 589, 590, 591, 628, 697, 705,
+    ];
+    let mut inventories = Vec::new();
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let variable_type = constants.user_type("MaryVarId").unwrap();
+        let unknowns = (0..=1024)
+            .filter_map(|id| {
+                constants
+                    .typed_int_const_name(variable_type, id)
+                    .filter(|name| name.starts_with("VAR_UNKNOWN_SLOT_"))
+                    .map(|name| (id, name.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        let expected_ids = if target.contains("MFOMT") {
+            MFOMT_UNKNOWN_IDS.as_slice()
+        } else {
+            FOMT_UNKNOWN_IDS.as_slice()
+        };
+        assert_eq!(
+            unknowns.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            expected_ids,
+            "{target}: physical unknown-slot inventory"
+        );
+        for (id, name) in &unknowns {
+            assert_eq!(*name, format!("VAR_UNKNOWN_SLOT_{id:03}"), "{target}");
+        }
+        inventories.push((target, unknowns));
+    }
+    assert_eq!(inventories[0].1, inventories[1].1, "FoMT US/JP");
+    assert_eq!(inventories[2].1, inventories[3].1, "MFoMT US/JP");
+}
+
+#[test]
+fn every_physical_callable_has_a_semantic_name_for_every_target() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let callables_source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&callables_source, &options, &constants).unwrap();
+
+        let numbered = callables
+            .scope
+            .callable_map()
+            .keys()
+            .filter(|name| {
+                ["Func", "Proc"].iter().any(|prefix| {
+                    name.strip_prefix(prefix).is_some_and(|suffix| {
+                        !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
+                    })
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert!(
+            numbered.is_empty(),
+            "{target}: numbered callable placeholders remain: {numbered:?}"
         );
     }
 }

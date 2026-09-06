@@ -37,7 +37,7 @@ mary_callable_table
     GetEntityY,
     SetEntityFacing,
     GetEntityFacing,
-    SetEntitySeatState,
+    SetEntitySpritePriority,
     MoveEntityXTo,
     MoveEntityXToRaw,
     MoveEntityYTo,
@@ -238,16 +238,16 @@ mary_callable_table
     HasGoldenLumberOnFarm,
     OpenDoor,
     CloseDoor,
-    CompleteRucksackUpgrade,
-    CompleteBlueFeatherPurchase,
+    RedrawRucksackShelfAfterPurchase,
+    RedrawBlueFeatherShelfAfterPurchase,
     GetHarvestSpriteCurrentTask,
     GetHarvestSpriteWorkDaysLeft,
     GetHarvestSpriteTaskExperience,
     HasHarvestSpritePlayedMinigameToday,
-    HasHarvestSpriteTaskExperience,
+    HasHarvestSpriteMinigameExperience,
     StartHarvestSpriteTask,
-    StopHarvestSpriteWorkForToday,
-    IsHarvestSpriteWorkComplete,
+    ScheduleHarvestSpriteTaskToEndAfterToday,
+    IsHarvestSpriteDailyWorkComplete,
     RunHarvestSpriteAnimalCareMinigame,
     RunHarvestSpriteHarvestingMinigame,
     RunHarvestSpriteWateringMinigame,
@@ -265,7 +265,7 @@ mary_callable_table
     ConfirmTVShoppingOrder,
     CompleteTVShoppingDelivery,
     IsVacationVillaBuilt,
-    AreAllVillagersAtMaxFriendship,
+    AreAllRequiredVillagersAtMaxFriendship,
     HasShippedOneOfEachCrop,
     AreAllFarmAnimalsAtMaxAffection,
     HasShippedOneOfEachMineral,
@@ -323,7 +323,7 @@ mary_callable_table
     SetTextVariableToCaughtFishName,
     GetCaughtFishSize,
     IsCaughtFishMaximumSize,
-    IsCaughtFishRiverKing,
+    IsCaughtFishKing,
     SelectMoonViewingPartner,
 #if defined(MARY_MFOMT)
     SelectMoonViewingPartnerAlias,
@@ -366,7 +366,7 @@ mary_callable_table
     NoOpAnimalEventEntityInitialization,
     SetTextVariableToProductName,
     GetEventContextValue,
-    SelectNextCursedTool,
+    CycleBackwardToNonCursedTool,
 #if defined(MARY_MFOMT)
     IsChickenIncubatorOccupied,
     IsCowPregnancySlotOccupied,
@@ -451,68 +451,107 @@ mary_callable_table
  * Sets a runtime map entity's position and facing.
  * Parameters: entity_id is the runtime map entity ID; x and y are map
  * coordinates; facing is the engine direction value.
+ * Uses the current scene's map, so this is not merely an X/Y assignment.
+ * Positioning ENTITY_PLAYER on a mine floor also updates the shared deepest
+ * floor reached record, only when the new floor is deeper. Both mines feed
+ * that record; their map-number ranges differ between FoMT and MFoMT.
+ * Player placement also enters family-specific visit-counter paths: FoMT's
+ * library second floor feeds Mary's affection bonuses; MFoMT's church feeds
+ * Cliff's. The MFoMT church path suppresses counting while the active romance
+ * marker is Rick/Kai/Cliff/Gray/Doctor's marriage event, any of Cliff's four
+ * heart events or proposal, or Kappa/Won/Gourmet's wedding event; it also
+ * suppresses counting during the initial Music Festival phase. These are
+ * guarded counters, not affection added on every call. Their repeat guards
+ * are cleared by the daily state-update path reached from
+ * RebuildMapEntitiesForNewDay in all four targets. Do not treat this call as
+ * a side-effect-free visual operation.
  *
  * 设置运行时地图实体的位置与朝向。
  * 参数：entity_id 为运行时地图实体 ID；x、y 为地图坐标；facing 为引擎朝向值。
+ * 使用当前场景的地图，因此不只是给 X/Y 赋值。将 ENTITY_PLAYER 定位到矿内
+ * 楼层时，还会在楼层更深的情况下更新两座矿共用的历史最深到达层数记录。
+ * FoMT 与 MFoMT 的矿地图编号区间不同。玩家定位还会进入版本特有的访问计数
+ * 路径：FoMT 图书馆二楼的计数关联玛丽爱情度奖励，MFoMT 教堂的计数关联
+ * 克里夫爱情度奖励。MFoMT 在当前活动恋爱事件标记属于 Rick／Kai／Cliff／
+ * Gray／Doctor 的结婚事件、Cliff 的四阶段爱情事件或求婚事件、Kappa／Won／
+ * Gourmet 的婚礼事件时不会计数；音乐节处于初始阶段时也不会计数。计数受
+ * 重复保护，并非每次调用都增加爱情度；四个目标都会在
+ * RebuildMapEntitiesForNewDay 进入的每日状态更新路径中清除该保护。不能把本
+ * 函数当作没有其他副作用的纯显示操作。
  */
 void SetEntityPosition(MaryEntityId entity_id, MaryMapSpaceX x, MaryMapSpaceY y, MaryFacingDirection facing);
 
 /*
  * Returns a runtime map entity's X coordinate.
  * Parameter: entity_id is the runtime map entity ID.
- * Return value: the entity's map X coordinate.
+ * Return value: the signed integer part of the entity's Q16.16 map X
+ * coordinate, or 0 when the entity is absent. Zero is also a valid coordinate.
  *
  * 返回运行时地图实体的 X 坐标。
  * 参数：entity_id 为运行时地图实体 ID。
- * 返回值：实体的地图 X 坐标。
+ * 返回值：实体 Q16.16 地图 X 坐标的有符号整数部分；实体不存在时返回 0。
+ * 0 本身也是合法坐标，不能用于判断实体是否存在。
  */
 MaryMapSpaceX GetEntityX(MaryEntityId entity_id);
 
 /*
  * Returns a runtime map entity's Y coordinate.
  * Parameter: entity_id is the runtime map entity ID.
- * Return value: the entity's map Y coordinate.
+ * Return value: the signed integer part of the entity's Q16.16 map Y
+ * coordinate, or 0 when the entity is absent. Zero is also a valid coordinate.
  *
  * 返回运行时地图实体的 Y 坐标。
  * 参数：entity_id 为运行时地图实体 ID。
- * 返回值：实体的地图 Y 坐标。
+ * 返回值：实体 Q16.16 地图 Y 坐标的有符号整数部分；实体不存在时返回 0。
+ * 0 本身也是合法坐标，不能用于判断实体是否存在。
  */
 MaryMapSpaceY GetEntityY(MaryEntityId entity_id);
 
 /*
  * Sets a runtime map entity's facing direction.
  * Parameters: entity_id is the runtime map entity ID; facing is the engine
- * direction value.
+ * direction value. An absent entity or an unchanged direction is a no-op.
+ * Changing direction refreshes the current animation base + facing; it does
+ * not replace the animation group. The native setter stores a byte, not a
+ * validated two-bit enum, so use FACING_DOWN/UP/LEFT/RIGHT rather than relying
+ * on out-of-range values being rejected. All four SetAnimFacing bodies agree.
  *
  * 设置运行时地图实体的朝向。
  * 参数：entity_id 为运行时地图实体 ID；facing 为引擎朝向值。
+ * 实体不存在或朝向未变时不操作；朝向改变时刷新“当前动画组起点 + 朝向”，
+ * 不替换动画组。原生 setter 存储的是字节，并非经过校验的两位枚举；应使用
+ * FACING_DOWN/UP/LEFT/RIGHT，不要指望引擎拒绝域外数值。四版 SetAnimFacing
+ * 函数体一致。
  */
 void SetEntityFacing(MaryEntityId entity_id, MaryFacingDirection facing);
 
 /*
  * Returns a runtime map entity's facing direction.
  * Parameter: entity_id is the runtime map entity ID.
- * Return value: the engine direction value.
+ * Return value: the stored direction byte, or 0 if the entity does not exist.
+ * Consequently FACING_DOWN alone does not prove that the entity exists.
  *
  * 返回运行时地图实体的朝向。
  * 参数：entity_id 为运行时地图实体 ID。
- * 返回值：引擎朝向值。
+ * 返回值：已存储的朝向字节；实体不存在时也返回 0。因此单凭 FACING_DOWN
+ * 不能证明实体存在。
  */
 MaryFacingDirection GetEntityFacing(MaryEntityId entity_id);
 
 /*
- * Forces a runtime entity's seated-state phase.
- * Parameters: entity_id selects
- * the event entity through the scene's virtual entity lookup; seat_state is
- * written to the actor byte at offset 0x21. Vanilla tea-party scripts use state
- * 1 while seating the sprites and state 2 when releasing that arrangement.
+ * Sets a runtime entity's default OBJ display priority; it does not seat or
+ * release an actor. Parameters: entity_id selects the scene entity; priority
+ * is stored in actor byte +0x21 and its low two bits feed the sprite renderer.
+ * Tea-party scripts use 1 at the table and restore 2 afterward to change
+ * occlusion. The visual controller can override this default with a per-piece
+ * priority mapping, so it is not an unconditional "draw in front" command.
  *
- * 强制设置运行时实体的就座状态阶段。
- * 参数：entity_id 会经场景虚函数查询选中
- * 事件实体；seat_state 写入角色偏移 0x21 的字节字段。原版茶会脚本在安排
- * 小矮人就座时使用状态 1，在解除该安排时使用状态 2。
+ * 设置运行时实体的默认 OBJ 显示优先级，并不使角色就座或离座。
+ * 参数：entity_id 选择场景实体；priority 写入角色 +0x21 字节，绘制时取低两位。
+ * 茶会脚本在桌边使用 1，结束后恢复 2，以改变遮挡关系。视觉控制器可以用逐部件
+ * 优先级映射覆盖此默认值，因此它不是无条件的“显示在最前”命令。
  */
-void SetEntitySeatState(MaryEntityId entity_id, MaryEntitySeatState seat_state);
+void SetEntitySpritePriority(MaryEntityId entity_id, MaryEntitySpritePriority priority);
 
 /*
  * Starts horizontal movement toward an absolute X coordinate.
@@ -520,11 +559,26 @@ void SetEntitySeatState(MaryEntityId entity_id, MaryEntitySeatState seat_state);
  * coordinate; speed is a MaryEntityMoveSpeed measured in pixels per frame and
  * converted by the engine to Q16.16. The call starts movement and returns immediately; use
  * WaitForEntityMovement when synchronization is required.
+ * X/Y and Raw variants share one movement command per entity; a later call
+ * replaces the previous axis/target rather than combining into diagonal motion.
+ * Setup discards the selected coordinate's fractional part. Zero speed or a
+ * target equal to that integer coordinate clears the movement command;
+ * otherwise the speed magnitude is used and the target is stored as u16.
+ * Negative target coordinates therefore do not mean movement outside the map:
+ * they wrap in the native target field. No source-bytecode normalization is done.
+ * Evidence: the paired native setup bodies at FoMT-US 0x08032308,
+ * FoMT-JP 0x0803209C, MFoMT-US 0x080326C4 and MFoMT-JP 0x08032538 agree.
  *
  * 启动实体向绝对 X 坐标的水平移动。
  * 参数：entity_id 为运行时场景实体编号；x 为目标坐标；speed 为以每帧像素数
  * 表示的 MaryEntityMoveSpeed，引擎会将其转换成 Q16.16。本调用只启动移动并立即返回；需要同步时应再调用
  * WaitForEntityMovement。
+ * X/Y 及 Raw 变体共用每个实体唯一的移动命令；后一次调用覆盖前一次的轴与目标，
+ * 不会组合成斜向移动。设置时丢弃所选坐标的小数部分；速度为零或目标等于该整数
+ * 坐标时，清除移动命令；否则使用速度的绝对值，并将目标存入 u16 字段。
+ * 因此负目标坐标并不表示向地图外移动，而会在原生目标字段中回绕；编译器不会
+ * 因此擅自改写源字节码。证据为四版相同的成对设置函数：FoMT-US 0x08032308、
+ * FoMT-JP 0x0803209C、MFoMT-US 0x080326C4、MFoMT-JP 0x08032538。
  */
 void MoveEntityXTo(MaryEntityId entity_id, MaryMapSpaceX x, MaryEntityMoveSpeed speed);
 
@@ -533,10 +587,12 @@ void MoveEntityXTo(MaryEntityId entity_id, MaryMapSpaceX x, MaryEntityMoveSpeed 
  * Parameters: entity_id is the
  * runtime scene entity; x is the absolute target coordinate; speed_q16 is a
  * MaryEntityMoveSpeedQ16 passed directly without scaling.
+ * The shared-command, zero-speed and u16-target rules of MoveEntityXTo apply.
  *
  * 与 MoveEntityXTo 相同地启动水平移动。
  * 参数：entity_id 为运行时场景实体；
  * x 为绝对目标坐标；speed_q16 为 MaryEntityMoveSpeedQ16，会直接传入而不做缩放。
+ * 同样遵循 MoveEntityXTo 的共用命令、零速度及 u16 目标字段规则。
  */
 void MoveEntityXToRaw(MaryEntityId entity_id, MaryMapSpaceX x, MaryEntityMoveSpeedQ16 speed_q16);
 
@@ -545,10 +601,12 @@ void MoveEntityXToRaw(MaryEntityId entity_id, MaryMapSpaceX x, MaryEntityMoveSpe
  * Parameters: entity_id selects the runtime scene entity; y is the target
  * coordinate; speed is a MaryEntityMoveSpeed measured in pixels per frame and
  * converted by the engine to Q16.16. Use WaitForEntityMovement when synchronization is required.
+ * Shares the command slot and target-storage rules documented for MoveEntityXTo.
  *
  * 启动实体向绝对 Y 坐标的垂直移动。
  * 参数：entity_id 为运行时场景实体编号；y 为目标坐标；speed 为以每帧像素数
  * 表示的 MaryEntityMoveSpeed，引擎会将其转换成 Q16.16。需要同步时应再调用 WaitForEntityMovement。
+ * 与 MoveEntityXTo 共用移动命令，并遵循其目标存储规则。
  */
 void MoveEntityYTo(MaryEntityId entity_id, MaryMapSpaceY y, MaryEntityMoveSpeed speed);
 
@@ -557,10 +615,12 @@ void MoveEntityYTo(MaryEntityId entity_id, MaryMapSpaceY y, MaryEntityMoveSpeed 
  * Parameters: entity_id is the
  * runtime scene entity; y is the absolute target coordinate; speed_q16 is a
  * MaryEntityMoveSpeedQ16 passed directly without scaling.
+ * The shared-command, zero-speed and u16-target rules of MoveEntityXTo apply.
  *
  * 与 MoveEntityYTo 相同地启动垂直移动。
  * 参数：entity_id 为运行时场景实体；
  * y 为绝对目标坐标；speed_q16 为 MaryEntityMoveSpeedQ16，会直接传入而不做缩放。
+ * 同样遵循 MoveEntityXTo 的共用命令、零速度及 u16 目标字段规则。
  */
 void MoveEntityYToRaw(MaryEntityId entity_id, MaryMapSpaceY y, MaryEntityMoveSpeedQ16 speed_q16);
 
@@ -579,27 +639,42 @@ void MoveEntityYToRaw(MaryEntityId entity_id, MaryMapSpaceY y, MaryEntityMoveSpe
 void WaitForEntityMovement(MaryEntityId entity_id);
 
 /*
- * Sets a runtime map entity's animation.
+ * Sets a runtime map entity's direction-relative animation group.
  * Parameters: entity_id is the runtime map entity ID; animation_id is the
- * target-specific engine animation ID from the complete ANIMATION_ID_* domain.
+ * group's base ID in the target-specific ANIMATION_ID_* domain, not an
+ * already direction-adjusted frame/animation ID. AActorEntity::SetAnim stores
+ * the base and refreshes base + current facing. SetEntityAnim skips this call
+ * when the entity is absent or already has that base, so repeating it does
+ * not restart the animation. SetEntityFacing changes the directional offset.
+ * Native SetAnim entries are FoMT-US 0x080321B0, FoMT-JP 0x08031F44,
+ * MFoMT-US 0x0803256C, MFoMT-JP 0x080323E0; their bodies are byte-identical.
+ * Not every physical ANIMATION_ID_* is a suitable group base. The compiler
+ * preserves the supplied integer and does not silently align it to a group.
  *
- * 设置运行时地图实体的动画。
- * 参数：entity_id 为运行时地图实体 ID；animation_id 使用目标版本完整的
- * ANIMATION_ID_* 引擎动画域。
+ * 设置运行时地图实体随朝向变化的动画组。
+ * 参数：entity_id 为运行时地图实体 ID；animation_id 是目标版本 ANIMATION_ID_*
+ * 域内的动画组起点，不是已经加过朝向偏移的动画编号或帧编号。
+ * AActorEntity::SetAnim 保存组起点，再刷新“起点 + 当前朝向”。实体不存在或
+ * 已经使用该组时，SetEntityAnim 不调用刷新，因此重复设置不会重启动画；
+ * SetEntityFacing 则改变朝向偏移。四版 SetAnim 原生入口依次为 0x080321B0、
+ * 0x08031F44、0x0803256C、0x080323E0，其函数体逐字节一致。
+ * 并非任意物理 ANIMATION_ID_* 都适合作为组起点；编译器原样保留输入整数，
+ * 不会擅自将其对齐到某个动画组。
  */
 void SetEntityAnim(MaryEntityId entity_id, MaryAnimationId animation_id);
 
 /*
- * Compatibility no-op at callable slot 0x00E. The VM consumes one integer,
- * then all four native FoMT/MFoMT US/JP implementations call an empty function
- * that immediately returns. It is exposed so otherwise-unused binary input
- * containing this slot can still round-trip without an unknown call.
+ * Compatibility no-op at callable slot 0x00E. The VM consumes one integer.
+ * With no current script entity it exits directly; otherwise all four native
+ * FoMT/MFoMT US/JP implementations call an empty function that immediately
+ * returns, then exit. It is exposed so otherwise-unused binary input containing
+ * this slot can still round-trip without an unknown call.
  * Parameter: unused_value is preserved only as the observed stack operand;
  * the native no-op does not inspect it.
  *
- * callable 槽 0x00E 的兼容空操作。VM 会取出一个整数，随后 FoMT/MFoMT 的
- * US/JP 四版原生实现都会调用一个立即返回的空函数。公开它仅用于让包含该槽的
- * 二进制输入仍能无损往返，而不是建议新脚本使用。
+ * callable 槽 0x00E 的兼容空操作。VM 会取出一个整数；不存在当前脚本实体时
+ * 直接退出，否则 FoMT/MFoMT 的 US/JP 四版原生实现会调用一个立即返回的空函数，
+ * 随后退出。公开它仅用于让包含该槽的二进制输入仍能无损往返，而不是建议新脚本使用。
  * 参数：unused_value 仅用于保留观察到的栈操作数；原生空操作不会检查它。
  */
 void NoOp014(int unused_value);
@@ -639,11 +714,21 @@ void SetEntityAuxRenderProfile(MaryEntityId entity_id, MaryEntityAuxRenderProfil
  * emote bubble; persistent is zero for the ordinary finite form and nonzero
  * for the persistent form. effect_id uses ENTITY_EMOTE_* or the exact numeric
  * resource index.
+ * The ordinary form clears on the animator's first wrap notification (bit 2),
+ * not after a fixed frame count. Persistent mode skips that automatic clear;
+ * it does not override the animation's timing. A zero-duration frame or a
+ * stopped animator can prevent wrapping, so use StopEntityEffect when explicit
+ * cleanup is required. FoMT-US reads this status at 0x08032670; the matching
+ * JP/MFoMT paths and animation stepper bodies are byte-identical.
  *
  * 在运行时场景实体上启动一个附加视觉效果。
  * 参数：entity_id 选择实体；effect_id 使用 ENTITY_EMOTE_* 或精确数字资源
  * 索引来选择表情气泡；persistent 为零时使用普通有限时长形式，非零时使用
  * 持续形式。
+ * 普通形式在动画器首次发出回绕通知（第 2 位）时清除，并非经过固定帧数后清除。
+ * 持续模式跳过此自动清除，但不覆盖动画本身的时序。零时长帧或停止的动画器
+ * 可能不会发生回绕；需要明确清理时应调用 StopEntityEffect。FoMT-US 在
+ * 0x08032670 检查该状态，其余三版对应路径和动画步进函数体均逐字节一致。
  */
 void StartEntityEffect(MaryEntityId entity_id, MaryEntityEmoteId effect_id, MaryBool persistent);
 
@@ -680,12 +765,16 @@ MaryFacingDirection GetOppositeFacing(MaryFacingDirection facing);
  * value `location`, and all four ROM handlers return the same map-ID field
  * consumed by ChangeMap and the fireplace callables.
  * Parameter: entity_id is the runtime map entity ID.
- * Return value: the entity's MaryMapId.
+ * Return value: the entity's MaryMapId, or MAP_NONE for an absent entity.
+ * MAP_NONE is 0x0234 in FoMT and 0x023A in MFoMT; it can also identify a
+ * detached/hidden entity, so it is not a unique missing-entity indicator.
  *
  * 返回运行时地图实体所在的地图。FoMT 源码将该值称为 `location`；四个 ROM
  * 的处理函数均返回与 ChangeMap 及壁炉函数共用的地图 ID 字段。
  * 参数：entity_id 为运行时地图实体 ID。
- * 返回值：实体所在地图的 MaryMapId。
+ * 返回值：实体所在地图的 MaryMapId；实体不存在时返回 MAP_NONE（FoMT 为
+ * 0x0234，MFoMT 为 0x023A）。脱离地图／隐藏的实体也可以具有该值，因此它
+ * 不是“实体不存在”的唯一标志。
  */
 MaryMapId GetEntityLocation(MaryEntityId entity_id);
 
@@ -707,7 +796,7 @@ MaryMapId GetEntityLocation(MaryEntityId entity_id);
  * 当前有符号 X、Y 字段，分别加上 delta_x、delta_y，再把结果交给实体位置更新
  * 函数。FoMT/MFoMT 的 US/JP 对应事件脚本都会用它把婚礼参与者平移一格。
  */
-void OffsetEntityPosition(MaryEntityId entity_id, int delta_x, int delta_y);
+void OffsetEntityPosition(MaryEntityId entity_id, MaryMapSpaceX delta_x, MaryMapSpaceY delta_y);
 
 /*
  * Changes the active field map and installs the destination coordinates in
@@ -732,6 +821,16 @@ void ChangeMap(MaryMapId map_id, MaryMapSpaceX x, MaryMapSpaceY y);
  * entity. Scripts commonly start matching movement for entity 0 separately,
  * then pan the camera to the same destination. Use WaitForCameraMovement when
  * later commands must wait for the pan itself.
+ * The native camera setup treats speed 0 as 1, not as a stop command.
+ * x/y request the viewport center, not its top-left corner. The engine
+ * subtracts (120, 80), then bounds the resulting viewport origin using map
+ * width/height minus (240, 160). Near map edges the requested point therefore
+ * need not appear at the screen center. These remain map-space coordinates.
+ * The controller derives an integer update count from distance/speed (at
+ * least one for a nonzero integer displacement), then divides the fixed-point
+ * displacement by that count. Integer rounding means speed is not an exact
+ * per-update displacement guarantee. A new pan replaces the stored increments
+ * and count; it is not appended to a movement queue.
  *
  * 启动事件镜头向指定地图坐标平移。
  * 参数：x、y 为地图空间中的镜头目标；speed 为场景控制器采用的整数移动速度。
@@ -739,6 +838,13 @@ void ChangeMap(MaryMapId map_id, MaryMapSpaceX x, MaryMapSpaceY y);
  * 本函数不会移动玩家实体。脚本经常另外启动实体 0 的对应移动，再让
  * 镜头以同一目标同步平移。后续指令必须等待镜头本身完成时，应调用
  * WaitForCameraMovement。
+ * 原生镜头初始化会将速度 0 按 1 处理，0 不是停止命令。
+ * x/y 指定期望的视口中心，而非左上角。引擎先减去 (120, 80)，再根据地图
+ * 宽高减去 (240, 160) 限制视口起点；因此靠近地图边缘时，指定点不一定能
+ * 出现在屏幕正中央。这些参数仍属于地图空间坐标。
+ * 控制器由距离／速度求出整数更新次数（整数位移非零时至少为一次），再以
+ * 定点位移除以次数得到增量。因此受整数取整影响，speed 不保证每次更新都
+ * 精确移动该距离。新的平移会覆盖已存储的增量与计数，不会追加到移动队列。
  */
 void PanCameraTo(MaryMapSpaceX x, MaryMapSpaceY y, MaryCameraMoveSpeed speed);
 
@@ -746,9 +852,14 @@ void PanCameraTo(MaryMapSpaceX x, MaryMapSpaceY y, MaryCameraMoveSpeed speed);
  * Suspends the current script until the field controller reports that the
  * active event-camera pan has finished. It does not wait for an entity's
  * movement; use WaitForEntityMovement for that independent state.
+ * Completion means the camera's remaining-update counter has reached zero,
+ * not an exact coordinate comparison. Each camera update adds the stored
+ * Q16.16 X/Y increments and decrements this counter.
  *
  * 暂停当前脚本，直到场景控制器报告正在执行的事件镜头平移已经完成。它不会
  * 等待实体移动；后者是由 WaitForEntityMovement 独立等待的状态。
+ * 完成条件是镜头的剩余更新计数归零，并非精确比较坐标。每次镜头更新会
+ * 累加已存储的 Q16.16 X/Y 增量，并将该计数减一。
  */
 void WaitForCameraMovement(void);
 
@@ -778,27 +889,58 @@ void StopBGM(void);
  * Parameters: start_mode selects AUDIO_START,
  * AUDIO_START_WEAK, or AUDIO_START_OR_CONTINUE; sequence_id is the m4a
  * song-table sequence ID.
+ * The native PlaySong handler keeps only the low 16 bits of sequence_id.
+ * This truncation is not a song-table bounds check; use a sequence present
+ * in the selected ROM. Mary-C preserves the original integer in bytecode.
+ * The handler chooses the first stopped player in its pool. If none is
+ * stopped, it applies the requested start mode to the last player instead;
+ * there is no request queue or automatic wait for a free player.
  *
  * 通过事件可用的 MusicPlayer 播放歌曲或音效序列。
  * 参数：start_mode 选择 AUDIO_START、AUDIO_START_WEAK 或
  * AUDIO_START_OR_CONTINUE；sequence_id 为 m4a 曲目表中的序列 ID。
+ * 原生 PlaySong handler 只保留 sequence_id 的低 16 位。这不是曲目表边界
+ * 检查，仍应使用目标 ROM 中实际存在的序列。Mary-C 在字节码中保留原始整数。
+ * handler 优先选择池中第一个已停止的播放器；若全都未停止，则对最后一个
+ * 播放器执行所选启动模式。没有请求队列，也不会自动等待播放器空闲。
  */
 void PlaySong(MaryAudioStartMode start_mode, MaryAudioSequenceId sequence_id);
 
 /*
  * Stops all active songs or sound sequences.
+ * This calls the global m4a player-table stop operation, not just the event
+ * PlaySong pool. It can stop background music as well; use StopBGM when only
+ * the dedicated background-music player should be stopped.
  * Parameters: none.
  *
  * 停止所有正在播放的歌曲或声音序列。
+ * 本函数调用全局 m4a 播放器表的停止操作，不只处理事件 PlaySong 播放器池，
+ * 因而也可能停止背景音乐。若只需停止专用背景音乐播放器，应使用 StopBGM。
  * 参数：无。
  */
 void StopAllSongs(void);
 
 /*
  * Fades out the current background music.
+ * Requests the m4a fade with fixed speed parameter 5 only when the dedicated
+ * BGM player is not stopped. The script continues without waiting for the
+ * fade to finish; 5 is an engine fade parameter, not a duration in seconds.
+ * The m4a parameter reloads the countdown between volume steps. A repeated
+ * accepted request reinitializes this countdown and the fade volume; it does
+ * not simply leave an existing fade untouched.
+ * An uninterrupted fade decreases the internal level from 64 by 4 every
+ * five FadeOutBody updates: 16 steps (80 such updates), then track stop and
+ * player pause. These are updater calls, not a wall-clock timing guarantee.
  * Parameters: none.
  *
  * 淡出当前背景音乐。
+ * 仅在专用 BGM 播放器未停止时，以固定速度参数 5 请求 m4a 淡出。脚本不会
+ * 等待淡出完成；5 是引擎淡出参数，不是以秒计的持续时间。
+ * 此 m4a 参数用于重装音量步进之间的倒计时。再次被接受的请求会重新初始化
+ * 倒计时及淡出音量，并非保持正在进行的淡出不变。
+ * 未被中途重置时，内部音量从 64 开始，每五次 FadeOutBody 更新降低 4，
+ * 共十六级（八十次该函数更新），然后停止音轨并暂停播放器。此处是更新
+ * 函数调用次数，不保证实际经过的墙钟时间。
  * 参数：无。
  */
 void FadeOutBGM(void);
@@ -806,10 +948,15 @@ void FadeOutBGM(void);
 /*
  * Destroys and clears the talk UI's auxiliary components and active text
  * window, then clears the corresponding active-state bit. This is a stronger
- * reset than TalkClose() and was not called by the four vanilla script sets.
+ * reset than TalkClose(). The four vanilla script sets contain no direct
+ * call to this callable, but selected VarSet event-state transitions invoke
+ * the same native cleanup internally; absence of a script call does not mean
+ * this cleanup is unused. Parameters: none.
  *
  * 销毁并清空对话界面的辅助组件及当前文本窗口，同时清除对应的活动状态位。
- * 本操作比 TalkClose() 更彻底，四套原版脚本均未调用它。
+ * 本操作比 TalkClose() 更彻底。四套原版脚本均无对此 callable 的直接调用，
+ * 但部分 VarSet 事件状态变化会在内部调用相同的原生清理函数，不能据此认定
+ * 该清理逻辑未使用。参数：无。
  */
 void ResetTalkUi(void);
 
@@ -838,9 +985,14 @@ void TalkOpenNoPortrait(void);
 
 /*
  * Closes the dialogue window opened by TalkOpen.
+ * With no text-window object, the native close routine does nothing. Otherwise
+ * it requests the closing state and clears internal window flags; unlike
+ * ResetTalkUi, this routine does not destroy and null the window object.
  * Parameters: none.
  *
  * 关闭由 TalkOpen 打开的对话框。
+ * 没有文本窗口对象时，原生关闭函数不执行操作；否则请求进入关闭状态并清理
+ * 窗口内部标志。与 ResetTalkUi 不同，该函数不会销毁并置空窗口对象。
  * 参数：无。
  */
 void TalkClose(void);
@@ -1107,12 +1259,18 @@ void FadeInScreenAlias(MaryScreenFadeStyle fade_style, MaryScreenFadeSpeed fade_
  * Parameter: frame_count is written to the event state as an unsigned 16-bit
  * counter; values outside 0-65535 are truncated to their low 16 bits by the
  * native handler.
+ * The waiting state decrements before testing for zero. A low-halfword value
+ * of zero therefore takes 65536 waiting-state updates, not zero; -1 takes
+ * 65535. This is not an immediate-return primitive or a wall-clock timer.
  *
  * 将当前脚本暂停 frame_count 个引擎帧。
  * 参数：frame_count 会作为无符号 16 位计数器写入事件状态；原生处理函数会把
  * 超出 0-65535 的值截成低 16 位。
+ * 等待状态先递减再判断是否为零。因此低 16 位为零时需要 65536 次等待状态
+ * 更新才结束，而不是立即返回；-1 对应 65535 次。它不是立即返回操作，
+ * 也不是按实际时间计时的定时器。
  */
-void WaitFrames(int frame_count);
+void WaitFrames(MaryFrameCount frame_count);
 
 /*
  * Calls another slot in the selected ROM's ordered script table.
@@ -1146,8 +1304,10 @@ void SetTextVariableNumber(MaryTextVariableSlot variable_index, int value);
  * decimal field width when nonzero. Shorter values are left-padded with ASCII
  * spaces; longer values lose their most-significant digits and retain only
  * the requested number of low-order digits. A zero width disables padding
- * and truncation. The native formatter has a ten-digit work buffer, so new
- * scripts should keep field_width in the original 0-10 domain. variable_index
+ * and truncation. The US and JP native formatters use different loops, but
+ * neither validates an arbitrary caller-supplied width before indexing its
+ * local work buffer. New scripts must keep field_width in the original 0-10
+ * domain; this is a caller contract, not a runtime clamp. variable_index
  * must be TEXT_VARIABLE_1 through TEXT_VARIABLE_4 because the native setter
  * does not bounds-check the destination. Shipped scripts
  * use width 2 for dates and width 3 for stock counts.
@@ -1156,21 +1316,26 @@ void SetTextVariableNumber(MaryTextVariableSlot variable_index, int value);
  * 参数：variable_index 选择 {Var1}、{Var2} 等槽位；value 为要显示的有符号
  * 整数；field_width 非零时是精确十进制字段宽度。位数不足会在左侧补 ASCII
  * 空格，位数超出则截去高位、只保留指定数量的低位；宽度 0 表示不补齐也不
- * 截断。原生格式化器的工作缓冲区为十位，新脚本应维持原版 0-10 的宽度域。
+ * 截断。US 与 JP 原生格式化器使用不同循环，但都不会在索引局部工作缓冲区之前
+ * 校验调用方给出的任意宽度。新脚本必须维持原版 0-10 的宽度域；这是调用契约，
+ * 不是运行时限幅。
  * variable_index 必须是 TEXT_VARIABLE_1 至 TEXT_VARIABLE_4，因为原生 setter
  * 不检查目标槽是否越界。原版脚本中，日期使用宽度 2，库存数量使用宽度 3。
  */
 void SetTextVariableNumberFieldWidth(
     MaryTextVariableSlot variable_index,
     int value,
-    int field_width
+    MaryTextNumberFieldWidth field_width
 );
 
 /*
  * Writes a string into a numbered text-substitution slot.
  * Parameters: variable_index must be TEXT_VARIABLE_1 through TEXT_VARIABLE_4;
  * the native setter performs no bounds check. text is copied into the slot
- * and truncated to at most 22 encoded bytes before the terminating zero.
+ * and truncated before the terminating zero: FoMT-US keeps at most 22 encoded
+ * bytes, FoMT-JP 20, MFoMT-US 28, MFoMT-JP 20. This is byte truncation, not
+ * character-aware truncation; it can split a multibyte character in modified
+ * text. RIFF strings themselves are not limited to this substitution length.
  * Calendar, clock, tool-name, and invitation scripts pass RIFF text symbols
  * here and later expand them through {Var1}-{Var4}. FOMT Studio's `Check_Date`
  * label is a type-recovery error: it renders the second text reference as an
@@ -1178,7 +1343,10 @@ void SetTextVariableNumberFieldWidth(
  *
  * 将字符串写入编号文本替换槽。
  * 参数：variable_index 必须是 TEXT_VARIABLE_1 至 TEXT_VARIABLE_4，原生 setter
- * 不做越界检查。text 会复制到该槽，并在终止零字节前最多保留 22 个编码字节。
+ * 不做越界检查。text 会复制到该槽，在终止零字节前的编码字节上限分别为：
+ * FoMT-US 22、FoMT-JP 20、MFoMT-US 28、MFoMT-JP 20。这里按字节截断，
+ * 不识别字符边界，改写文本时可能截断多字节字符。RIFF 字符串本身不受这个
+ * 替换槽长度上限约束。
  * 日历、时钟、工具名称及邀请脚本会在此传入 RIFF 文本符号，随后通过
  * {Var1}-{Var4} 展开。FOMT Studio 的 `Check_Date` 标签源于类型恢复错误：它把
  * 第二个文本引用显示成了整数表索引。本 callable 在 FoMT 为 0x03A，在 MFoMT
@@ -1197,15 +1365,23 @@ int RandomU15(void);
 /*
  * Generates a random integer in the inclusive range [min_value, max_value].
  * Parameters: min_value is the inclusive lower bound; max_value is the
- * inclusive upper bound. The native handler requires min_value <= max_value;
- * an inverted range skips random generation and does not produce a valid VM
- * result, so callers must not use it.
+ * inclusive upper bound. Use min_value <= max_value for a meaningful range;
+ * an inverted range skips random generation and pushes zero (assuming a
+ * valid VM stack). This fallback is not a sample from the requested range.
+ * Implementation: min_value + native_rand() % (max_value - min_value + 1).
+ * Unlike RandomU15(), this uses the native 31-bit sample without a 15-bit
+ * mask. The width must fit a positive signed 32-bit integer. Direct modulo
+ * reduction introduces bias when the width does not divide 2147483648.
  * Return value: a generated integer inside the requested range.
  *
  * 生成闭区间 [min_value, max_value] 内的随机整数。
  * 参数：min_value 为包含在内的下界；max_value 为包含在内的上界。原生处理
- * 函数要求 min_value <= max_value；反向区间会跳过随机数生成，且不会产生
- * 有效的 VM 返回值，因此调用者不得传入反向区间。
+ * 函数在 min_value <= max_value 时执行区间采样；反向区间会跳过随机数
+ * 生成并压入零（前提是 VM 栈有效）。此回退值不是请求区间内的随机样本。
+ * 实现为 min_value + native_rand() % (max_value - min_value + 1)。与
+ * RandomU15() 不同，此处直接使用原生 31 位样本，不施加 15 位掩码。区间
+ * 宽度必须能用正的 32 位有符号整数表示；宽度不能整除 2147483648 时，
+ * 直接取余会引入分布偏差。
  * 返回值：请求区间内生成的整数。
  */
 int RandomIntInclusive(int min_value, int max_value);
@@ -1225,10 +1401,46 @@ int VarGet(MaryVarId var_id);
 /*
  * Writes a numbered game-state variable.
  * Parameters: var_id is VAR_* or the exact numeric variable ID; value is the
- * integer stored in that variable.
+ * requested integer value. Return value: none; use VarGet to observe the result.
+ * Readability does not imply writeability: IDs below 28 have no native
+ * storage setter in any target. In particular, writing VAR_PLAYER_FATIGUE
+ * neither changes fatigue nor dispatches a variable-change notification.
+ * Use ChangePlayerStaminaAndFatigue for relative stamina/fatigue adjustment,
+ * observing its mode guard and fatigue scaling.
+ * The selected setter may normalize or truncate value; it is not an arbitrary
+ * integer storage cell.
+ * Child age/birthday and the pregnancy-day counter are also read-only through
+ * this callable. The child walking state is set-only: zero cannot clear it.
+ * VAR_WEDDING_SEASON and VAR_WEDDING_DAY are read-only through VarSet in all
+ * four targets: their entries skip storage. Marriage progression updates the
+ * packed wedding date through a separate native path.
+ * VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID also has no storage setter or
+ * change notification in any target; VarSet cannot select the submitted dish.
+ * Some event-state IDs also run post-write processing when their stored value
+ * changes: 1 registers the ID in a deduplicated list
+ * of at most three entries, while 0 and 2 remove it without reordering the
+ * remaining entries. Registration can also invoke the same context-object
+ * cleanup as ResetTalkUi (physical callable slot 0x01E in all four targets).
+ * These effects are ID-dependent, not a universal rule for every VAR_*.
  *
  * 写入编号游戏状态变量。
  * 参数：var_id 为 VAR_* 或精确数字变量 ID；value 为写入的整数。
+ * 返回值：无；应通过 VarGet 读取操作后的实际状态。
+ * 可读取不代表可写入：四个目标版本的编号 28 以下均没有原生存储写入分支。
+ * 特别是写入 VAR_PLAYER_FATIGUE 既不会改变疲劳，也不会分派变量变化通知。
+ * 相对调整体力／疲劳应使用 ChangePlayerStaminaAndFatigue，并注意其模式门控
+ * 和疲劳数值尺度。
+ * 具体写入分支可能将 value 归一化或截断，并非任意整数存储单元。
+ * 孩子年龄／生日及孕期天数也不能通过此函数写入。孩子学步状态只能置位，
+ * 写入零不能将其清除。
+ * 四版的 VAR_WEDDING_SEASON 和 VAR_WEDDING_DAY 均不能通过 VarSet 写入：
+ * 对应入口跳过存储操作，婚姻进度通过另一条原生路径更新打包的婚礼日期。
+ * 四版的 VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID 也没有存储写入或变化通知，
+ * 不能通过 VarSet 选择提交的料理。
+ * 部分事件状态 ID 在实际存储值变化后还会执行后处理：1 将 ID 登记到最多三个成员的
+ * 去重列表，0 或 2 则移除该 ID，保留其余成员顺序。登记还可能调用与
+ * ResetTalkUi（四版物理 callable 槽 0x01E）相同的上下文对象清理。
+ * 这些副作用取决于 ID，并非所有 VAR_* 的统一规则。
  */
 void VarSet(MaryVarId var_id, int value);
 
@@ -1461,7 +1673,7 @@ MaryHeldToolStackCount GetPlayerHeldToolStackCount(void);
  * 背包堆叠数量。原生 ToolStack 构造函数会把 0 转成 1，并把大于 99 的值
  * 限制为 99。
  */
-void SetPlayerHeldTool(MaryToolId tool_id, int stack_count);
+void SetPlayerHeldTool(MaryToolId tool_id, MaryRequestedToolStackCount stack_count);
 
 /*
  * Clears the player's currently held tool.
@@ -1536,51 +1748,65 @@ MaryRucksackSlotIndex GetFirstFreeRucksackItemSlot(void);
 /*
  * Attempts to add an article stack to the rucksack.
  * Parameters: article_id is ARTICLE_* or the exact original article ID;
- * requested_count is the number of copies to add. Each article occupies one
- * item slot.
+ * requested_count is a nonnegative number of copies to add. Each article
+ * occupies one item slot. The native routine treats the quantity as u32 and
+ * does not reject negative Mary-C values.
  * Return value: the number of copies that could not be added. Zero means the
  * full request fit in the currently unlocked item slots.
  *
  * 尝试向背包加入一组物品。
  * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID；requested_count 为请求
- * 加入的份数。每份物品占用一个物品槽。
+ * 加入的非负份数。每份物品占用一个物品槽。原生例程把数量视为 u32，不会
+ * 拒绝 Mary-C 负值。
  * 返回值：未能加入背包的剩余份数；返回 0 表示请求数量全部装入当前已解锁
  * 的物品槽。
  */
-MaryUnaddedItemCount AddArticleToRucksack(MaryArticleId article_id, int requested_count);
+MaryUnaddedItemCount AddArticleToRucksack(
+    MaryArticleId article_id,
+    MaryRequestedInventoryCount requested_count
+);
 
 /*
  * Attempts to add a food stack to the rucksack.
  * Parameters: food_id is FOOD_* or the exact original food ID;
- * requested_count is the number of copies to add. Each food occupies one item
- * slot.
+ * requested_count is a nonnegative number of copies to add. Each food occupies
+ * one item slot. The native routine treats the quantity as u32 and does not
+ * reject negative Mary-C values.
  * Return value: the number of copies that could not be added. Zero means the
  * full request fit in the currently unlocked item slots.
  *
  * 尝试向背包加入一组食品。
  * 参数：food_id 为 FOOD_* 或精确原始食品 ID；requested_count 为请求加入的
- * 份数。每份食品占用一个物品槽。
+ * 非负份数。每份食品占用一个物品槽。原生例程把数量视为 u32，不会拒绝
+ * Mary-C 负值。
  * 返回值：未能加入背包的剩余份数；返回 0 表示请求数量全部装入当前已解锁
  * 的物品槽。
  */
-MaryUnaddedItemCount AddFoodToRucksack(MaryFoodId food_id, int requested_count);
+MaryUnaddedItemCount AddFoodToRucksack(
+    MaryFoodId food_id,
+    MaryRequestedInventoryCount requested_count
+);
 
 /*
  * Attempts to add a quantity of one tool ID to the rucksack. Existing stacks
  * of the same tool are filled first and each tool stack holds at most 99.
  * Parameters: tool_id is TOOL_* or the exact original tool ID;
- * requested_count is the inventory quantity to add.
+ * requested_count is the nonnegative inventory quantity to add. The native
+ * routine treats it as u32 and does not reject negative Mary-C values.
  * Return value: the quantity that could not be added. Zero means the full
  * request fit in the currently unlocked tool slots.
  *
  * 尝试向背包加入指定数量的同一种工具。引擎会先填充已有的同 ID 工具堆，
  * 每个工具堆最多保存 99 个。
  * 参数：tool_id 为 TOOL_* 或精确原始工具 ID；requested_count 为请求加入的
- * 背包数量。
+ * 非负背包数量。原生例程把它视为 u32，不会拒绝 Mary-C 负值。
  * 返回值：未能加入背包的剩余数量；返回 0 表示请求数量全部装入当前已解锁
  * 的工具槽。
  */
-MaryUnaddedItemCount AddToolToRucksack(MaryToolId tool_id, int requested_count);
+MaryUnaddedItemCount AddToolToRucksack(
+    MaryToolId tool_id,
+    MaryRequestedInventoryCount requested_count
+);
 
 /*
  * Makes the player actor visibly hold or present a tool.
@@ -1602,6 +1828,15 @@ void ShowPlayerHoldingTool(MaryToolId tool_id);
  * bathroom and fireplace effects, collapse treatment, and Doctor/Kai events.
  * This callable is physical slot 0x05B in FoMT and 0x05C in MFoMT because
  * MFoMT inserts ShowPlayerHoldingTool immediately before it.
+ * fatigue_delta is an adjustment input, not a raw stored-byte delta. On the
+ * normal adjustment path, positive fatigue is doubled without the Mystic
+ * Berry and left undoubled with it; negative fatigue is doubled in either
+ * case. The fatigue helper uses an internal upper limit of 200. Do not treat
+ * this internal scale as a displayed percentage or use extreme integers.
+ * VarGet(VAR_PLAYER_FATIGUE) returns floor(internal fatigue / 2), not the
+ * raw stored value; odd internal changes can be invisible in a single read.
+ * While EnableScriptedNpcControl's global mode is active, the player entity
+ * returns before applying either adjustment.
  *
  * 对玩家体力与疲劳应用有符号变化量。
  * 参数：stamina_delta 改变体力；fatigue_delta 改变疲劳。
@@ -1609,8 +1844,19 @@ void ShowPlayerHoldingTool(MaryToolId tool_id);
  * 效果、昏倒治疗以及 Doctor/Kai 事件中都使用相同参数约定。该 callable 在
  * FoMT 的物理槽为 0x05B；MFoMT 在它之前插入了 ShowPlayerHoldingTool，故其
  * 物理槽顺延为 0x05C。
+ * fatigue_delta 是调整输入，不是原始存储字节的变化量。正常调整路径中，
+ * 正疲劳输入在未取得神秘果实时翻倍、取得后不翻倍；负疲劳输入则始终翻倍。
+ * 疲劳辅助函数的内部上限为 200，不能将此内部尺度直接当成显示百分比，
+ * 也不应传入极端整数。
+ * VarGet(VAR_PLAYER_FATIGUE) 返回内部疲劳值除以 2 后向下取整的结果，而非
+ * 原始存储值；内部增加奇数时，单次读取可能看不出变化。
+ * EnableScriptedNpcControl 启用的全局模式生效期间，玩家实体会在应用这两项
+ * 调整之前直接返回。
  */
-void ChangePlayerStaminaAndFatigue(int stamina_delta, int fatigue_delta);
+void ChangePlayerStaminaAndFatigue(
+    MaryStaminaDelta stamina_delta,
+    MaryFatigueDelta fatigue_delta
+);
 
 /*
  * Tests whether the player is currently holding a tool.
@@ -1670,11 +1916,21 @@ void RemoveAllOwnedArticles(MaryArticleId article_id);
  * Parameters: none. This updates the Farmer power-berry state itself; event
  * flags that prevent an individual berry from being collected twice remain
  * the responsibility of the calling script.
+ * The acquisition routine updates the count before setting up its animation.
+ * The counter helper increments only when the existing count is below 10;
+ * a count of 10 or greater is left unchanged, not reset to 10.
+ * A successful increment also adds 10 current stamina, capped at the newly
+ * computed maximum; it does not fully heal the player. At count >= 10 the
+ * helper skips both the increment and stamina recovery.
  *
  * 给予玩家一枚力量果实，并执行引擎的取得动作。
  * 参数：无。
  * 本函数会直接更新 Farmer 的力量果实状态；用于防止某一枚果实被重复取得的
  * 事件标志，仍由调用脚本负责设置。
+ * 取得处理函数先更新计数，再设置动画。计数辅助函数只在原计数小于 10 时
+ * 增加；已有计数大于等于 10 时保持原值，不会强制修正为 10。
+ * 成功增加计数时也增加当前体力 10 点，以新的体力上限为限，并非回满体力。
+ * 计数已大于等于 10 时，计数增加和体力恢复都会跳过。
  */
 void ObtainPowerBerry(void);
 
@@ -1683,9 +1939,19 @@ void ObtainPowerBerry(void);
  * cucumbers, and runs the corresponding engine acquisition action.
  * Parameters: none. The calling event separately records that this unique
  * reward has been claimed.
+ * Its Farmer-state helper sets a single flag; it does not increment
+ * the Power Berry count or restore stamina. Repeating it leaves that flag set
+ * rather than stacking another numerical bonus.
+ * Read the acquired state with VarGet(VAR_HAS_MYSTIC_BERRY). This is the
+ * Farmer flag, separate from the Kappa reward event's progression state;
+ * VarSet cannot write this read-only variable ID.
  *
  * 给予玩家向 Kappa 供奉十根黄瓜后获得的神秘果实，并执行对应的引擎取得动作。
  * 参数：无。该唯一奖励是否已经领取，仍由调用事件另行记录。
+ * 其 Farmer 状态辅助函数仅设置一个标志位，不增加力量果实计数，也不恢复体力。
+ * 重复调用只是保持该标志已设置，并不会叠加新的数值奖励。
+ * 用 VarGet(VAR_HAS_MYSTIC_BERRY) 读取取得状态；这是 Farmer 的标志，
+ * 与河童奖励事件的进度状态不同。该变量编号只读，不能通过 VarSet 写入。
  */
 void ObtainMysticBerry(void);
 
@@ -2016,27 +2282,37 @@ MaryBool IsCharacterAtPlayerLocation(MaryCharacterId character_id);
  * 参数：character_id 为 CHARACTER_* 或目标版本的精确 ID。
  * 返回值：NPC 当前的友好度；ID 无法解析为 NPC 时返回零。
  */
-int GetNpcFriendship(MaryCharacterId character_id);
+MaryNpcFriendshipValue GetNpcFriendship(MaryCharacterId character_id);
 
 /*
  * Adds a signed amount to an NPC's friendship points.
  * Parameters: character_id selects the NPC; amount is the signed adjustment.
  * This is the modifying counterpart of GetNpcFriendship.
+ * The native 32-bit sum is limited to 0-255 after addition. Avoid extreme
+ * adjustments that overflow signed 32-bit arithmetic; they can wrap before
+ * the limit checks. An unresolved character ID leaves NPC state unchanged.
  *
  * 对 NPC 的友好度点数增加一个有符号数值。
  * 参数：character_id 选择 NPC；amount 为有符号调整量。
  * 本函数是 GetNpcFriendship 对应的修改操作。
+ * 原生先进行 32 位加法，再将结果限制到 0-255。应避免导致有符号 32 位
+ * 溢出的极端调整量，因为结果可能在范围检查前回绕。人物 ID 无法解析时，
+ * 不修改 NPC 状态。
  */
-void AddNpcFriendship(MaryCharacterId character_id, int amount);
+void AddNpcFriendship(MaryCharacterId character_id, MaryNpcFriendshipDelta amount);
 
 /*
  * Replaces an NPC's friendship value.
  * Parameters: character_id selects the NPC; friendship is the new value.
+ * This directly stores the low eight bits, unlike AddNpcFriendship's limit
+ * checks: 256 becomes 0, and -1 becomes 255. An unresolved ID is ignored.
  *
  * 直接替换 NPC 的友好度数值。
  * 参数：character_id 选择 NPC；friendship 为新的友好度数值。
+ * 本函数直接写入低八位，不执行 AddNpcFriendship 的范围限制：256 变成 0，
+ * -1 变成 255。无法解析的人物 ID 被忽略。
  */
-void SetNpcFriendship(MaryCharacterId character_id, int friendship);
+void SetNpcFriendship(MaryCharacterId character_id, MaryNpcFriendshipValue friendship);
 
 /*
  * Gets the number of days since the player last spoke to an NPC.
@@ -2047,7 +2323,7 @@ void SetNpcFriendship(MaryCharacterId character_id, int friendship);
  * 参数：character_id 选择 NPC。
  * 返回值：保存的天数；ID 无效时返回零。
  */
-int GetDaysSinceLastSpokenToNpc(MaryCharacterId character_id);
+MaryDaysSinceNpcConversation GetDaysSinceLastSpokenToNpc(MaryCharacterId character_id);
 
 /*
  * Records that the player has just spoken to an NPC.
@@ -2125,43 +2401,61 @@ MaryBool WasNpcGiftedToday(MaryCharacterId character_id);
  * 返回值：当前爱情度；ID 不是恋爱候选人时返回零。FOMT 对应女性候选人，
  * MFOMT 对应男性候选人。
  */
-int GetCharacterLove(MaryCharacterId character_id);
+MaryCharacterLoveValue GetCharacterLove(MaryCharacterId character_id);
 
 /*
  * Adds a signed amount to a romance candidate's love points.
  * Parameters: character_id selects the target-specific candidate; amount is
  * the signed adjustment. This is the modifying counterpart of GetCharacterLove.
+ * The native 32-bit sum is limited to 0-65535, not the friendship range
+ * 0-255. Extreme adjustments can overflow before these limit checks.
  *
  * 对恋爱候选人的爱情度点数增加一个有符号数值。
  * 参数：character_id 选择目标版本中的恋爱候选人；amount 为有符号调整量。
  * 本函数是 GetCharacterLove 对应的修改操作。
+ * 原生 32 位加法结果限制到 0-65535，并非友好度的 0-255；极端调整量
+ * 可能在范围检查前溢出。
  */
-void AddCharacterLove(MaryCharacterId character_id, int amount);
+void AddCharacterLove(MaryCharacterId character_id, MaryCharacterLoveDelta amount);
 
 /*
  * Replaces a romance candidate's love points with an exact value.
  * Parameters: character_id selects the target-specific candidate; love is the
  * new absolute value. Unlike AddCharacterLove(), this does not apply a delta.
+ * Only the low 16 bits are stored: 65536 becomes 0 and -1 becomes 65535.
  * Invalid or non-romance character IDs leave the candidate table unchanged.
  *
  * 将恋爱候选人的爱情度直接替换为指定值。
  * 参数：character_id 选择目标版本中的恋爱候选人；love 为新的绝对值。与
  * AddCharacterLove() 不同，本函数不会把参数当作增量。无效或非恋爱候选人的
  * ID 不会修改候选人表。
+ * 仅写入低 16 位：65536 变成 0，-1 变成 65535，并非封顶处理。
  */
-void SetCharacterLove(MaryCharacterId character_id, int love);
+void SetCharacterLove(MaryCharacterId character_id, MaryCharacterLoveValue love);
 
 /*
  * Assigns an event script to a live scene entity.
  * Parameters: entity_id selects the scene entity; script_id is a symbol from
  * mary_scripts.mary.h or the exact target-specific script-table ID.
- * The entity ID is deliberately untyped because it addresses live scene
- * entities rather than the character-name table.
+ * entity_id uses MaryEntityId (ENTITY_*), not MaryCharacterId (CHARACTER_*):
+ * it addresses a live scene entity rather than the character-name table.
+ * For NPC entities, stores the low 16 bits as a script override, without
+ * executing the script immediately. Zero selects the entity's default script
+ * instead of overriding it. Entities 70-73 instead store a record's low-16-bit
+ * script value directly; their getter has no zero-to-default fallback in any
+ * of the four targets. Other actor classes may ignore this operation;
+ * do not assume every entity supports script binding. Use a valid entity ID:
+ * an empty-slot check is not an out-of-range index check.
  *
  * 为当前场景中的实体绑定事件脚本。
  * 参数：entity_id 选择场景实体；script_id 为 mary_scripts.mary.h 中的符号或
- * 目标版本脚本表的精确 ID。实体 ID 指向运行时场景实体，并非人物名称表编号，
- * 因此有意保留为普通 int。
+ * 目标版本脚本表的精确 ID。entity_id 使用 MaryEntityId（ENTITY_*），
+ * 而不是 MaryCharacterId（CHARACTER_*）；它指向运行时场景实体，并非人物名称表。
+ * 对 NPC 实体，将脚本 ID 的低 16 位保存为覆盖值，不会立即执行该脚本。
+ * 零表示使用实体默认脚本，而不是覆盖它。实体 70-73 则直接保存记录中的
+ * 低 16 位脚本值；四个版本的读取函数均没有零值回退到默认脚本的逻辑。
+ * 其他角色实体类型可能忽略此操作，
+ * 不能假定所有实体都支持脚本绑定。须使用有效实体 ID；空槽检查不等于越界检查。
  */
 void SetEntityEventScript(MaryEntityId entity_id, MaryScriptId script_id);
 
@@ -2169,9 +2463,19 @@ void SetEntityEventScript(MaryEntityId entity_id, MaryScriptId script_id);
  * Clears the event script assigned to a live scene entity.
  * Parameter: entity_id selects the same scene-entity domain used by
  * SetEntityEventScript.
+ * NPC entities clear the override to zero, restoring selection of their
+ * default script. This does not necessarily disable interaction or erase
+ * the default script, and is not a command to abort an already running script.
+ * Entities 70-73 instead clear their record's script halfword directly;
+ * their getter returns zero without selecting a default. Other entity types
+ * may ignore the setter. Use a valid entity ID, as for SetEntityEventScript.
  *
  * 清除当前场景实体已绑定的事件脚本。
  * 参数：entity_id 与 SetEntityEventScript 使用同一个运行时场景实体编号域。
+ * NPC 实体把覆盖值清零，从而恢复选择默认脚本；这不一定禁用交互，也不会
+ * 删除默认脚本，更不是用于中止已运行脚本的指令。
+ * 实体 70-73 则直接清零记录中的脚本半字；读取时返回零，不选择默认脚本。
+ * 其他实体类型可能忽略该设置。与 SetEntityEventScript 一样，须使用有效实体 ID。
  */
 void ClearEntityEventScript(MaryEntityId entity_id);
 
@@ -2401,15 +2705,17 @@ MaryGameCubeLinkResult RunGameCubeLink(void);
  * Opens the name-entry interface for the selected target kind.
  * Parameter:
  * kind is NAME_ENTRY_* or an exact numeric kind; target_index selects the
- * animal slot for animal births and is zero for the horse, child, and custom
- * spouse-nickname forms. The call completes after the entered name has been
- * stored by the engine.
+ * animal slot for animal births and is NAME_ENTRY_SINGLETON_SLOT for the
+ * horse, child, and custom spouse-nickname forms. Native construction preserves
+ * this target byte and the completed input task carries it back unchanged.
+ * The call completes after the entered name has been stored by the engine.
  *
  * 为指定目标类型打开命名输入界面。参数 kind 为 NAME_ENTRY_* 或精确数字类型；
- * target_index 在动物出生时选择动物槽位，马、孩子及自定义配偶昵称形式使用 0。
- * 调用会在引擎保存输入名称后完成。
+ * target_index 在动物出生时选择动物槽位，马、孩子及自定义配偶昵称形式使用
+ * NAME_ENTRY_SINGLETON_SLOT。原生构造会保留该目标字节，输入完成后的任务也会
+ * 将其原样带回。调用会在引擎保存输入名称后完成。
  */
-void OpenNameEntry(MaryNameEntryKind kind, int target_index);
+void OpenNameEntry(MaryNameEntryKind kind, MaryNameEntryTargetIndex target_index);
 
 /*
  * Starts the farm-inheritance flashback shown during Thomas's opening
@@ -2655,54 +2961,78 @@ MaryArticleId GetVaseArticleId(void);
 
 /*
  * Tests whether a chicken-coop feed trough is already filled.
- * Parameter: trough_index uses CHICKEN_FEED_TROUGH_*; only 1-4 are available
- * before the coop upgrade and all eight afterwards.
- * Return value: nonzero when feed is present; zero when the trough is empty.
+ * Parameter: trough_index uses CHICKEN_COOP_FEED_TROUGH_SLOT_*; only slots
+ * 01-04 are available before the coop upgrade and all eight afterwards.
+ * Return value: 1 when feed is present; 0 when empty or beyond current
+ * capacity. This query does not trigger the setter's map-tile refresh.
  * Feed-box inspection scripts pair this with FillChickenFeedTrough.
  *
  * 判断鸡舍中的指定饲料槽是否已经放入饲料。
- * 参数：trough_index 使用 CHICKEN_FEED_TROUGH_*；扩建前仅 1-4 号可用，
- * 扩建后八个全部可用。
- * 返回值：已有饲料时为非零，饲料槽为空时为零。饲料箱检查脚本会将其与
+ * 参数：trough_index 使用 CHICKEN_COOP_FEED_TROUGH_SLOT_*；扩建前仅槽位
+ * 01-04 可用，扩建后八个全部可用。
+ * 返回值：已有饲料时为 1；为空或超出当前容量时为 0。本查询不触发设置函数
+ * 的地图图块刷新。饲料箱检查脚本会将其与
  * FillChickenFeedTrough 配对使用。
  */
 MaryBool IsChickenFeedTroughFilled(MaryChickenFeedTroughIndex trough_index);
 
 /*
  * Fills a chicken-coop feed trough.
- * Parameter: trough_index uses CHICKEN_FEED_TROUGH_* and is checked against
- * the current four- or eight-trough capacity.
+ * Parameter: trough_index uses CHICKEN_COOP_FEED_TROUGH_SLOT_* and is checked
+ * against the current four- or eight-trough capacity.
  * Call IsChickenFeedTroughFilled first when the script must avoid replacing
  * feed that is already present.
+ * In all four targets the storage setter only sets a feed bit, without consuming
+ * inventory. In all four targets the later map refresh indexes an X-coordinate
+ * table with the original trough index, without its own capacity check.
+ * Always pass a valid trough index; do not rely on invalid input being a no-op.
  *
  * 向鸡舍中的指定饲料槽放入饲料。
- * 参数：trough_index 使用 CHICKEN_FEED_TROUGH_*，并按当前四个或八个槽的
- * 容量校验。若脚本需要避免覆盖已有饲料，应先调用 IsChickenFeedTroughFilled。
+ * 参数：trough_index 使用 CHICKEN_COOP_FEED_TROUGH_SLOT_*，并按当前四个或
+ * 八个槽的容量校验。若脚本需要避免覆盖已有饲料，应先调用
+ * IsChickenFeedTroughFilled。
+ * 四个版本的存储设置函数均只设置饲料位，不扣库存。后续地图刷新
+ * 均用原始槽位编号索引 X 坐标表，没有独立容量检查。必须传入有效编号，不可依赖
+ * 越界输入会安全地不执行任何操作。
  */
 void FillChickenFeedTrough(MaryChickenFeedTroughIndex trough_index);
 
 /*
  * Begins egg incubation in the selected coop incubator.
- * Parameter: incubator_index uses CHICKEN_INCUBATOR_1 or
- * CHICKEN_INCUBATOR_2. Only the first exists before the coop upgrade.
+ * Parameter: incubator_index uses CHICKEN_INCUBATOR_SOUTH or
+ * CHICKEN_INCUBATOR_NORTH. Only the south incubator exists before the upgrade.
  * Check IsIncubatorOccupied before calling when replacement is not intended.
+ * The four native storage setters mark the incubator occupied and set its
+ * countdown to 3, even if it was already occupied. Egg validation and removal
+ * belong to the surrounding script, not this storage setter.
+ * An out-of-capacity index skips the storage write, but the outer context
+ * method still forwards that index to its refresh callback. Use a valid
+ * incubator index; the storage guard is not a whole-call no-op guarantee.
  *
  * 在选定的鸡舍孵化箱中开始孵化鸡蛋。
- * 参数：incubator_index 使用 CHICKEN_INCUBATOR_1 或
- * CHICKEN_INCUBATOR_2；扩建前只有第一个存在。不希望覆盖时，应先调用
+ * 参数：incubator_index 使用 CHICKEN_INCUBATOR_SOUTH 或
+ * CHICKEN_INCUBATOR_NORTH；扩建前只有南侧孵化箱存在。不希望覆盖时，应先调用
  * IsIncubatorOccupied 检查。
+ * 四个版本的原生存储函数都会设置占用标记，并将倒计时设为 3；已经占用时
+ * 也会重置。鸡蛋检查与扣除由外围脚本负责，不由该存储函数完成。
+ * 超出当前容量的编号会跳过存储写入，但外层上下文方法仍将该编号传给刷新
+ * 回调。应使用有效孵化箱编号，不能将存储层保护等同于整个调用毫无影响。
  */
 void BeginEggIncubation(MaryChickenIncubatorIndex incubator_index);
 
 /*
  * Tests whether a chicken-coop incubator is occupied.
- * Parameter: incubator_index uses CHICKEN_INCUBATOR_*.
- * Return value: nonzero when occupied; zero when available.
+ * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
+ * CHICKEN_INCUBATOR_NORTH.
+ * Return value: TRUE when occupied; FALSE when empty or outside current
+ * incubator capacity. FALSE alone does not prove that an index is usable.
  * Incubator inspection scripts use indices 0 and 1.
  *
  * 判断鸡舍中的指定孵化器是否已被占用。
- * 参数：incubator_index 使用 CHICKEN_INCUBATOR_*。
- * 返回值：已占用时为非零，可用时为零。孵化器检查脚本使用索引 0 和 1。
+ * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
+ * CHICKEN_INCUBATOR_NORTH。
+ * 返回值：已占用时为 TRUE；为空或超出当前孵化箱容量时均返回 FALSE，
+ * 所以仅凭 FALSE 不能认定编号可用。孵化器检查脚本使用索引 0 和 1。
  */
 MaryBool IsIncubatorOccupied(MaryChickenIncubatorIndex incubator_index);
 
@@ -2715,46 +3045,64 @@ MaryBool IsIncubatorOccupied(MaryChickenIncubatorIndex incubator_index);
  * 参数：无。
  * 返回值：鸡舍扩建前为 1，扩建后为 2。
  */
-int GetIncubatorCapacity(void);
+MaryIncubatorCapacity GetIncubatorCapacity(void);
 
 /*
  * Tests whether the egg in an incubator has reached its hatch day.
- * Parameter: incubator_index uses CHICKEN_INCUBATOR_* and is checked against
- * the current one- or two-incubator capacity.
+ * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
+ * CHICKEN_INCUBATOR_NORTH and is checked against the current capacity.
  * Return value: nonzero when ready to hatch; zero otherwise.
  *
  * 判断指定孵化箱中的鸡蛋是否已经到达孵化日。
- * 参数：incubator_index 使用 CHICKEN_INCUBATOR_*，并按当前一个或两个
- * 孵化箱的容量校验。
+ * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
+ * CHICKEN_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
  * 返回值：可以孵化时为非零，否则为零。
  */
 MaryBool IsEggReadyToHatch(MaryChickenIncubatorIndex incubator_index);
 
 /*
  * Hatches a ready egg and inserts the new chick into the chicken-coop roster.
- * Parameter: incubator_index uses CHICKEN_INCUBATOR_* and is checked against
- * the current one- or two-incubator capacity.
+ * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
+ * CHICKEN_INCUBATOR_NORTH and is checked against the current capacity.
  * Return value: the new chicken's roster slot, or -1 if hatching fails.
+ * All four targets clear incubator occupancy before inserting the chick.
+ * A later insertion failure does not restore the egg. The readiness check
+ * requires an occupied incubator with its countdown at zero.
+ * After constructing the chick, all targets add rand() % 10 affection
+ * (0-9 points) before insertion. Construction initializes affection to zero,
+ * so this is also the newborn's initial total. This is not an event-state ID.
  *
  * 孵化已经到期的鸡蛋，并将新生小鸡加入鸡舍动物列表。
- * 参数：incubator_index 使用 CHICKEN_INCUBATOR_*，并按当前一个或两个
- * 孵化箱的容量校验。
+ * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
+ * CHICKEN_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
  * 返回值：新生小鸡的列表槽位；孵化失败时为 -1。
+ * 四个版本都先清除孵化箱占用状态，再将小鸡插入列表；之后插入失败不会
+ * 恢复鸡蛋。孵化条件要求孵化箱处于占用状态，且倒计时为零。
+ * 四个版本都在构造小鸡后、插入列表前增加 rand() % 10 的好感度（0-9 点）。
+ * 构造时好感度初始化为零，因此这也是小鸡的初始总好感度，不是事件状态编号。
  */
 MaryChickenSlotIndex AttemptEggHatch(MaryChickenIncubatorIndex incubator_index);
 
 /*
  * Tests whether a barn feed trough is already filled.
- * Parameter: trough_index uses BARN_FEED_TROUGH_* for ordinary troughs or
- * BARN_PREGNANCY_FEED_TROUGH_* for pregnancy-stall troughs. The handler checks
- * the selected group against the current barn-upgrade capacity.
- * Return value: nonzero when fodder is present; zero when the trough is empty.
+ * Parameter: trough_index uses BARN_FEED_TROUGH_{NORTH,SOUTH}_ROW_SLOT_* for
+ * ordinary troughs or BARN_PREGNANCY_FEED_TROUGH_{NORTH,SOUTH} for pregnancy
+ * troughs. The handler checks the selected group against current capacity.
+ * Return value: 1 when fodder is present; 0 when empty or outside the selected
+ * group's current capacity. Unlike FillBarnFeedTrough, this query does not
+ * invoke the map coordinate-table refresh path.
+ * A physical trough index is not an animal roster index. FoMT-US Barn::DayUpdate
+ * pools ordinary trough feed and distributes it to eligible animals; pregnancy
+ * feed is first checked against the animal linked to that pregnancy stall.
  *
  * 判断牛羊小屋中的指定饲料槽是否已经放入饲料。
- * 参数：trough_index 使用 BARN_FEED_TROUGH_* 选择普通槽，或使用
- * BARN_PREGNANCY_FEED_TROUGH_* 选择怀孕槽；处理函数会按当前牛羊舍扩建
- * 状态校验对应分组的容量。
- * 返回值：已有牧草时为非零，饲料槽为空时为零。
+ * 参数：trough_index 使用 BARN_FEED_TROUGH_{NORTH,SOUTH}_ROW_SLOT_* 选择
+ * 普通槽，或使用 BARN_PREGNANCY_FEED_TROUGH_{NORTH,SOUTH} 选择怀孕槽；
+ * 处理函数会按当前牛羊舍扩建状态校验对应分组的容量。
+ * 返回值：已有牧草时为 1；为空或超出对应分组当前容量时为 0。与
+ * FillBarnFeedTrough 不同，本查询不会进入地图坐标表刷新路径。
+ * 物理饲料槽索引不是动物记录索引。FoMT-US Barn::DayUpdate 汇总普通槽中的
+ * 饲料，再分配给符合条件的动物；妊娠槽饲料则先检查该妊娠栏关联的动物。
  */
 MaryBool IsBarnFeedTroughFilled(MaryBarnFeedTroughIndex trough_index);
 
@@ -2763,10 +3111,25 @@ MaryBool IsBarnFeedTroughFilled(MaryBarnFeedTroughIndex trough_index);
  * Parameter: trough_index uses the same normal-stall and pregnancy-stall
  * encoding as IsBarnFeedTroughFilled. Feed-box scripts normally check the
  * trough first; scripted tutorials may fill it directly.
+ * In all four targets, the Barn storage setters only set the selected feed bit; they
+ * do not subtract stored fodder. The ordinary feed-box script separately
+ * calls UsePlayerHeldItem before FillBarnFeedTrough. Preserve that separation
+ * when implementing a player-fed interaction; filling a bit twice does not
+ * create two portions of feed.
+ * Use a valid trough index: all four targets subsequently forward the original
+ * index to the current map's feed-tile refresh. That path indexes coordinate
+ * tables without the storage setter's capacity guard; rejected storage
+ * indices are not guaranteed to make the entire callable a safe no-op.
  *
  * 向牛羊小屋中的指定饲料槽放入牧草。
  * 参数：trough_index 使用与 IsBarnFeedTroughFilled 相同的普通畜栏和怀孕畜栏
  * 编码。饲料箱脚本通常会先检查饲料槽；教学事件也可能直接放入牧草。
+ * 四个版本的 Barn 存储设置函数只设置所选饲料位，不扣减库存牧草。普通饲料箱
+ * 脚本会在 FillBarnFeedTrough 之前另行调用 UsePlayerHeldItem。编写玩家投喂
+ * 交互时应保留这种分工；同一个饲料位设置两次不会变成两份饲料。
+ * 必须使用有效饲料槽编号：四个版本后续仍把原始编号传给当前地图的饲料图块
+ * 刷新路径，该路径索引坐标表时没有沿用存储函数的容量检查。因此，存储函数
+ * 拒绝越界编号并不保证整个 callable 会安全地不执行任何操作。
  */
 void FillBarnFeedTrough(MaryBarnFeedTroughIndex trough_index);
 
@@ -2794,66 +3157,112 @@ void StartShipmentBoxDepositAnimation(void);
  * 参数：无。
  * 返回值：畜舍扩建前为 1，扩建后为 2。
  */
-int GetPregnancyStallCapacity(void);
+MaryPregnancyStallCapacity GetPregnancyStallCapacity(void);
 
 /*
  * Tests whether the cow or sheep in a pregnancy stall is ready to give birth.
- * Parameter: pregnancy_stall_index uses BARN_PREGNANCY_STALL_*; only the
- * first stall exists before the barn upgrade.
+ * After validating the linked animal, all four targets require healthy
+ * pregnancy days > 20 OR total pregnancy days >= 30. The two native getters
+ * return zero when the animal is not pregnant; this is not an unconditional
+ * 21-calendar-day timer. The shared daily updater increments total pregnancy
+ * days every day while pregnant, regardless of feeding or sickness, and
+ * increments healthy pregnancy days only when the animal is not sick after
+ * that day's livestock health update. Both five-bit counters saturate at 31.
+ * Invalid or unoccupied links return FALSE.
+ * Parameter: pregnancy_stall_index selects BARN_PREGNANCY_STALL_NORTH or
+ * BARN_PREGNANCY_STALL_SOUTH; only the north stall exists before the upgrade.
  * Return value: nonzero when birth is due; zero otherwise.
  *
  * 判断指定妊娠栏中的牛或羊是否已经到达生产日。
- * 参数：pregnancy_stall_index 使用 BARN_PREGNANCY_STALL_*；扩建前只有
- * 第一个怀孕槽存在。
+ * 四个版本均先验证关联动物，再判断健康妊娠天数大于 20，或总妊娠天数
+ * 达到 30。未怀孕时两个原生计数读取函数均返回零，因此不是无条件经过
+ * 21 个日历日就可以生产。共用的每日更新器会在怀孕期间每天增加总妊娠天数，
+ * 不受是否喂食或生病影响；健康妊娠天数则只在当天家畜健康更新后仍未生病时
+ * 增加。两个五位计数均在 31 封顶。关联编号无效或槽位为空时返回 FALSE。
+ * 参数：pregnancy_stall_index 选择 BARN_PREGNANCY_STALL_NORTH 或
+ * BARN_PREGNANCY_STALL_SOUTH；扩建前只有北侧妊娠栏存在。
  * 返回值：可以生产时为非零，否则为零。
  */
 MaryBool IsBarnAnimalReadyToGiveBirth(MaryBarnPregnancyStallIndex pregnancy_stall_index);
 
 /*
  * Delivers a ready cow or sheep and inserts the newborn into the barn roster.
- * Parameter: pregnancy_stall_index uses BARN_PREGNANCY_STALL_* and is checked
- * against the current one- or two-stall capacity.
+ * Parameter: pregnancy_stall_index selects BARN_PREGNANCY_STALL_NORTH or
+ * BARN_PREGNANCY_STALL_SOUTH and is checked against current stall capacity.
  * Return value: the newborn's barn roster slot, or -1 if birth fails.
+ * Insertion searches from roster slot zero up to the current barn capacity;
+ * the returned index is not the pregnancy-stall index. A full roster returns
+ * -1 rather than overwriting an occupied slot.
+ * All four native handlers check readiness first, then clear the pregnancy
+ * stall's linked animal index before constructing the newborn. Do not assume
+ * that a failure return guarantees the original stall association is intact.
+ * Both cow and sheep paths reset the parent's pregnancy before attempting
+ * roster insertion; the insertion loops can return -1 without rolling back
+ * that reset or the cleared link.
+ * FoMT-JP differs: its birth paths sample the PRNG without the other targets'
+ * low-affection guard. Its sheep path also passes a null pointer to the
+ * affection getter, which reads offset 0x18; do not describe that result as
+ * maternal affection. The in-game effect of this invalid read is unverified.
  *
  * 让已经到期的牛或羊生产，并将幼崽加入畜舍动物列表。
- * 参数：pregnancy_stall_index 使用 BARN_PREGNANCY_STALL_*，并按当前一个
- * 或两个怀孕槽的容量校验。
+ * 参数：pregnancy_stall_index 选择 BARN_PREGNANCY_STALL_NORTH 或
+ * BARN_PREGNANCY_STALL_SOUTH，并按当前一个或两个妊娠栏的容量校验。
  * 返回值：新生动物的畜舍列表槽位；生产失败时为 -1。
+ * 插入时从动物列表的零号槽开始，在当前畜舍容量内查找空位；返回编号不是
+ * 妊娠栏编号。列表已满时返回 -1，不会覆盖已占用的动物槽。
+ * 四个版本的原生实现均先检查生产条件，再清除妊娠栏的动物关联编号，然后
+ * 构造幼崽。因此不能假定返回失败就意味着原栏位关联一定保持不变。
+ * 牛和羊的路径都会先重置母体怀孕状态，再尝试插入动物列表；插入循环可以
+ * 返回 -1，且不会回滚此前的怀孕重置或栏位关联清除。
+ * FoMT-JP 存在差异：生产路径没有其他版本的低好感度随机采样保护；羊的
+ * 路径还将空指针传给读取偏移 0x18 的好感度函数，不能将该结果解释为
+ * 母体好感度。此无效读取在实际游戏中的表现尚未验证。
  */
 MaryAnimalSlotIndex AttemptBarnAnimalBirth(MaryBarnPregnancyStallIndex pregnancy_stall_index);
 
 /*
- * Constructs and unlocks the mountain cottage awarded by the fiftieth wedding
+ * Permanently unlocks the mountain cottage awarded by the fiftieth wedding
  * anniversary event.
- * Parameters: none. The surrounding event sets its own
- * completion variable before invoking this persistent world-state change.
+ * Parameters: none. The native operation idempotently sets bit 0 of the shared
+ * persistent facility byte and preserves every other bit; it does not directly
+ * construct map entities. The surrounding event sets its own completion
+ * variable before invoking this world-state change.
  *
- * 建造并解锁结婚五十周年事件奖励的山顶别墅。
- * 参数：无。外围事件会先设置自身的完成变量，再调用此函数修改持久世界状态。
+ * 永久解锁结婚五十周年事件奖励的山顶别墅。
+ * 参数：无。原生操作会幂等地置位共用持久设施字节的第 0 位并保持其他位不变，
+ * 不会直接构造地图实体。外围事件会先设置自身的完成变量，再调用本函数修改世界状态。
  */
 void BuildMountainCottage(void);
 
 /*
- * Permanently builds the Seaside Cottage on Mineral Beach. The shipped
+ * Permanently unlocks the Seaside Cottage on Mineral Beach. The shipped
  * scripts call this after the Harvest Goddess announces the maximum link
- * level reward. This is the companion flag operation to BuildMountainCottage.
+ * level reward. The native operation idempotently sets bit 2 of the same
+ * persistent facility byte used by BuildMountainCottage and preserves every
+ * other bit; it does not directly construct map entities.
  *
- * 永久建成矿石海滩的海边别墅。原版脚本在女神宣布联动度满级奖励后调用本
- * 函数；它是与 BuildMountainCottage 对应的另一项别墅持久标志操作。
+ * 永久解锁矿石海滩的海边别墅。原版脚本在女神宣布联动度满级奖励后调用本函数。
+ * 原生操作会幂等地置位 BuildMountainCottage 所用同一持久设施字节的第 2 位并
+ * 保持其他位不变，不会直接构造地图实体。
  */
 void BuildSeasideCottage(void);
 
 /*
  * Tests whether at least one piece of Golden Lumber is placed on the farm.
  * Parameters: none.
- * Return value: nonzero when a placed farm plot contains Golden Lumber; zero
- * otherwise. Daily dialogue and achievement scripts use this for the special
- * villager reaction to displaying Golden Lumber.
+ * Return value: TRUE as soon as one of the farm's complete 25-by-43 FieldPlot
+ * grid has a nonzero placed-object state and object ID 0x1A (Golden Lumber),
+ * otherwise FALSE after scanning all 1,075 plots. It does not inspect the
+ * rucksack, cabinet, shipment history, or a cached event variable. Daily
+ * dialogue and achievement scripts use it for the special villager reaction
+ * to displaying Golden Lumber.
  *
  * 判断农场中是否至少摆放了一块黄金资材。
  * 参数：无。
- * 返回值：农场地块中摆放了黄金资材时为非零，否则为零。每日对话和成就脚本
- * 用它触发村民对展示黄金资材的特殊反应。
+ * 返回值：依次扫描农场完整的 25×43 个 FieldPlot；一旦发现摆放对象状态非零且
+ * 对象 ID 为 0x1A（黄金资材）便返回 TRUE，扫描完 1075 个地块仍未发现则返回
+ * FALSE。它不会检查背包、置物柜、出货历史或缓存的事件变量。每日对话和成就
+ * 脚本用它触发村民对展示黄金资材的特殊反应。
  */
 MaryBool HasGoldenLumberOnFarm(void);
 
@@ -2861,44 +3270,61 @@ MaryBool HasGoldenLumberOnFarm(void);
  * Opens a map door or entrance by its runtime door ID. Scripts pair this with
  * the opening sound and movement through the entrance.
  * Parameter: door_index is the current map's local door/entrance index. It is
- * not a global location identifier.
+ * not a global location identifier. The callable immediately dispatches the
+ * current map controller's virtual open operation and does not wait for its
+ * animation. If no map controller exists, it is a no-op. Neither the VM
+ * wrapper nor the dispatch shim validates the index.
  *
  * 按运行时门编号打开地图中的门或入口。脚本通常将其与开门音效及穿门移动配合。
- * 参数：door_index 为当前地图局部的门／入口索引，并非全局地点编号。
+ * 参数：door_index 为当前地图局部的门／入口索引，并非全局地点编号。本调用会
+ * 立即分派当前地图控制器的虚拟开门操作，不等待动画；地图控制器不存在时无操作
+ * 返回。VM wrapper 和分派薄层都不会校验索引。
  */
 void OpenDoor(MaryDoorIndex door_index);
 
 /*
  * Closes a map door or entrance previously opened by OpenDoor.
  * Parameter: door_index uses the same current-map local domain as OpenDoor.
+ * This immediately dispatches the distinct virtual close operation, does not
+ * wait for animation, becomes a no-op without a map controller, and performs
+ * no index validation in the wrapper or dispatch shim.
  *
  * 关闭此前由 OpenDoor 打开的地图门或入口。
- * 参数：door_index 与 OpenDoor 使用同一当前地图局部索引域。
+ * 参数：door_index 与 OpenDoor 使用同一当前地图局部索引域。本调用立即分派另一
+ * 个虚拟关门操作，不等待动画；地图控制器不存在时无操作返回，wrapper 与分派
+ * 薄层均不校验索引。
  */
 void CloseDoor(MaryDoorIndex door_index);
 
 /*
- * Applies the next purchased rucksack capacity upgrade. The supermarket calls
- * this after charging 3000G or 5000G for the corresponding rucksack tier.
+ * Redraws the supermarket shelf after a rucksack purchase. It copies a fixed
+ * 2-by-3 tile background patch to map tile coordinate (33, 20), then marks the
+ * map graphics dirty. It does not change the rucksack level or purchase state;
+ * the script calls UpgradeRucksack separately for the actual capacity change.
  * Parameters: none.
  *
- * 应用下一档已购买的背包容量升级。杂货店在为相应背包档位扣除 3000G 或
- * 5000G 后调用此函数。
+ * 购买背包后重绘杂货店货架。它把固定的 2×3 图块背景补丁复制到地图图块坐标
+ * (33, 20)，随后标记地图图形需要刷新。它不修改背包等级或购买状态；脚本会
+ * 另行调用 UpgradeRucksack 完成真正的容量升级。
  * 参数：无。
  */
-void CompleteRucksackUpgrade(void);
+void RedrawRucksackShelfAfterPurchase(void);
 
 /*
- * Completes the supermarket Blue Feather purchase. Unlike ordinary inventory
- * insertion, this callable performs the purchase-specific state update after
- * the Blue Feather has been placed in the player's tool inventory.
+ * Redraws the supermarket shelf after a Blue Feather purchase. It copies the
+ * same fixed 2-by-3 tile background patch to map tile coordinate (33, 23), then
+ * marks the map graphics dirty. It neither inserts the Blue Feather nor changes
+ * a persistent purchase flag; SetPlayerHeldTool or AddToolToRucksack has already
+ * inserted the item before this call.
  * Parameters: none.
  *
- * 完成杂货店蓝色羽毛购买流程。与普通的背包写入不同，本函数在蓝色羽毛已经
- * 放入玩家工具栏后更新该商品专用的购买状态。
+ * 购买蓝色羽毛后重绘杂货店货架。它把同一固定的 2×3 图块背景补丁复制到地图
+ * 图块坐标 (33, 23)，随后标记地图图形需要刷新。它既不把蓝色羽毛写入背包，
+ * 也不修改持久购买标记；调用前 SetPlayerHeldTool 或 AddToolToRucksack 已经
+ * 完成物品写入。
  * 参数：无。
  */
-void CompleteBlueFeatherPurchase(void);
+void RedrawBlueFeatherShelfAfterPurchase(void);
 
 /*
  * Gets a Harvest Sprite's current assigned task.
@@ -2922,7 +3348,7 @@ MaryHarvestSpriteTask GetHarvestSpriteCurrentTask(MaryCharacterId sprite_id);
  * 参数：sprite_id 为该小矮人的 CHARACTER_* ID。
  * 返回值：剩余天数；ID 无效时返回零。
  */
-int GetHarvestSpriteWorkDaysLeft(MaryCharacterId sprite_id);
+MaryHarvestSpriteWorkDays GetHarvestSpriteWorkDaysLeft(MaryCharacterId sprite_id);
 
 /*
  * Gets a Harvest Sprite's experience for one task category.
@@ -2935,7 +3361,10 @@ int GetHarvestSpriteWorkDaysLeft(MaryCharacterId sprite_id);
  * HARVEST_SPRITE_TASK_HARVEST、WATER 或 ANIMALS。
  * 返回值：保存的工作经验值；ID 无效时返回零。
  */
-int GetHarvestSpriteTaskExperience(MaryCharacterId sprite_id, MaryHarvestSpriteTask task);
+MaryHarvestSpriteTaskExperience GetHarvestSpriteTaskExperience(
+    MaryCharacterId sprite_id,
+    MaryHarvestSpriteTask task
+);
 
 /*
  * Tests whether a Harvest Sprite has played a minigame today.
@@ -2949,16 +3378,21 @@ int GetHarvestSpriteTaskExperience(MaryCharacterId sprite_id, MaryHarvestSpriteT
 MaryBool HasHarvestSpritePlayedMinigameToday(MaryCharacterId sprite_id);
 
 /* Tests whether the selected sprite has nonzero minigame experience for a
- * task category. Parameters use the same domains as
- * GetHarvestSpriteTaskExperience(). Return value: nonzero when experience is
- * present for that task; zero otherwise.
+ * task category. Parameters: sprite_id is the sprite's CHARACTER_* ID; task
+ * is HARVEST_SPRITE_TASK_HARVEST, WATER, or ANIMALS. This reads the separate
+ * minigame-experience array, not the ordinary task-experience array returned
+ * by GetHarvestSpriteTaskExperience(). Return value: nonzero when minigame
+ * experience is present for that task; zero for no experience, an invalid
+ * task, or an ID that does not resolve to a Harvest Sprite.
  *
- * 判断指定小矮人在某类工作小游戏中是否拥有非零经验。参数范围与
- * GetHarvestSpriteTaskExperience() 相同。
- * 返回值：该工作已有经验时为非零，
- * 否则为零。
+ * 判断指定小矮人在某类工作小游戏中是否拥有非零经验。
+ * 参数：sprite_id 为该小矮人的 CHARACTER_* ID；task 为
+ * HARVEST_SPRITE_TASK_HARVEST、WATER 或 ANIMALS。本函数读取独立的小游戏
+ * 经验数组，并非 GetHarvestSpriteTaskExperience() 返回的普通工作经验数组。
+ * 返回值：该类小游戏已有经验时为非零；没有经验、工作类型无效或人物 ID
+ * 无法解析为小矮人时返回零。
  */
-MaryBool HasHarvestSpriteTaskExperience(
+MaryBool HasHarvestSpriteMinigameExperience(
     MaryCharacterId sprite_id,
     MaryHarvestSpriteTask task
 );
@@ -2973,26 +3407,39 @@ MaryBool HasHarvestSpriteTaskExperience(
  * 参数：sprite_id 为该小矮人的 CHARACTER_* ID；task 为实际工作用的
  * HARVEST_SPRITE_TASK_*；days 为委托天数。雇佣对话通常传入 1、3 或 7 天。
  */
-void StartHarvestSpriteTask(MaryCharacterId sprite_id, MaryHarvestSpriteTask task, int days);
+void StartHarvestSpriteTask(
+    MaryCharacterId sprite_id,
+    MaryHarvestSpriteTask task,
+    MaryHarvestSpriteWorkDays days
+);
 
 /*
- * Stops the selected Harvest Sprite's current work for the rest of the day.
- * Parameters: sprite_id is the sprite's CHARACTER_* ID.
+ * Schedules the selected Harvest Sprite's assignment to end at the next daily
+ * task update by setting its remaining-work-days field to one. It does not
+ * immediately clear the current task. Parameter: sprite_id is the sprite's
+ * CHARACTER_* ID; an ID that does not resolve to a Harvest Sprite is a no-op.
  *
- * 让指定小矮人停止当天剩余时间的当前工作。参数 sprite_id 为该小矮人的
- * CHARACTER_* ID。
+ * 把指定小矮人的剩余工作天数字段设为一，使当前委托在下一次每日任务更新时
+ * 结束；它不会立即清除当前工作。参数 sprite_id 为该小矮人的 CHARACTER_* ID；
+ * 无法解析为小矮人的 ID 不产生操作。
  */
-void StopHarvestSpriteWorkForToday(MaryCharacterId sprite_id);
+void ScheduleHarvestSpriteTaskToEndAfterToday(MaryCharacterId sprite_id);
 
 /*
- * Returns 1 when the selected Harvest Sprite has completed or exhausted the
- * work currently available for its assigned task, otherwise 0.
- * Parameters: sprite_id is the sprite's CHARACTER_* ID.
+ * Tests whether the selected Harvest Sprite's runtime entity has completed or
+ * exhausted the work currently available for the assigned task on the current
+ * map. This is a daily/runtime work query, not a test of assignment days left.
+ * Parameter: sprite_id is the sprite's CHARACTER_* ID. Return value: nonzero
+ * when no currently available work remains; zero when work remains, the ID is
+ * outside the seven Harvest Sprite IDs, or the sprite has no entity on the
+ * current map.
  *
- * 当指定小矮人已完成当前任务可执行的工作，或当天已无可继续处理的目标时返回
- * 1，否则返回 0。参数 sprite_id 为该小矮人的 CHARACTER_* ID。
+ * 检查指定小矮人的运行时实体是否已完成当前地图上该工作当天可执行的目标，或
+ * 已无可继续处理的目标。这是当日运行时工作查询，不是委托剩余天数查询。
+ * 参数 sprite_id 为该小矮人的 CHARACTER_* ID。当天已无可执行工作时返回非零；
+ * 仍有工作、ID 不属于七名小矮人或当前地图不存在该小矮人实体时返回零。
  */
-MaryBool IsHarvestSpriteWorkComplete(MaryCharacterId sprite_id);
+MaryBool IsHarvestSpriteDailyWorkComplete(MaryCharacterId sprite_id);
 
 /*
  * Runs the selected Harvest Sprite's animal-care training minigame and waits
@@ -3136,10 +3583,15 @@ MaryTVShoppingItemId GetPendingTVShoppingItem(void);
  * Parameters: none.
  * Return value: 1 when an order exists and its delivery countdown reached
  * zero; otherwise 0.
+ * This does not check time of day or competing events. All four vanilla farm
+ * entry dispatchers separately require hour >= 6 and < 12 after this test;
+ * earlier event branches can take priority over delivery.
  *
  * 检查等待中的电视购物订单是否已经可以送达。
  * 参数：无。
  * 返回值：存在订单且送货倒计时已经归零时为 1，否则为 0。
+ * 本函数不检查时段或其他竞争事件。四版原版农场进入分派脚本另行要求小时
+ * 大于等于 6 且小于 12；前面的事件分支还可能优先于送货。
  */
 MaryBool IsTVShoppingDeliveryReady(void);
 
@@ -3147,19 +3599,28 @@ MaryBool IsTVShoppingDeliveryReady(void);
  * Selects the item currently offered by the TV Shopping program.
  * Parameter: item_id is TV_SHOPPING_ITEM_* or the exact original item ID.
  * This changes the current selection but does not yet place an order.
+ * Clearing this selection to NONE while an order is pending pauses its native
+ * countdown: the updater requires both the selection and order to be non-NONE.
  *
  * 选择电视购物节目当前展示的商品。
  * 参数：item_id 为 TV_SHOPPING_ITEM_* 或精确原始商品 ID。
  * 本函数只改变当前选择，尚不会正式下单。
+ * 已下单时若把当前选择清为 NONE，会暂停原生送货计数：更新器要求当前选择
+ * 和待送货商品均不是 NONE。
  */
 void SetTVShoppingSelection(MaryTVShoppingItemId item_id);
 
 /*
  * Confirms the current TV Shopping selection as the pending delivery order.
  * Parameters: none. Call SetTVShoppingSelection first when changing the item.
+ * Copies the selection unconditionally and resets the delivery counter to 2.
+ * It does not charge money, validate the selection, or preserve an existing
+ * pending order; purchase eligibility and payment belong to the caller.
  *
  * 将当前电视购物选择确认为等待送货的订单。
  * 参数：无。需要更换商品时，应先调用 SetTVShoppingSelection。
+ * 无条件复制当前选择，并将送货计数重置为 2。不会扣钱、校验所选商品或保留
+ * 已有待送货订单；购买资格检查及付款需要由调用方处理。
  */
 void ConfirmTVShoppingOrder(void);
 
@@ -3167,10 +3628,26 @@ void ConfirmTVShoppingOrder(void);
  * Completes the pending TV Shopping delivery and clears the stored order.
  * Parameters: none. For farmhouse items, the matching facility or utensil is
  * installed; the Power Berry delivery is finalized after its script-side effect.
+ * Cleanup clears the current selection only when it matches the delivered
+ * item; a different selection is preserved. The pending item is always set
+ * to NONE, but the delivery counter is not reset by the cleanup helper.
+ * Utensil installation requires an existing kitchen. If that prerequisite
+ * fails, the installer does nothing but the order is still cleared; this
+ * callable is not a retryable delivery transaction.
+ * Refrigerator, shelf and carpet require a nonzero house upgrade level;
+ * the large bed requires a level greater than 1. Kitchen installation also
+ * requires a nonzero upgrade level and an existing refrigerator. Failed
+ * facility prerequisites likewise do not preserve the pending order.
  *
  * 完成等待中的电视购物送货并清除已保存订单。
  * 参数：无。农舍商品会安装对应设施或厨具；力量果实则在脚本侧效果完成后，
  * 由本函数结束该笔送货。
+ * 清理时仅当当前选择与送货商品相同时才清空当前选择；不同的新选择会保留。
+ * 待送货商品总会置为 NONE，但清理辅助函数不会重置送货计数。
+ * 安装厨具要求已有厨房；不满足时安装器不作修改，但订单仍会清除。
+ * 因此本函数不是失败后保留订单、供重试的送货事务。
+ * 冰箱、柜子和地毯要求房屋扩建等级非零；大床要求等级大于 1。厨房要求
+ * 扩建等级非零且已有冰箱。这些设施的安装条件不满足时，同样不会保留订单。
  */
 void CompleteTVShoppingDelivery(void);
 
@@ -3187,90 +3664,119 @@ void CompleteTVShoppingDelivery(void);
 MaryBool IsVacationVillaBuilt(void);
 
 /*
- * Tests the all-villagers maximum-friendship completion condition.
+ * Tests the maximum-friendship completion condition for every required,
+ * currently present villager. The native loop covers character IDs 1 through
+ * 42, statically excludes Cliff, Kai, Gourmet, Kappa, and the player's child,
+ * skips absent NPC records, and requires friendship greater than 249 for every
+ * remaining record. It tests current friendship, not a recorded milestone.
  * Parameters: none.
  * Return value: nonzero when the condition is satisfied; zero otherwise.
  *
- * 判断是否满足全村民最高友好度完成条件。
+ * 判断所有要求计入且当前存在的村民是否满足最高友好度完成条件。原生循环覆盖
+ * 人物 ID 1 至 42，固定排除 Cliff、Kai、Gourmet、Kappa 及玩家孩子，跳过当前
+ * 不存在的 NPC 记录，并要求其余每条记录的友好度均大于 249。检查的是当前
+ * 友好度，不是已经登记过的里程碑。
  * 参数：无。
  * 返回值：满足条件时为非零，否则为零。
  */
-MaryBool AreAllVillagersAtMaxFriendship(void);
+MaryBool AreAllRequiredVillagersAtMaxFriendship(void);
 
 /*
- * Tests whether at least one of every crop has been shipped.
+ * Tests all 15 crop-product records. Every record must be visible in the
+ * shipping list and have a nonzero shipped count; this reads current records,
+ * not a separately latched achievement flag.
  * Parameters: none.
  * Return value: nonzero when complete; zero otherwise.
  *
- * 判断是否每种农作物都至少出货过一个。
+ * 检查全部 15 条作物出货记录。每条记录都必须已在出货表中显示且出货数量
+ * 非零；读取的是当前记录，不是另行锁存的成就标志。
  * 参数：无。
  * 返回值：完成时为非零，否则为零。
  */
 MaryBool HasShippedOneOfEachCrop(void);
 
 /*
- * Tests the all-farm-animals maximum-affection completion condition.
+ * Tests the maximum-affection condition for the dog, the horse when present,
+ * and every present chicken, cow, and sheep in the active coop/barn capacity.
+ * Empty animal slots are skipped; every present animal must have affection
+ * greater than 199. This reads current affection, not a recorded milestone.
  * Parameters: none.
  * Return value: nonzero when the condition is satisfied; zero otherwise.
  *
- * 判断是否满足所有农场动物最高好感度完成条件。
+ * 检查狗、当前存在的马，以及鸡舍／畜棚有效容量内所有实际存在的鸡、牛、羊
+ * 是否满足最高好感度条件。空动物槽会跳过；所有存在动物的好感度必须大于
+ * 199。读取的是当前好感度，不是已经登记的里程碑。
  * 参数：无。
  * 返回值：满足条件时为非零，否则为零。
  */
 MaryBool AreAllFarmAnimalsAtMaxAffection(void);
 
 /*
- * Tests whether at least one of every mineral has been shipped.
+ * Tests all 20 mineral-product records. Every record must be visible in the
+ * shipping list and have a nonzero shipped count.
  * Parameters: none.
  * Return value: nonzero when complete; zero otherwise.
  *
- * 判断是否每种矿石都至少出货过一个。
+ * 检查全部 20 条矿物出货记录；每条记录都必须已在出货表中显示且出货数量
+ * 非零。
  * 参数：无。
  * 返回值：完成时为非零，否则为零。
  */
 MaryBool HasShippedOneOfEachMineral(void);
 
 /*
- * Tests whether every fish species has been caught.
+ * Tests fishing-record slots 8 through 58: all 45 ordinary fish and all six
+ * Fish Kings. The eight preceding non-fish catches are intentionally excluded;
+ * every checked record must have a nonzero caught count.
  * Parameters: none.
  * Return value: nonzero when complete; zero otherwise.
  *
- * 判断是否已捕获全部鱼类。
+ * 检查钓鱼纪录槽 8 至 58，即全部 45 种普通鱼和六种鱼王。前八条非鱼类钓获
+ * 物会明确排除；每条被检查记录的捕获数都必须非零。
  * 参数：无。
  * 返回值：完成时为非零，否则为零。
  */
 MaryBool HasCaughtEveryFishSpecies(void);
 
 /*
- * Returns the cumulative number of fish caught.
+ * Sums the caught-count field of fishing-record slots 8 through 58: all 45
+ * ordinary fish and all six Fish Kings. The eight preceding non-fish catches
+ * are excluded. The running total saturates at 1,000,000,000.
  * Parameters: none.
- * Return value: total fish caught across the save data.
+ * Return value: the saturated cumulative fish count.
  *
- * 返回累计捕获鱼的数量。
+ * 累加钓鱼纪录槽 8 至 58 的捕获数，即全部 45 种普通鱼和六种鱼王；前八条
+ * 非鱼类钓获物不计入。累计值最高饱和为 1,000,000,000。
  * 参数：无。
- * 返回值：存档中的累计捕获数量。
+ * 返回值：经过上述饱和处理的累计捕获鱼数量。
  */
-int GetTotalFishCaught(void);
+MaryFishCount GetTotalFishCaught(void);
 
 /*
- * Tests whether the player has obtained a Mythic Tool.
+ * Tests the persistent bit set when CollectBlacksmithOrder successfully places
+ * a completed Mythic sickle, hoe, axe, hammer, watering can, or fishing rod
+ * order. The vanilla scripts use it as the prerequisite for recording the
+ * GameCube-link Mythic Tool milestone.
  * Parameters: none.
- * Return value: nonzero after any Mythic-level sickle, hoe, axe, hammer,
- * watering can, or fishing rod is first awarded; zero otherwise.
+ * Return value: nonzero after at least one of those six orders has been
+ * collected successfully; zero otherwise. Merely possessing an injected tool
+ * or failing collection for lack of space does not establish this bit.
  *
- * 判断玩家是否曾获得 Mythic（贤者）农具。
+ * 检查持久状态位：CollectBlacksmithOrder 成功放入已经完成的贤者镰刀、锄头、
+ * 斧、锤、洒水壶或钓竿订单成品时置位。原版脚本将它用作记录 GameCube 联机
+ * “贤者农具”里程碑的前置条件。
  * 参数：无。
- * 返回值：首次取得任一 Mythic 等级的镰刀、锄头、斧、锤、洒水壶或钓竿后
- * 为非零，否则为零。
+ * 返回值：上述六种订单至少成功领取过一种后为非零，否则为零。仅通过其他方式
+ * 把农具放入存档，或因空间不足导致领取失败，不能据此证明该位会置位。
  */
 MaryBool HasObtainedMythicTool(void);
 
-/* Tests the broader shipping completion flag covering every product category,
- * rather than only crops or minerals. Return value: nonzero after at least
- * one of every required product has been shipped; zero otherwise.
+/* Tests every one of the 103 physical shipping-product records, IDs 0x00
+ * through 0x66. Each record must be visible in the shipping list and have a
+ * nonzero shipped count. This is broader than the crop and mineral subsets.
  *
- * 判断覆盖全部出货品类别的总完成状态，而不是仅检查作物或矿物。
- * 返回值：所有要求的出货品都至少出货一次后为非零，否则为零。
+ * 检查全部 103 条物理出货品记录（ID 0x00 至 0x66）。每条记录都必须已在
+ * 出货表中显示且出货数量非零；该范围比作物和矿物子集更广。
  */
 MaryBool HasShippedOneOfEachProduct(void);
 
@@ -3283,25 +3789,42 @@ MaryBool HasShippedOneOfEachProduct(void);
  * 参数：无。
  * 返回值：当前游戏货币数量。
  */
-int GetMoney(void);
+MaryMoneyBalance GetMoney(void);
 
 /*
  * Adds game currency to the player.
  * Parameter: amount is the currency amount to add.
+ * Native arithmetic treats amount as unsigned and caps a valid balance at
+ * 1,000,000,000 G; do not use a negative amount to subtract money. The routine
+ * also updates account records. In MFoMT-US/JP, reaching the cap sets the
+ * boolean read by VAR_SAVED_ONE_BILLION_G_ACHIEVEMENT_RECORDED; FoMT-US/JP
+ * do not perform this extra flag write.
  *
  * 增加玩家的游戏货币。
  * 参数：amount 为增加的货币数量。
+ * 原生运算把 amount 视为无符号数，并将有效余额封顶为 1,000,000,000 G；
+ * 不要用负数表示扣款。函数还会更新账户记录。女孩美版／日版达到上限时，
+ * 会设置 VAR_SAVED_ONE_BILLION_G_ACHIEVEMENT_RECORDED 所读取的布尔标志；
+ * 男孩美版／日版没有这一步额外标志写入。
  */
-void AddMoney(int amount);
+void AddMoney(MaryMoneyAmount amount);
 
 /*
  * Subtracts game currency from the player.
  * Parameter: amount is the currency amount to subtract.
+ * The native amount comparison is unsigned. Insufficient funds leave the
+ * balance unchanged, rather than clamping it to zero. Empty account records
+ * may still be initialized before this check. The native success/failure
+ * result is discarded by the script dispatcher: this callable returns void.
+ * Check GetMoney() before a purchase; do not use negative amounts as refunds.
  *
  * 扣除玩家的游戏货币。
  * 参数：amount 为扣除的货币数量。
+ * 原生金额比较按无符号数进行。余额不足时不修改余额，而不是扣到零；
+ * 但在检查前仍可能初始化空的账户记录。底层成功／失败返回值被脚本派发器
+ * 丢弃，因此此 callable 返回 void。购买前应检查 GetMoney()，不要用负数退款。
  */
-void SubtractMoney(int amount);
+void SubtractMoney(MaryMoneyAmount amount);
 
 /*
  * Enables the global scripted-NPC-control mode used while a coordinated event
@@ -3309,12 +3832,21 @@ void SubtractMoney(int amount);
  * NPC schedule/update path observes the event-control flag instead of freely
  * advancing participants. Pair it with DisableScriptedNpcControl when the
  * event's participant scripts have finished.
+ * This flag also suppresses the player entity's stamina/fatigue adjustment
+ * path, including ChangePlayerStaminaAndFatigue. It is not NPC-only.
+ * Audited FoMT-US and MFoMT-JP tool-action paths also skip experience awards
+ * while this mode is active. This is a guard on those action paths, not a
+ * blanket prohibition on direct writes to tool-experience records.
  * Parameters: none.
  * Return value: none.
  *
  * 启用全局的脚本化 NPC 控制模式，用于由事件统一控制参与者移动和各 NPC
  * 事件脚本的场景。启用后，常规 NPC 日程/更新流程会遵循事件控制标志，
  * 不再自行推进参与者。参与者脚本结束后应调用 DisableScriptedNpcControl。
+ * 此标志还会屏蔽玩家实体的体力／疲劳调整路径，包括
+ * ChangePlayerStaminaAndFatigue，因此其影响不只限于 NPC。
+ * 已核对的男孩US、女孩JP农具动作路径还会在该模式下跳过经验发放。
+ * 这是动作路径上的判断，不代表所有直接写入农具经验记录的操作都被禁止。
  * 参数：无。
  * 返回值：无。
  */
@@ -3324,49 +3856,59 @@ void EnableScriptedNpcControl(void);
  * Disables scripted-NPC-control mode and returns NPC updates to the normal
  * schedule path. Event cleanup scripts call this before removing or restoring
  * their participant entities.
+ * This only clears the shared mode byte. It does not replay stamina/fatigue
+ * changes that were skipped while the mode was enabled.
  * Parameters: none.
  * Return value: none.
  *
  * 关闭脚本化 NPC 控制模式，使 NPC 更新恢复到常规日程流程。事件清理脚本会在
  * 移除或恢复参与者实体之前调用它。
+ * 本函数仅清除共享模式字节，不会补执行此前启用期间被跳过的体力／疲劳调整。
  * 参数：无。
  * 返回值：无。
  */
 void DisableScriptedNpcControl(void);
 
 /*
- * Returns the current blacksmith order ID.
+ * Returns bits 0-5 of the current blacksmith order record.
  * Parameters: none.
  * Return value: a BLACKSMITH_ORDER_* value; BLACKSMITH_ORDER_NONE means no
- * order is pending.
+ * order is pending. The vanilla order domain is 0-37 even though the physical
+ * field is six bits wide.
  *
- * 返回当前锻冶屋订单 ID。
+ * 返回当前锻冶屋订单记录的 bit 0-5。
  * 参数：无。
- * 返回值：BLACKSMITH_ORDER_*；BLACKSMITH_ORDER_NONE 表示当前没有订单。
+ * 返回值：BLACKSMITH_ORDER_*；BLACKSMITH_ORDER_NONE 表示当前没有订单。物理
+ * 字段宽六位，但原版订单域只使用 0-37。
  */
 MaryBlacksmithOrderId GetBlacksmithOrderId(void);
 
 /*
- * Tests whether the current blacksmith order is ready.
+ * Tests whether an order exists and its three-bit remaining-days field is zero.
  * Parameters: none.
- * Return value: nonzero when ready; zero otherwise.
+ * Return value: nonzero only when order bits 0-5 are nonzero and timer bits
+ * 6-8 are all zero; zero when no order exists or at least one timer bit remains.
  *
- * 判断当前锻冶屋订单是否完成。
+ * 检查当前是否存在订单，并且其三位剩余天数字段是否已经归零。
  * 参数：无。
- * 返回值：完成时为非零，否则为零。
+ * 返回值：仅当订单 bit 0-5 非零且计时 bit 6-8 全为零时为非零；没有订单或
+ * 计时字段仍非零时返回零。
  */
 MaryBool IsBlacksmithOrderReady(void);
 
 /*
  * Tries to collect the completed blacksmith order. This operation places the
  * result in the player's held slot, rucksack, or appropriate storage and
- * clears the pending order when placement succeeds.
+ * clears the pending order when placement succeeds. Successfully collecting
+ * any of the six Mythic tool orders also sets the persistent bit returned by
+ * HasObtainedMythicTool().
  * Parameters: none. Call only after IsBlacksmithOrderReady() succeeds.
  * Return value: a BLACKSMITH_COLLECTION_* placement result. NO_SPACE leaves
  * the order pending so collection can be retried.
  *
  * 尝试领取已经完成的锻冶屋订单。该操作会把成品放入玩家手持栏、背包或对应
- * 仓库；成功放入后会清除等待中的订单。
+ * 仓库；成功放入后会清除等待中的订单。成功领取六种贤者农具订单中的任意一种，
+ * 还会设置 HasObtainedMythicTool() 所返回的持久状态位。
  * 参数：无。应在 IsBlacksmithOrderReady() 成功后调用。
  * 返回值：BLACKSMITH_COLLECTION_* 放置结果。NO_SPACE 不会清除订单，可在
  * 腾出空间后再次领取。
@@ -3374,81 +3916,94 @@ MaryBool IsBlacksmithOrderReady(void);
 MaryBlacksmithCollectionResult CollectBlacksmithOrder(void);
 
 /*
- * Sets the in-game clock immediately.
+ * Requests the target in-game clock time.
  * Parameters: hour is the 0-23 hour; minute is the 0-59 minute. The engine
- * stores them in its five-bit hour and six-bit minute fields and refreshes
- * dependent game state.
+ * packs them into a five-bit hour and six-bit minute target.
+ * These ranges are conventional clock values, not native clamps: hour is
+ * masked with 31 and minute with 63, with no carry normalization. Values
+ * outside 0-23/0-59 therefore need not produce a valid clock time.
+ * All four targets advance the active map simulation until the time is reached,
+ * including midnight date rollover, instead of simply overwriting the clock.
+ * It advances before comparing, so an equal target is not a no-op. Invalid
+ * target times can be unreachable; do not use them.
  *
- * 立即设置游戏内时钟。
- * 参数：hour 为 0-23 时，minute 为 0-59 分。引擎会分别写入 5 位小时字段和
- * 6 位分钟字段，并刷新依赖时间的游戏状态。
+ * 请求将游戏时钟推进至目标时间。
+ * 参数：hour 为 0-23 时，minute 为 0-59 分。目标值分别打包为 5 位小时字段和
+ * 6 位分钟字段。
+ * 上述范围是常规时钟取值，不是原生限幅规则：小时按 31 掩码、分钟按 63
+ * 掩码截断，不进行进位归一化。超出 0-23／0-59 的值不保证形成有效时间。
+ * 四个版本都会推进当前地图模拟直到目标时刻，包括跨午夜更新日期，而不是直接
+ * 覆盖时钟。先推进后比较，所以目标等于当前时间也不是空操作。非法目标可能
+ * 无法到达，不应使用。
  */
-void SetGameTime(int hour, int minute);
+void SetGameTime(MaryClockHour hour, MaryClockMinute minute);
 
 /*
- * Tests whether a letter is waiting for delivery or readout.
- * Parameter: letter_id is a REFERENCE_PAGE_* entry from the selected target's
- * physical page table, or the exact numeric ID.
- * Return value: nonzero when waiting; zero otherwise.
+ * Tests the pending/unread bitmap for one mailbox letter. The native state is
+ * indexed by letter_id - 77: FoMT accepts IDs 77-136 and MFoMT IDs 77-189.
+ * Parameter: letter_id is a LETTER_* value for the selected target.
+ * Return value: TRUE while the letter is pending/unread; FALSE otherwise.
  *
- * 判断指定邮件是否处于待投递或待读取状态。
- * 参数：letter_id 为所选目标物理页面表中的 REFERENCE_PAGE_*，或精确数字 ID。
- * 返回值：处于待收状态时为非零，否则为零。
+ * 检查指定邮箱信件的待阅读位图。原生状态以 letter_id - 77 为索引：FoMT
+ * 接受 ID 77-136，MFoMT 接受 ID 77-189。
+ * 参数：letter_id 为所选目标的 LETTER_* 值。
+ * 返回值：信件尚待阅读时为 TRUE，否则为 FALSE。
  */
-MaryBool IsLetterWaiting(MaryReferencePageId letter_id);
+MaryBool IsLetterWaiting(MaryLetterId letter_id);
 
 /*
- * Tests whether a letter has been received persistently.
- * Parameter: letter_id is a REFERENCE_PAGE_* entry or the exact numeric ID.
- * Return value: nonzero when received; zero otherwise.
+ * Tests the read/archive bitmap for one mailbox letter. This does not include
+ * a newly delivered letter that is still pending/unread.
+ * Parameter: letter_id is a LETTER_* value for the selected target.
+ * Return value: TRUE after the letter has been marked read; FALSE otherwise.
  *
- * 判断指定邮件是否已经永久收取。
- * 参数：letter_id 为 REFERENCE_PAGE_* 条目或精确数字 ID。
- * 返回值：已经收取时为非零，否则为零。
+ * 检查指定邮箱信件的已读／归档位图；刚投递但仍待阅读的信件不属于此状态。
+ * 参数：letter_id 为所选目标的 LETTER_* 值。
+ * 返回值：信件已标记为已读时为 TRUE，否则为 FALSE。
  */
-MaryBool HasReceivedLetter(MaryReferencePageId letter_id);
+MaryBool HasReceivedLetter(MaryLetterId letter_id);
 
 /*
- * Queues or delivers a letter.
- * Parameter: letter_id is a REFERENCE_PAGE_* entry or the exact numeric ID.
- * Use IsLetterWaiting and HasReceivedLetter to inspect its lifecycle state.
+ * Delivers a letter by setting its pending/unread bit. Repeating the call is
+ * idempotent because the native operation only sets the same bit.
+ * Parameter: letter_id is a LETTER_* value for the selected target.
  *
- * 投递或加入指定邮件。
- * 参数：letter_id 为 REFERENCE_PAGE_* 条目或精确数字 ID。
- * 可使用 IsLetterWaiting 与 HasReceivedLetter 查询其生命周期状态。
+ * 通过设置待阅读位来投递信件。重复调用只会再次设置同一位，因此结果幂等。
+ * 参数：letter_id 为所选目标的 LETTER_* 值。
  */
-void DeliverLetter(MaryReferencePageId letter_id);
+void DeliverLetter(MaryLetterId letter_id);
 
 /*
- * Marks a letter as read.
- * Parameter: letter_id is a REFERENCE_PAGE_* entry or the exact numeric ID.
+ * Marks a letter as read by clearing its pending/unread bit and setting its
+ * read/archive bit. Repeating the operation leaves the same final state.
+ * Parameter: letter_id is a LETTER_* value for the selected target.
  *
- * 将指定邮件标记为已读。
- * 参数：letter_id 为 REFERENCE_PAGE_* 条目或精确数字 ID。
+ * 将信件标记为已读：清除待阅读位，并设置已读／归档位。重复操作保持相同终态。
+ * 参数：letter_id 为所选目标的 LETTER_* 值。
  */
-void MarkLetterRead(MaryReferencePageId letter_id);
+void MarkLetterRead(MaryLetterId letter_id);
 
 /*
- * Returns the number of letters waiting for delivery or readout.
+ * Returns the number of set bits in the pending/unread letter map.
  * Parameters: none.
- * Return value: waiting-letter count.
+ * Return value: 0-60 in FoMT or 0-113 in MFoMT.
  *
- * 返回待投递或待读取邮件的数量。
+ * 返回待阅读信件位图中已设置位的数量。
  * 参数：无。
- * 返回值：待收邮件数量。
+ * 返回值：FoMT 为 0-60，MFoMT 为 0-113。
  */
-int GetWaitingLetterCount(void);
+MaryLetterCount GetWaitingLetterCount(void);
 
 /*
- * Returns the number of saved or persistently received letters.
+ * Returns the number of set bits in the read/archive letter map.
  * Parameters: none.
- * Return value: saved-letter count.
+ * Return value: 0-60 in FoMT or 0-113 in MFoMT.
  *
- * 返回已保存或永久收取邮件的数量。
+ * 返回已读／归档信件位图中已设置位的数量。
  * 参数：无。
- * 返回值：已保存邮件数量。
+ * 返回值：FoMT 为 0-60，MFoMT 为 0-113。
  */
-int GetSavedLetterCount(void);
+MaryLetterCount GetSavedLetterCount(void);
 
 /*
  * Displays one television-program text through the television viewer and waits
@@ -3513,34 +4068,54 @@ void EndTelevisionProgram(void);
 void RefreshAllNpcSchedules(void);
 
 /*
- * Tests whether an animal kind/index pair resolves to a live animal slot.
+ * Tests whether an animal kind/index pair resolves to a currently registered
+ * animal record. This is a resolver-presence check, not a separate life-state
+ * flag test. Cow, sheep and chicken use guarded occupied-roster lookups; horse
+ * and dog ignore animal_index. Kinds outside ANIMAL_KIND_HORSE..ANIMAL_KIND_DOG
+ * resolve to null.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
  * slot within that animal family.
- * Return value: nonzero for a live slot; zero for an empty or invalid slot.
+ * Return value: TRUE when the resolver returns a record; FALSE otherwise.
  * Call this before indexed animal getters while iterating barn or coop slots.
  *
- * 判断动物类别与槽位组合是否指向有效动物。
+ * 判断动物类别与槽位组合是否能解析到当前已登记的动物记录。这是解析器的
+ * “记录存在”检查，不会另外查询生命状态标志。牛、羊、鸡使用带占用状态和
+ * 种类检查的名册 getter；马和狗忽略 animal_index。超出
+ * ANIMAL_KIND_HORSE～ANIMAL_KIND_DOG 的类别会解析为空。
  * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该动物类别内从 0 开始的槽位。
- * 返回值：有效动物槽为非零；空槽或无效槽为零。
+ * 返回值：解析器返回记录时为 TRUE，否则为 FALSE。
  * 遍历牛羊棚或鸡舍槽位时，应先调用本函数再读取动物属性。
  */
 MaryBool DoesAnimalExist(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Creates and registers the farm's horse, then creates its runtime entity.
- * Parameters: facing is the initial engine direction; age_stage is a
- * MaryHorseAgeStage whose value is converted to age_stage * 120 days;
+ * Parameters: create_guard must be zero to perform creation; any nonzero
+ * value returns without creating the horse. The reachable initial facing is
+ * therefore always zero (down), not a selectable direction. age_stage is a
+ * MaryHorseAgeStage whose value is converted to age_stage * 120 days and
+ * stored in a ten-bit age field. Noncanonical values wrap rather than clamp
+ * to a growth stage (for example, 128 becomes zero days);
  * map_id is the initial MaryMapId; x and y are absolute map coordinates.
  * The shipped horse-offer events use entity slot 44 internally after this
  * call.
+ * If the farm already has a registered horse, the registration helper keeps
+ * its existing record. The outer routine still proceeds to runtime-entity
+ * setup; this is not a general overwrite operation or a guaranteed no-op.
  *
  * 创建并登记农场的马，随后创建其运行时实体。
- * 参数：facing 为初始引擎朝向；age_stage 为 MaryHorseAgeStage，引擎会将其
- * 换算为 age_stage * 120 天；map_id 为初始 MaryMapId；x、y 为绝对地图坐标。
+ * 参数：create_guard 必须为零才执行创建，任何非零值都会直接返回、不创建马。
+ * 因此实际可达的初始朝向固定为零（向下），不是可选朝向。age_stage 为
+ * MaryHorseAgeStage，引擎会将其
+ * 换算为 age_stage * 120 天后存入 10 位年龄字段。非标准值会截断回绕，
+ * 而非限制到有效成长阶段（例如 128 会变成零天）。
+ * map_id 为初始 MaryMapId；x、y 为绝对地图坐标。
  * 原版送马事件在本调用后使用运行时实体槽 44。
+ * 如果农场已有登记的马，登记辅助函数保留原记录；外层函数仍继续运行时实体
+ * 的设置流程。因此这既不是通用覆盖操作，也不能保证重复调用完全无影响。
  */
 void CreateFarmHorse(
-    MaryFacingDirection facing,
+    MaryBool create_guard,
     MaryHorseAgeStage age_stage,
     MaryMapId map_id,
     MaryMapSpaceX x,
@@ -3550,28 +4125,52 @@ void CreateFarmHorse(
  * Removes runtime horse entity 44 and clears the registered farm horse when
  * remove_guard is zero. A nonzero remove_guard makes the native routine return
  * without changing either object; it is a guard value, not a family of removal
- * modes. The reserved argument is consumed by the VM wrapper but never passed
- * to the native routine. All shipped calls pass zero for both arguments. FoMT
- * source and the MFoMT-US/MFoMT-JP native handlers agree on this behavior.
+ * modes. The VM consumes the reserved argument, but the native routine does
+ * not use its value: on the removal path its incoming register is overwritten
+ * by the entity-manager method pointer before being read. All shipped calls
+ * pass zero for both arguments. The native entry code agrees in all four ROMs.
+ * The farm-data step clears only the horse-present flag; it does not erase
+ * the stored horse record. That record becomes inaccessible through GetHorse
+ * while the flag is clear. Do not interpret removal as zeroing all horse data.
  *
  * 当 remove_guard 为零时，删除运行时马实体 44，并清除农场数据中登记的马；
  * 非零值会让原生函数直接返回，不改变两处对象，所以它是移除保护值而不是多种
- * “移除模式”。reserved 会被 VM 包装层从栈中取出，但不会传给原生函数。原版
- * 脚本的两个参数均为零。FoMT 源码与 MFoMT-US/MFoMT-JP 原生处理函数对此一致。
+ * “移除模式”。reserved 会被 VM 从栈中取出，但原生函数不使用其值：在实际移除
+ * 路径上，保存该值的传入寄存器在读取前被实体管理器的方法指针覆盖。原版脚本
+ * 的两个参数均为零。四个 ROM 的原生入口代码对此一致。
+ * 农场数据处理只清除“有马”标志，不擦除保存的马匹记录；标志清除后 GetHorse
+ * 不再返回该记录。不要把移除理解为将全部马匹数据清零。
  */
 void RemoveFarmHorse(MaryBool remove_guard, int reserved);
 
 /*
  * Copies the selected animal's name into a text string-substitution slot.
  * Parameters: text_variable is TEXT_VARIABLE_1 through TEXT_VARIABLE_4;
- * animal_kind is ANIMAL_KIND_*; animal_index is the zero-based slot in that
- * family.
+ * animal_kind is ANIMAL_KIND_*; animal_index follows GetAnimalAffection's
+ * shared barn/separate coop roster rules (horse/dog ignore the index).
  * Use DoesAnimalExist before calling this with a dynamically iterated index.
+ * If animal resolution fails or the text context is absent, the handler
+ * returns without updating or clearing the substitution slot. An earlier
+ * string can therefore remain; do not treat this as an empty-string setter.
+ * The native substitution copier truncates by bytes: FoMT-US 22, FoMT-JP 20,
+ * MFoMT-US 28, MFoMT-JP 20, then adds a terminator. These are copier limits,
+ * not animal-name input limits or Unicode character counts.
+ * The native copier does not bounds-check text_variable before computing
+ * the destination address. Use only the four declared TEXT_VARIABLE_* slots;
+ * an out-of-range integer is not a supported extra substitution slot.
  *
  * 将指定动物名称复制到文本字符串替换槽。
  * 参数：text_variable 为 TEXT_VARIABLE_1 至 TEXT_VARIABLE_4；animal_kind 为
- * ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * ANIMAL_KIND_*；animal_index 遵循 GetAnimalAffection 的牛羊共享畜棚、鸡另用
+ * 鸡舍名册规则（马和狗忽略槽位）。
  * 动态遍历槽位时，应先使用 DoesAnimalExist 检查。
+ * 无法解析到动物或文本上下文不存在时，handler 直接返回，不更新也不清空
+ * 替换槽。因此旧字符串可能仍然保留，不能把此调用当成设置空字符串。
+ * 原生替换复制器按字节截断：FoMT-US 为 22、FoMT-JP 为 20、MFoMT-US 为 28、
+ * MFoMT-JP 为 20，之后添加终止字节。这是复制器上限，不是动物命名输入上限，
+ * 也不是 Unicode 字符数。
+ * 原生复制器在计算目标地址前不检查 text_variable 边界。仅使用声明的四个
+ * TEXT_VARIABLE_* 槽；越界整数不是可用的额外替换槽。
  */
 void GetAnimalName(
     MaryTextVariableSlot text_variable,
@@ -3580,26 +4179,32 @@ void GetAnimalName(
 );
 
 /*
- * Returns the zero-based livestock slot bound to the currently executing
- * animal-interaction event.
- * Parameters: none. The event determines the animal
- * family separately, then uses this slot with the typed animal getters and
- * setters. This is not a global entity ID.
+ * Returns the current animal-target selector stored by scene entity 0 (the
+ * player entity). The native helper looks up entity 0 and calls its virtual
+ * getter at vtable offset 0x78; it does not read the script event record and
+ * does not validate or clamp the result. Vanilla calls it only from animal
+ * interaction events, where the value is a zero-based livestock roster slot.
+ * Parameters: none. The script determines the animal family separately, then
+ * uses this selector with typed animal getters and setters. It is not a global
+ * entity ID. Outside a prepared animal interaction its meaning is unsupported.
  *
- * 返回当前正在执行的动物交互事件所绑定的家畜槽位（从 0 开始）。
- * 参数：无。事件会另外确定动物类别，再将此槽位传给带类型的动物属性读写函数。
- * 该返回值不是全局实体 ID。
+ * 返回场景实体 0（玩家实体）保存的当前动物目标选择值。原生辅助函数固定查找
+ * 实体 0，再调用其虚表偏移 0x78 的 getter；它不读取脚本事件记录，也不验证或
+ * 限制返回值。原版仅在动物交互事件中调用，此时该值是从 0 开始的家畜名册槽。
+ * 参数：无。脚本会另外确定动物类别，再将此选择值传给带类型的动物属性读写
+ * 函数。该值不是全局实体 ID；脱离已准备好的动物交互时，其含义不受支持。
  */
 MaryAnimalSlotIndex GetInteractingAnimalIndex(void);
 
 /*
  * Tests the selected animal's daily talked-to flag.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
  * Return value: nonzero when already talked to today; zero otherwise.
  *
  * 判断指定动物当日是否已经交谈。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
  * 返回值：当日已经交谈时为非零，否则为零。
  */
 MaryBool HasAnimalBeenTalkedTo(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
@@ -3607,127 +4212,199 @@ MaryBool HasAnimalBeenTalkedTo(MaryAnimalKind animal_kind, MaryAnimalSlotIndex a
 /*
  * Sets the selected animal's daily talked-to flag.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
  * Pair this with HasAnimalBeenTalkedTo around the completed interaction.
+ * Idempotent: only sets the talked bit; it does not open dialogue or increase
+ * affection. Vanilla interaction scripts call AddAnimalAffection separately.
+ * Failed animal resolution performs no write; horse/dog ignore the index.
  *
  * 设置指定动物的当日已交谈标志。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
  * 应与 HasAnimalBeenTalkedTo 配合，在交互完成时设置。
+ * 重复调用不会重复产生效果：只设置已交谈位，不打开对话，也不增加好感度。
+ * 原版交互脚本另外调用 AddAnimalAffection。动物解析失败时不写入；马和狗
+ * 忽略槽位参数。
  */
 void SetAnimalTalkedTo(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Adds a signed amount to the selected animal's affection.
- * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family; amount is the signed affection change.
+ * Parameters: animal_kind is ANIMAL_KIND_*; animal_index follows the shared
+ * barn/separate coop roster rules documented by GetAnimalAffection (horse
+ * and dog ignore it); amount is the signed affection change.
+ * The native 32-bit sum is limited to 0-250 after addition, not the NPC
+ * friendship limit of 255. Avoid extreme amounts that overflow before the
+ * checks. If animal resolution returns null, no affection write occurs.
  *
  * 为指定动物增加有符号好感度变化量。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 遵循 GetAnimalAffection
+ * 注明的牛羊共享畜棚、鸡另用鸡舍的名册规则（马和狗忽略此参数）。
  * amount 为有符号好感度变化量。
+ * 原生先进行 32 位加法，再将结果限制到 0-250，并非 NPC 友好度的 255。
+ * 应避免在检查前导致溢出的极端增量。无法解析到动物时不写入好感度。
  */
 void AddAnimalAffection(
     MaryAnimalKind animal_kind,
     MaryAnimalSlotIndex animal_index,
-    int amount
+    MaryAnimalAffectionDelta amount
 );
 
 /*
  * Tests whether the selected livestock animal is unhappy.
+ * Use only cow, sheep or chicken kinds; horse/dog are not Livestock.
+ * The handler checks null, not the resolved object's class. Unsupported kinds
+ * read an unrelated field rather than reliably returning zero; failed animal
+ * resolution returns zero.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
  * Return value: nonzero when unhappy; zero otherwise.
  *
  * 判断指定家畜是否处于不高兴状态。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 仅用于牛、羊或鸡；马和狗不是 Livestock 类型。
+ * handler 仅检查空指针，不验证解析对象的类别。不支持的种类会读取无关字段，
+ * 不能保证返回零；无法解析到动物时才直接返回零。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
  * 返回值：不高兴时为非零，否则为零。
  */
 MaryBool IsAnimalUnhappy(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Tests whether the selected livestock animal is sick.
+ * Use only cow, sheep or chicken kinds; horse/dog are not Livestock.
+ * The handler checks null, not the resolved object's class. Unsupported kinds
+ * read an unrelated field rather than reliably returning zero; failed animal
+ * resolution returns zero.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
  * Return value: nonzero when sick; zero otherwise.
  *
  * 判断指定家畜是否生病。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 仅用于牛、羊或鸡；马和狗不是 Livestock 类型。
+ * handler 仅检查空指针，不验证解析对象的类别。不支持的种类会读取无关字段，
+ * 不能保证返回零；无法解析到动物时才直接返回零。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
  * 返回值：生病时为非零，否则为零。
  */
 MaryBool IsAnimalSick(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Tests whether the selected barn animal is pregnant.
+ * Use only cow or sheep kinds; chicken/horse/dog are not BarnAnimal.
+ * The handler checks null, not the resolved object's class. Unsupported kinds
+ * read an unrelated field rather than reliably returning zero; failed animal
+ * resolution returns zero.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
  * Return value: nonzero when pregnant; zero otherwise.
  *
  * 判断指定牛羊棚动物是否怀孕。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
+ * 仅用于牛或羊；鸡、马、狗不是 BarnAnimal 类型。
+ * handler 仅检查空指针，不验证解析对象的类别。不支持的种类会读取无关字段，
+ * 不能保证返回零；无法解析到动物时才直接返回零。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
  * 返回值：怀孕时为非零，否则为零。
  */
 MaryBool IsAnimalPregnant(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Returns the healthy-pregnancy day counter for the selected barn animal.
+ * Use only cow or sheep kinds; chicken/horse/dog are not BarnAnimal.
+ * The handler checks null, not the resolved object's class. Unsupported kinds
+ * read an unrelated field rather than reliably returning zero; failed animal
+ * resolution returns zero.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
- * Return value: the engine's healthy-pregnancy day value.
+ * roster slot (cows/sheep share the barn roster; chickens use the coop roster).
+ * Return value: the five-bit healthy-pregnancy counter (0-31), or zero when
+ * not pregnant. This is elapsed healthy pregnancy time, not remaining days:
+ * vanilla cow/sheep interaction scripts subtract it from 21 for dialogue.
+ * Treat it as a numeric count, not an event-state enum.
  *
  * 返回指定牛羊棚动物的健康怀孕天数计数。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
- * 返回值：引擎记录的健康怀孕天数值。
+ * 仅用于牛或羊；鸡、马、狗不是 BarnAnimal 类型。
+ * handler 仅检查空指针，不验证解析对象的类别。不支持的种类会读取无关字段，
+ * 不能保证返回零；无法解析到动物时才直接返回零。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的名册槽位，
+ * 牛羊共享畜棚名册，鸡另用鸡舍名册。
+ * 返回值：五位健康怀孕天数计数（0-31）；未怀孕时为零。这是已累计的健康
+ * 怀孕天数，不是剩余天数；原版牛羊交互脚本用 21 减去它生成对话数值。
+ * 它是普通数量，不是事件状态枚举。
  */
-int GetAnimalHealthyPregnancyDays(
+MaryAnimalHealthyPregnancyDays GetAnimalHealthyPregnancyDays(
     MaryAnimalKind animal_kind,
     MaryAnimalSlotIndex animal_index
 );
 
 /* Returns the selected animal's age counter.
- * Parameters use the same animal family and zero-based slot convention as the
- * neighboring animal-state queries.
+ * Parameters follow GetAnimalAffection's shared barn/separate coop roster
+ * rules; horse and dog ignore the index. Returns the raw ten-bit counter
+ * (0-1023), or zero when resolution fails. This is a numeric count, not a
+ * juvenile/adult selector; zero alone does not prove that an animal exists.
  *
- * 返回指定动物的年龄计数。参数使用与相邻动物状态查询相同的动物类别和
- * 从 0 开始的槽位约定。
+ * 返回指定动物的年龄计数。参数遵循 GetAnimalAffection 的牛羊共享畜棚、
+ * 鸡另用鸡舍名册规则；马和狗忽略槽位。返回原始十位计数（0-1023），
+ * 解析失败时返回零。这是普通数量，不是幼年／成年状态；零不能证明动物存在。
  */
-int GetAnimalAge(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
+MaryAnimalAgeDays GetAnimalAge(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Returns the selected animal's affection value.
- * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
- * slot within that animal family.
- * Return value: current animal affection.
+ * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is a zero-based
+ * roster slot. Cows and sheep share the barn roster, not separate per-species
+ * numbering; chickens use the coop roster. Horse and dog ignore animal_index.
+ * An out-of-capacity slot, empty slot, or cow/sheep species mismatch resolves
+ * to null. This is not a feeding-trough or pregnancy-stall selector.
+ * Return value: the raw eight-bit affection value, or zero if animal resolution
+ * fails. Normal additions limit it to 250, but this getter does not clamp
+ * stored values 251-255. Zero alone does not prove that the animal exists.
  *
  * 返回指定动物的好感度。
- * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
- * 返回值：动物当前好感度。
+ * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为从 0 开始的动物名册槽位。
+ * 牛羊共享畜棚名册，而非各物种分别编号；鸡使用鸡舍名册。马和狗忽略此参数。
+ * 超出当前容量、空槽或牛羊种类不匹配时解析为空指针。此编号不是饲料槽编号，
+ * 也不是南北怀孕隔间编号。
+ * 返回值：存储的八位好感度值；无法解析到动物时返回零。正常增加操作将其
+ * 限制到 250，但读取函数不会裁剪存档中的 251-255。零不能单独证明动物存在。
  */
-int GetAnimalAffection(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
+MaryAnimalAffectionValue GetAnimalAffection(
+    MaryAnimalKind animal_kind,
+    MaryAnimalSlotIndex animal_index
+);
 
 /*
  * Returns the selected animal's growth-stage value.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the zero-based
  * slot within that animal family.
  * Return value: the engine growth-stage value for horse, cow, sheep, chicken,
- * or dog as selected by animal_kind. When animal_kind is a statically known
- * symbol, the decompiler uses MaryPetGrowthStage, MaryCowGrowthStage,
- * MarySheepGrowthStage, or MaryChickenGrowthStage as appropriate.
+ * or dog as selected by animal_kind. Horse and dog ignore animal_index; cow,
+ * sheep, and chicken use it to resolve a family-local record. An invalid kind,
+ * a missing horse, or an unresolved livestock slot returns zero. When
+ * animal_kind is a statically known symbol, the decompiler uses
+ * MaryPetGrowthStage, MaryCowGrowthStage, MarySheepGrowthStage, or
+ * MaryChickenGrowthStage as appropriate.
  *
  * 返回指定动物的成长阶段值。
  * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
- * 返回值：由 animal_kind 选择的马、牛、羊、鸡或狗的引擎成长阶段值。当
- * animal_kind 是静态可知的符号时，反编译器会按物种选用 MaryPetGrowthStage、
- * MaryCowGrowthStage、MarySheepGrowthStage 或 MaryChickenGrowthStage。
+ * 返回值：由 animal_kind 选择的马、牛、羊、鸡或狗的引擎成长阶段值。马和狗
+ * 忽略 animal_index；牛、羊、鸡用它解析各自类别内的记录。动物类别无效、马
+ * 不存在或家畜槽无法解析时返回零。当 animal_kind 是静态可知的符号时，反编译器
+ * 会按物种选用 MaryPetGrowthStage、MaryCowGrowthStage、MarySheepGrowthStage
+ * 或 MaryChickenGrowthStage。
  */
 int GetAnimalGrowthStage(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
 /*
  * Tests whether the selected sheep has been sheared.
  * Parameter: sheep_index is the zero-based sheep slot in the shared barn.
- * Return value: nonzero when sheared; zero otherwise.
+ * Return value: nonzero when sheared; zero when not sheared or when the shared
+ * barn slot does not resolve to a sheep record.
  *
  * 判断指定羊是否已经剪毛。
  * 参数：sheep_index 为共享牛羊棚中从 0 开始的羊槽位。
- * 返回值：已经剪毛时为非零，否则为零。
+ * 返回值：已经剪毛时为非零；未剪毛或共享畜棚槽无法解析为羊记录时为零。
  */
 MaryBool IsSheepSheared(MaryAnimalSlotIndex sheep_index);
 
@@ -3736,15 +4413,18 @@ MaryBool IsSheepSheared(MaryAnimalSlotIndex sheep_index);
  * value.
  * Parameters: animal_kind is ANIMAL_KIND_COW, ANIMAL_KIND_SHEEP, or
  * ANIMAL_KIND_CHICKEN; life_state is LIVESTOCK_LIFE_STATE_*. Return value: the
- * number of matching livestock slots. The death-summary event uses the two
- * death states before its cleanup removes those records.
+ * number of non-null records within the current barn or coop capacity whose
+ * stored state matches exactly. Horse, dog, and invalid kinds return zero. The
+ * death-summary event uses the two death states before its cleanup removes
+ * those records.
  *
  * 统计保存的生命状态等于指定值的牛、羊或鸡。
  * 参数：animal_kind 为 ANIMAL_KIND_COW、ANIMAL_KIND_SHEEP 或
  * ANIMAL_KIND_CHICKEN；life_state 为 LIVESTOCK_LIFE_STATE_*。
- * 返回值：匹配的家畜槽位数量。动物死亡汇总事件会在清理相应记录前读取两种死亡状态。
+ * 返回值：在当前畜棚或鸡舍容量内，非空且保存状态完全匹配的记录数量。马、狗及
+ * 无效类别返回零。动物死亡汇总事件会在清理相应记录前读取两种死亡状态。
  */
-int CountAnimalsByLifeState(
+MaryAnimalCount CountAnimalsByLifeState(
     MaryAnimalKind animal_kind,
     MaryLivestockLifeState life_state);
 
@@ -3797,56 +4477,65 @@ void RemoveNaturallyDeadLivestock(void);
 /*
  * Tests whether a barn slot contains a cow rather than another barn animal.
  * Parameter: barn_slot is the zero-based shared barn slot.
- * Return value: nonzero for a cow; zero otherwise.
+ * Return value: nonzero for a cow; zero for a sheep, an empty slot, or an
+ * out-of-range slot.
  *
  * 判断共享牛羊棚槽位中是否为牛。
  * 参数：barn_slot 为从 0 开始的共享牛羊棚槽位。
- * 返回值：槽位中为牛时为非零，否则为零。
+ * 返回值：槽位中为牛时为非零；为羊、空槽或越界槽时均返回零。
  */
 MaryBool IsCowAtBarnSlot(MaryAnimalSlotIndex barn_slot);
 
 /*
- * Returns the number of currently owned cows.
+ * Returns the number of cow records currently present within barn capacity.
  * Parameters: none.
- * Return value: cow count.
+ * Return value: cow count. This does not filter the livestock life-state field;
+ * a pending-death record remains counted until its cleanup removes the record.
  *
- * 返回当前拥有的牛数量。
+ * 返回当前畜棚容量范围内实际存在的牛记录数量。
  * 参数：无。
- * 返回值：牛数量。
+ * 返回值：牛数量。此函数不筛选家畜生命状态；待清理的死亡记录在真正移除前仍会计数。
  */
-int GetCowCount(void);
+MaryAnimalCount GetCowCount(void);
 
 /*
- * Returns the number of currently owned sheep.
+ * Returns the number of sheep records currently present within barn capacity.
  * Parameters: none.
- * Return value: sheep count.
+ * Return value: sheep count. This does not filter the livestock life-state
+ * field; a pending-death record remains counted until cleanup.
  *
- * 返回当前拥有的羊数量。
+ * 返回当前畜棚容量范围内实际存在的羊记录数量。
  * 参数：无。
- * 返回值：羊数量。
+ * 返回值：羊数量。此函数不筛选家畜生命状态；待清理的死亡记录在清理前仍会计数。
  */
-int GetSheepCount(void);
+MaryAnimalCount GetSheepCount(void);
 
 /*
- * Returns the number of currently owned chickens.
+ * Returns the number of chicken records currently present within coop capacity.
  * Parameters: none.
- * Return value: chicken count.
+ * Return value: chicken count. This does not filter the livestock life-state
+ * field; a pending-death record remains counted until cleanup.
  *
- * 返回当前拥有的鸡数量。
+ * 返回当前鸡舍容量范围内实际存在的鸡记录数量。
  * 参数：无。
- * 返回值：鸡数量。
+ * 返回值：鸡数量。此函数不筛选家畜生命状态；待清理的死亡记录在清理前仍会计数。
  */
-int GetChickenCount(void);
+MaryAnimalCount GetChickenCount(void);
 
 /*
  * Registers one owned animal as the entrant for its contest family.
  * Parameters: animal_kind is ANIMAL_KIND_*; animal_index is the animal's
- * zero-based slot within that family.
+ * zero-based slot within that family. Cow and sheep share the barn selector;
+ * chicken uses the coop selector; horse and dog ignore animal_index. The native
+ * operation also removes/reinserts the live entity as needed and resets its
+ * saved location to the appropriate home map. Invalid kinds do nothing.
  * Related calls: GetContestAnimalIndex reads the registered slot, and
  * ClearContestAnimal removes the registration after the contest or event.
  *
  * 将一只已拥有的动物登记为相应类别比赛的参赛动物。
  * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该动物在类别内从 0 开始的槽位。
+ * 牛羊共用畜棚选择器，鸡使用鸡舍选择器，马和狗忽略 animal_index。原生操作还会按
+ * 需要移除并重新插入活动实体，并把保存位置重置到相应住所地图；无效类别不执行操作。
  * 联动调用：GetContestAnimalIndex 读取登记槽位；比赛或事件结束后由
  * ClearContestAnimal 清除登记。
  */
@@ -3855,11 +4544,16 @@ void SetContestAnimal(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_ind
 /*
  * Clears the registered contest entrant for one animal family.
  * Parameter: animal_kind is ANIMAL_KIND_*.
+ * Side effects: clears the barn/coop selected-slot flag for livestock and
+ * restores the selected animal entity to its home location; horse and dog are
+ * likewise restored through their fixed entity IDs. Invalid kinds do nothing.
  * Related calls: SetContestAnimal registers the entrant and
  * GetContestAnimalIndex reads its slot.
  *
  * 清除一个动物类别中已经登记的比赛参赛动物。
  * 参数：animal_kind 为 ANIMAL_KIND_*。
+ * 副作用：对家畜会清除畜棚／鸡舍的已选槽标志，并把所选动物实体恢复到住所位置；
+ * 马和狗同样通过固定实体 ID 恢复。无效类别不执行操作。
  * 联动调用：SetContestAnimal 负责登记；GetContestAnimalIndex 读取其槽位。
  */
 void ClearContestAnimal(MaryAnimalKind animal_kind);
@@ -3867,11 +4561,14 @@ void ClearContestAnimal(MaryAnimalKind animal_kind);
 /*
  * Returns the selected contest entrant slot for an animal family.
  * Parameter: animal_kind is ANIMAL_KIND_*.
- * Return value: the selected animal's zero-based family slot.
+ * Return value: the selected animal's zero-based family slot; horse and dog
+ * return slot zero while their transferred entity is present. Returns -1 when
+ * no entrant is registered/present or when animal_kind is invalid.
  *
  * 返回指定动物类别所选择的比赛参赛槽位。
  * 参数：animal_kind 为 ANIMAL_KIND_*。
- * 返回值：所选动物在该类别内从 0 开始的槽位。
+ * 返回值：所选动物在该类别内从 0 开始的槽位；马和狗的已转移实体存在时返回槽位零。
+ * 未登记／实体不存在或 animal_kind 无效时返回 -1。
  */
 MaryAnimalSlotIndex GetContestAnimalIndex(MaryAnimalKind animal_kind);
 
@@ -3899,7 +4596,7 @@ void SetTextVariableToCaughtFishName(MaryTextVariableSlot text_variable);
  * 参数：无。
  * 返回值：使用引擎原生单位的当前捕获尺寸。
  */
-int GetCaughtFishSize(void);
+MaryFishSize GetCaughtFishSize(void);
 
 /*
  * Tests whether the current catch is a maximum-size record.
@@ -3913,28 +4610,39 @@ int GetCaughtFishSize(void);
 MaryBool IsCaughtFishMaximumSize(void);
 
 /*
- * Tests whether the current catch is a River King.
+ * Tests whether the current catch belongs to the special Fish King group.
  * Parameters: none.
- * Return value: nonzero for a River King; zero otherwise.
+ * Return value: nonzero for a Fish King; zero otherwise. FoMT-US calls this
+ * result a "River King" in its reward dialogue, while MFoMT-US says "king
+ * fish"; the neutral callable name intentionally covers both official texts.
  *
- * 判断当前捕获是否为鱼王。
+ * 判断当前捕获是否属于特殊鱼王组。
  * 参数：无。
- * 返回值：属于鱼王时为非零，否则为零。
+ * 返回值：属于鱼王时为非零，否则为零。FoMT-US 的奖励对话称其为 “River King”，
+ * MFoMT-US 则写作 “king fish”；中性的 callable 名称有意兼容两套官方文本。
  */
-MaryBool IsCaughtFishRiverKing(void);
+MaryBool IsCaughtFishKing(void);
 
 /*
  * Selects the partner index used by the upcoming Moon-Viewing Festival.
- * Parameters: none. Return value: MOON_VIEWING_PARTNER_*. A married player
- * gets the spouse; otherwise the engine considers candidates whose rival-event
- * progression still permits the event, selects the highest love above the
- * required threshold, and breaks equal scores randomly.
+ * Parameters: none. Return value: MOON_VIEWING_PARTNER_*.
+ *
+ * A married player gets the spouse. Otherwise, each standard spouse candidate
+ * is eligible while their rival-event count is at most 4. The selector starts
+ * at 30000 love and only replaces the result when love is strictly greater,
+ * so exactly 30000 does not qualify. Equal scores above that threshold use a
+ * successive 50% replacement test; this is random but is not a uniform choice
+ * among all tied candidates. If nobody qualifies, FoMT falls back to Popuri
+ * and MFoMT falls back to Rick.
  *
  * 选择即将举行的赏月节所使用的同行对象索引。
- * 参数：无。
- * 返回值：MOON_VIEWING_PARTNER_*。玩家已婚时返回配偶；未婚时引擎
- * 仅考虑情敌事件进度仍允许参加的候选人，从爱情度达到门槛者中选择最高值，
- * 同分时随机决定。
+ * 参数：无。返回值：MOON_VIEWING_PARTNER_*。
+ *
+ * 玩家已婚时返回配偶。未婚时，标准结婚候选人的情敌事件计数不超过 4 才能
+ * 参选。选择器以 30000 爱情度为初值，只有严格大于当前值才会替换结果，因此
+ * 恰好 30000 不满足条件。超过门槛且同分时逐次进行 50% 替换；这个过程具有
+ * 随机性，但并不是在全部同分候选人之间作均匀随机选择。无人满足条件时，FoMT
+ * 固定回退到 Popuri，MFoMT 固定回退到 Rick。
  */
 MaryMoonViewingPartner SelectMoonViewingPartner(void);
 #if defined(MARY_MFOMT)
@@ -3958,25 +4666,44 @@ MaryMoonViewingPartner SelectMoonViewingPartnerAlias(void);
  * Parameters: none. Return value: COOKING_FESTIVAL_DISH_RATING_*.
  * Ratings excellent and great win in the vanilla result script; ineligible
  * means the held food is invalid or does not match the year's category.
+ * For eligible food, score = stamina gain - fatigue gain, including the
+ * food instance's signed bonuses. Each theme uses its own four thresholds;
+ * a rating requires strictly exceeding its threshold, not merely equaling it.
+ * Also updates VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID: empty/non-food hands
+ * record FOOD_NONE; a valid held food records its ID before category/rating
+ * evaluation, even if that dish subsequently receives an ineligible rating.
  *
  * 按当前料理祭主题评价玩家手中持有的料理。
  * 参数：无。
  * 返回值：COOKING_FESTIVAL_DISH_RATING_*。
  * 原版结果脚本中“优秀”和“很棒”会获胜；“不合格”表示手持料理无效或不符合当年类别。
+ * 对符合类别的食品，分数为体力回复量减去疲劳变化量，包含该食品实例的有符号
+ * 附加修正值。每种主题有各自的四档阈值；必须严格大于阈值才能进入该档，
+ * 恰好等于阈值时进入下一档。
+ * 同时更新 VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID：空手或非食品时记录
+ * FOOD_NONE；有效的手持食品在类别及评分判断前便记录其 ID，即使随后评分
+ * 为不合格，也不代表该变量会恢复为 FOOD_NONE。
  */
 MaryCookingFestivalDishRating GetCookingFestivalDishRating(void);
 
 /*
- * Selects the weighted mineral gift Thomas leaves in the stocking on Winter
- * 25.
+ * Selects the weighted mineral gift for Thomas's Winter 25 stocking event.
  * Parameters: none. Return value: MaryThomasStockingGift values 1-5; the
  * delivery script maps them to Mystrile, Orichalc, Moon Stone, Sand Rose, or
  * Alexandrite respectively.
  *
- * 为冬 25 日袜子礼物事件按权重选择 Thomas 留下的矿石礼物。
- * 参数：无。
- * 返回值：MaryThomasStockingGift 的 1-5；送礼脚本依次把它们映射为
+ * All four native handlers use the low eight bits of rand() >> 4 and the same
+ * five-entry table. The exact outcome counts out of 256 are 126, 43, 43, 43,
+ * and 1 in that order. The selector does not inspect the stocking, inventory,
+ * delivery state, or existing gift; those checks belong to the event script.
+ *
+ * 为 Thomas 的冬 25 日袜子礼物事件按权重选择矿石礼物。
+ * 参数：无。返回值：MaryThomasStockingGift 的 1-5；送礼脚本依次把它们映射为
  * 秘银、奥利哈钢、月亮石、沙漠玫瑰石和亚历山大石。
+ *
+ * 四版原生 handler 都取 rand() >> 4 的低八位，并使用相同的五项权重表。按
+ * 256 种输入精确计算，各结果依次占 126、43、43、43、1 种。选择器本身不检查
+ * 袜子、背包、送达状态或已有礼物；这些条件由事件脚本处理。
  */
 MaryThomasStockingGift SelectThomasStockingGift(void);
 
@@ -3985,11 +4712,18 @@ MaryThomasStockingGift SelectThomasStockingGift(void);
  * spouse-present events.
  * Parameters: none. Return value: the selected
  * MaryArticleId, suitable for SetPlayerHeldArticle or its wrapped variant.
+ * All four targets use the same table. Exact counts out of 256 are:
+ * Amethyst 126, Topaz 43, Ruby 43, Diamond 43, and Pink Diamond 1. The
+ * selector only draws and returns the article ID; it does not inspect or
+ * modify inventory, wrapping, marriage state, or event state.
  *
  * 从婚后配偶赠礼事件使用的加权礼物表中抽取一个物品 ID。
  * 参数：无。
  * 返回值：选中的 MaryArticleId，可直接传给 SetPlayerHeldArticle
  * 或其包装物品版本。
+ * 四个版本使用相同的表。按 256 种输入精确计算，紫水晶占 126，黄玉占 43，
+ * 红宝石占 43，钻石占 43，粉红钻石占 1。选择器只抽取并返回物品 ID，不检查
+ * 或修改背包、包装、婚姻状态或事件状态。
  */
 MaryArticleId GetRandomSpouseGiftArticleId(void);
 
@@ -3999,12 +4733,17 @@ MaryArticleId GetRandomSpouseGiftArticleId(void);
  * Parameters: none. Return value: 1 when the unlocked-album count
  * was increased, or 0 when all ten link albums were already unlocked. The
  * engine table maps these ten entries directly to ARTICLE_ALBUM_1 through
- * ARTICLE_ALBUM_10.
+ * ARTICLE_ALBUM_10. The native state stores the unlocked prefix length at
+ * offset 0x16 and the per-album removed/sold bitmap at offset 0x14. This
+ * callable only increments the prefix length; it does not clear or restore
+ * any album's bitmap state.
  *
  * 根据 GameCube 联动进度，解锁 Van 商店中下一张可出售的音乐唱片。
  * 参数：无。
  * 返回值：成功增加已解锁唱片数量时为 1；十张联动唱片均已解锁时为 0。
- * 引擎表会将这十项直接映射到 ARTICLE_ALBUM_1 至 ARTICLE_ALBUM_10。
+ * 引擎表会将这十项直接映射到 ARTICLE_ALBUM_1 至 ARTICLE_ALBUM_10。原生状态
+ * 在偏移 0x16 保存已解锁前缀长度，在偏移 0x14 保存逐唱片移除／售出位图。
+ * 本函数只增加前缀长度，不会清除或恢复任何唱片的位图状态。
  */
 MaryBool UnlockNextVanAlbum(void);
 
@@ -4013,12 +4752,15 @@ MaryBool UnlockNextVanAlbum(void);
  * Van's shop.
  * Parameters: none. Return value: 1 only when every album slot
  * from Album 1 through Album 10 is unlocked and has not been removed from the
- * current shop inventory; otherwise 0.
+ * current shop inventory; otherwise 0. Concretely, the unlocked-prefix byte
+ * must be at least 10 and all ten corresponding bits in the removed/sold
+ * bitmap must be zero.
  *
  * 检查十张 GameCube 联动唱片当前是否全部可在 Van 商店购买。
  * 参数：无。
  * 返回值：仅当 Album 1 至 Album 10 的全部槽位均已解锁，且尚未从当前
- * 商店库存中移除时为 1；否则为 0。
+ * 商店库存中移除时为 1；否则为 0。具体而言，已解锁前缀长度必须至少为 10，
+ * 且移除／售出位图中对应十个位必须全部为 0。
  */
 MaryBool AreAllVanAlbumsAvailable(void);
 
@@ -4028,21 +4770,40 @@ MaryBool AreAllVanAlbumsAvailable(void);
  * name. For a custom typed nickname, use OpenNameEntry with
  * NAME_ENTRY_SPOUSE_NICKNAME instead.
  *
+ * The destination is the player's second FixedStr<12>: at most 12 encoded
+ * bytes are copied, followed by a zero terminator. If the source begins with
+ * the two encoded bytes FF 21 (the current charmap's {Player} control token),
+ * the handler ignores the rest of that source and copies the player's saved
+ * name instead. The test is performed on encoded bytes, not on a hard-coded
+ * source-language spelling.
+ *
  * 保存配偶称呼玩家时所使用的预设昵称。
  * 参数：nickname 指向包含所选称呼的脚本文本。需要由玩家输入自定义昵称时，
  * 应改用 OpenNameEntry(NAME_ENTRY_SPOUSE_NICKNAME, ...) 。
+ *
+ * 目标字段是玩家结构中的第二个 FixedStr<12>：最多复制 12 个编码字节，随后补
+ * 零终止字节。若来源开头两个编码字节为 FF 21（当前码表的 {Player} 控制符），
+ * handler 会忽略来源的剩余内容，改为复制玩家已保存的本名。判断依据是编码字节，
+ * 不是在程序中硬编码某种源文本写法。
  */
 void SetPlayerNicknameForSpouse(const char *nickname);
 
 /*
- * Places the player at the farmhouse bed used after overnight or
- * event-ending transitions. The engine selects the bed X coordinate from the
- * current farmhouse-upgrade level and uses the fixed farmhouse-interior map
- * and bed Y coordinate.
+ * Moves the active field and player entity to the farmhouse bed position used
+ * after overnight or event-ending transitions. This is not a position-only
+ * helper: it first changes the active map to MAP_FARMHOUSE and installs the
+ * packed destination, then positions ENTITY_PLAYER at the same coordinates.
+ * Farmhouse upgrade levels 0, 1, and 2 select X coordinates 143, 263, and 327;
+ * Y is always 112 and the player faces FACING_LEFT. The native table has only
+ * these three entries, relying on the FarmHouse invariant that upgrade_level
+ * stays in 0..2.
  * Parameters: none.
  *
- * 将玩家放到过夜或事件结束转场使用的农舍床位。引擎根据当前农舍升级等级选择
- * 床位 X 坐标，并使用固定的农舍室内地图及床位 Y 坐标。
+ * 将当前场景及玩家实体移动到过夜或事件结束转场所使用的农舍床位。这不是只修改
+ * 坐标的辅助函数：它先切换到 MAP_FARMHOUSE 并安装压缩目的地记录，再将
+ * ENTITY_PLAYER 放到相同坐标。农舍升级等级 0、1、2 分别选择 X 坐标 143、263、
+ * 327；Y 恒为 112，玩家朝向 FACING_LEFT。原生表只有这三项，依赖 FarmHouse 的
+ * upgrade_level 始终处于 0..2 的内部不变量。
  * 参数：无。
  */
 void PlacePlayerAtFarmhouseBed(void);
@@ -4052,33 +4813,65 @@ void PlacePlayerAtFarmhouseBed(void);
  * Parameters: red, green, and blue are each in the range 0..31. The engine
  * packs them as red | (green << 5) | (blue << 10) before updating the palette.
  * Fireworks events use the three full-intensity primary colors in sequence.
+ * These are channel intensities, not a duration or speed. The native packing
+ * performs shifts and ORs without clamping or masking each channel; 0..31 is
+ * the intended input domain, not an enforced runtime bound. Out-of-range
+ * inputs can affect adjacent color bits and must not be silently normalized.
+ * All four targets reset the effect counter and use the same 120-entry
+ * blend-strength sequence, then clear the effect on the next update. This
+ * is 120 effect updates, not a caller-specified duration; calling again
+ * reinitializes the color and counter rather than queuing another flash.
  *
  * 使用 GBA 的 5 位 RGB 通道启动固定的屏幕闪色效果。
  * 参数：red、green、blue 的范围均为 0..31。引擎按
  * red | (green << 5) | (blue << 10) 打包后更新调色板；烟火事件会依次使用
  * 三种满强度原色。
+ * 三个参数都是颜色强度，不是持续时间或速度。原生打包直接移位并按位或，
+ * 不会逐通道截断或限制范围；0..31 是预期输入域，并非运行时强制边界。
+ * 越界输入可能影响相邻颜色位，编译器不得静默归一化这些原始值。
+ * 四个版本均重置效果计数，使用相同的 120 项混合强度序列，随后在下一次
+ * 更新时清理效果。这是 120 次效果更新，而非调用者指定的持续时间；再次
+ * 调用会重新初始化颜色与计数，不会把另一次闪色追加到队列中。
  */
-void FlashScreenColor(int red, int green, int blue);
+void FlashScreenColor(MaryRgb5Channel red, MaryRgb5Channel green, MaryRgb5Channel blue);
 
 /*
  * Rebuilds the current map's entity manager at the start of the new-day
  * script. This reloads map actors for the new calendar state and applies a
  * preserved overnight return position when one is active.
  * Parameters: none.
+ * All four native paths first run the game-state daily update, including
+ * farm/NPC updates and visit-counter guard resets and affection rewards.
+ * It is not a side-effect-free actor reload; do not call it merely to refresh
+ * an actor's graphics. Reset/reward processing is tied to this update call,
+ * not an autonomous timer attached to each visit counter.
  *
  * 在新一天脚本开始时重建当前地图的实体管理器。它会按照新的日期状态重新载入
  * 地图角色，并在存在已保存的过夜返回位置时恢复该位置。
  * 参数：无。
+ * 四个版本的原生路径都会先执行游戏状态的每日更新，包括农场／NPC 更新、访问
+ * 计数重复标记重置和爱情度奖励结算。它不是无副作用的角色重新载入操作。
+ * 不应仅为刷新角色图像而调用。重置／奖励处理由这条更新调用链触发，
+ * 不是访问计数器各自附带的独立定时器。
  */
 void RebuildMapEntitiesForNewDay(void);
 
 /*
- * Cures every currently sick livestock entity in the barn and coop.
- * Parameters: none. The shooting-star event uses this for the healthy-animals
- * wish; healthy livestock is left unchanged.
+ * Cures every currently sick livestock entity in the farm-animal entity range.
+ * Parameters: none. The native routine scans entity IDs 0x2E through 0x45,
+ * skips missing entities, tests each resolved livestock object's sick flag,
+ * and calls ResetSick only when set. ResetSick clears both the sick flag and
+ * accumulated sick-day counter. It does not clear unhappiness or change
+ * affection, feeding, pregnancy, age, or festival-winner state. The
+ * shooting-star event uses this for the healthy-animals wish; healthy
+ * livestock is left unchanged.
  *
- * 治愈牛羊棚与鸡舍中当前所有生病的家畜。
- * 参数：无。射星事件的“动物健康”愿望调用此函数；健康家畜不会发生变化。
+ * 治愈农场动物实体范围内当前所有生病的家畜。
+ * 参数：无。原生例程扫描实体 ID 0x2E 到 0x45，跳过不存在的实体，检查每个
+ * 成功解析的家畜对象的生病标志，并且只在该标志置位时调用 ResetSick。
+ * ResetSick 会同时清除生病标志与累计生病天数；不会清除“不高兴”，也不会改变
+ * 好感度、喂食、怀孕、年龄或祭典优胜状态。射星事件的“动物健康”愿望调用
+ * 此函数；健康家畜不会发生变化。
  */
 void CureAllSickLivestock(void);
 
@@ -4086,36 +4879,59 @@ void CureAllSickLivestock(void);
  * Adds the same signed affection amount to every owned farm animal: dog,
  * horse, chickens, cows, and sheep.
  * Parameter: amount is the signed affection
- * delta. Church-confession outcomes currently call this with a positive value.
+ * delta. The dog is always updated; the horse is updated only when present;
+ * chicken and shared cow/sheep rosters are traversed up to their currently
+ * unlocked capacities, skipping empty slots. Sick, unhappy, pregnant, young,
+ * or festival-winning animals are not filtered out. Every resolved animal
+ * uses the same signed-add operation as AddAnimalAffection and clamps its final
+ * affection to 0-250. Church-confession outcomes currently call this with a
+ * positive value.
  *
  * 为所有已拥有的农场动物增加相同的有符号好感变化量，包括狗、马、鸡、牛和羊。
- * 参数：amount 为有符号好感变化量；当前教堂忏悔结果会传入正值。
+ * 参数：amount 为有符号好感变化量。狗始终更新；马仅在存在时更新；鸡舍名册及
+ * 牛羊共用名册会遍历到当前已解锁容量并跳过空槽。函数不会排除生病、不高兴、
+ * 怀孕、幼年或祭典优胜动物。每个成功解析的动物都使用与 AddAnimalAffection
+ * 相同的有符号加法，并把最终好感度限制到 0-250。当前教堂忏悔结果会传入正值。
  */
-void AddAffectionToAllFarmAnimals(int amount);
+void AddAffectionToAllFarmAnimals(MaryAnimalAffectionDelta amount);
 
 /*
- * Enables the persistent shipping-price bonus awarded by the shooting-star
- * event's shipping wish.
- * Parameters: none. This function sets the dedicated
- * event bonus flag; it does not immediately ship an item.
+ * Enables the one-shot double payout awarded by the shooting-star event's
+ * shipping wish.
+ * Parameters: none. This function idempotently sets a dedicated byte to 1;
+ * repeated calls do not stack. At the next shipping settlement, the engine
+ * adds that settlement's accumulated shipping value to the player's money a
+ * second time, clears the byte, and resets the accumulated shipping value.
+ * It does not immediately ship an item or permanently change product prices.
  *
- * 启用射星事件“提高出货价格”愿望所奖励的持久出货加成。
- * 参数：无。该函数设置专用事件奖励标志，不会立即出货任何物品。
+ * 启用射星事件“提高出货收入”愿望所奖励的一次性双倍结算。
+ * 参数：无。该函数会幂等地把专用字节置为 1，重复调用不会叠加。下一次出货结算
+ * 时，引擎会把本次累计出货额再次加入玩家金钱，随后清除此字节并清空累计出货额。
+ * 它不会立即出货物品，也不会永久修改产品价格。
  */
 void EnableShootingStarShippingBonus(void);
 
 /*
  * Returns the cumulative shipped count for a product.
  * Parameter: product_id is the target-specific MaryProductId. This is the
- * ShippingBin table domain, not MaryFoodId or MaryArticleId.
- * Return value: cumulative shipped amount for that entry.
+ * complete ShippingBin table domain 0x00..0x66, not MaryFoodId or
+ * MaryArticleId. Values above 0x66 return zero. The native comparison is
+ * signed and does not reject negative raw integers, which can index before
+ * the table; callers must therefore use MaryProductId rather than treating
+ * this as a generally range-safe integer API.
+ * Return value: the entry's 31-bit cumulative shipped amount when its display
+ * flag is enabled, otherwise zero. Shipping saturates the stored count at
+ * 1,000,000,000.
  *
  * 返回指定产品的累计出货量。
- * 参数：product_id 为目标版本的 MaryProductId；它属于 ShippingBin 表编号域，
- * 不是 MaryFoodId 或 MaryArticleId。
- * 返回值：该表项的累计出货数量。
+ * 参数：product_id 为目标版本完整的 ShippingBin 表编号域 0x00..0x66；它不是
+ * MaryFoodId 或 MaryArticleId。大于 0x66 的值返回零。原生比较使用有符号条件，
+ * 不会拒绝负的原始整数，负值可能索引到表之前；调用方必须使用 MaryProductId，
+ * 不能把它当作对任意整数都安全的接口。
+ * 返回值：显示标志已启用时返回该表项的 31 位累计出货量，否则返回零。出货时
+ * 存储计数会在 1,000,000,000 饱和。
  */
-int GetAmountShipped(MaryProductId product_id);
+MaryProductShippedCount GetAmountShipped(MaryProductId product_id);
 
 /*
  * Initializes the player's child record when needed, then creates and enables
@@ -4123,25 +4939,36 @@ int GetAmountShipped(MaryProductId product_id);
  * Parameters:
  * none. Childbirth scripts call this immediately before positioning the baby;
  * existing child data is preserved rather than initialized again.
+ * An existing scene entity in slot 35 is destroyed and replaced; preserving
+ * the child record does not mean preserving the existing runtime entity.
+ * Requires the ScriptEngine scene-context pointer to be present; if it is
+ * null, the native handler returns without initializing the child record.
  *
  * 在需要时初始化玩家孩子的资料，随后为当前场景创建并启用孩子角色实体
  *（实体 ID 35）。
  * 参数：无。生育事件会在设置婴儿位置前调用此函数；已经存在
  * 的孩子资料不会被重复初始化。
+ * 场景中槽 35 的旧实体会被销毁并替换；保留孩子资料不等于保留原运行时实体。
+ * 要求 ScriptEngine 的场景上下文指针存在；为空时，原生 handler 直接返回，
+ * 不会初始化孩子记录。
  */
 void CreatePlayerChildEntity(void);
 
 /*
- * Relocates a persistent actor entity to another map and stores its target
- * coordinates.
+ * Sets a runtime entity's explicitly selected map and target coordinates.
  * Parameters: entity_id is the runtime actor ID; map_id is a
  * MaryMapId; x and y are target map coordinates. Unlike SetEntityPosition,
- * this updates the actor's cross-map location and refreshes its entity state.
+ * this uses map_id rather than the current scene map. The dispatcher passes
+ * zero as the actor-facing argument. This is not a guarantee of save-file
+ * persistence or entity creation; player placement also has map-dependent
+ * side effects, including the deepest mine-floor record.
  *
- * 将持久角色实体迁移到另一张地图，并保存其目标坐标。
+ * 设置运行时实体的指定地图和目标坐标。
  * 参数：entity_id 为运行时
  * 角色 ID；map_id 为 MaryMapId；x、y 为目标地图坐标。它与
- * SetEntityPosition 不同，会更新角色的跨地图位置并刷新实体状态。
+ * SetEntityPosition 不同，使用 map_id 而非当前场景地图。分派器把角色朝向参数
+ * 设为零。本调用不保证写入存档或创建实体；玩家定位还涉及地图相关副作用，
+ * 包括历史最深矿层记录。
  */
 void RelocateEntityToMap(
     MaryEntityId entity_id,
@@ -4150,44 +4977,54 @@ void RelocateEntityToMap(
     MaryMapSpaceY y);
 
 /*
- * Creates the dedicated first-sunrise visual entity used by the New Year
- * mountaintop event.
- * Parameters: none. Call PlayNewYearSunriseEffect next and
- * release the entity with DestroyNewYearSunriseEffect afterward.
+ * Creates or replaces the first-sunrise child effect owned by the scene's
+ * fixed event-effect host in entity slot 0x5D. It does not create that scene
+ * entity. The host must already exist; the native routine does not null-check
+ * the entity returned by the scene lookup.
+ * Parameters: none. Call PlayNewYearSunriseEffect next and release the child
+ * effect with DestroyNewYearSunriseEffect afterward.
  *
- * 创建跨年山顶事件专用的“新年首次日出”视觉实体。
- * 参数：无。随后应调用
- * PlayNewYearSunriseEffect，结束后再用 DestroyNewYearSunriseEffect 释放实体。
+ * 在场景固定事件特效宿主的实体槽 0x5D 内创建或替换“新年首次日出”子特效；
+ * 它不会创建该场景实体。宿主必须已经存在，原生函数不会检查场景查找返回的
+ * 实体是否为空。
+ * 参数：无。随后应调用 PlayNewYearSunriseEffect，结束后再用
+ * DestroyNewYearSunriseEffect 释放子特效。
  */
 void CreateNewYearSunriseEffect(void);
 
 /*
- * Starts the previously created first-sunrise animation and waits until its
- * active transition finishes.
+ * Starts the previously created first-sunrise child animation and switches
+ * script execution to the native sunrise wait state 0x1C until the child
+ * reports completion. The same fixed host entity 0x5D must exist.
  * Parameters: none.
  *
- * 启动此前创建的新年首次日出动画，并等待其活动转场结束。
+ * 启动此前创建的新年首次日出子动画，并把脚本执行切换到原生日出等待状态
+ * 0x1C，直至子对象报告完成。固定宿主实体 0x5D 同样必须存在。
  * 参数：无。
  */
 void PlayNewYearSunriseEffect(void);
 
 /*
- * Destroys the first-sunrise visual entity after the New Year transition.
+ * Destroys and clears the first-sunrise child effect after the New Year
+ * transition. This does not destroy the fixed scene host entity 0x5D.
  * Parameters: none.
  *
- * 在跨年转场结束后销毁首次日出视觉实体。
+ * 在跨年转场结束后销毁并清空首次日出子特效；不会销毁固定场景宿主实体 0x5D。
  * 参数：无。
  */
 void DestroyNewYearSunriseEffect(void);
 
 /*
- * Plays the reusable star-sparkle particle effect and waits for its active
- * phase. Scripts use it both for the shooting-star night and for the Gourmet's
- * highest cooking-festival reaction.
+ * Replaces the reusable star-sparkle particle collection owned by fixed host
+ * entity 0x5D and switches script execution to native wait state 0x1B.
+ * Scripts use it both for the shooting-star night and for the Gourmet's
+ * highest cooking-festival reaction. It is independent of the sunrise child
+ * slot, but requires the same host entity to exist.
  * Parameters: none.
  *
- * 播放可复用的星光闪烁粒子特效，并等待其活动阶段结束。脚本会在流星雨之夜及
- * 美食家对料理祭最高评价时使用它。
+ * 替换固定宿主实体 0x5D 所持有的可复用星光粒子集合，并把脚本执行切换到原生
+ * 等待状态 0x1B。脚本会在流星雨之夜及美食家对料理祭最高评价时使用它。该集合
+ * 与日出子对象使用不同槽位，但同样要求宿主实体已存在。
  * 参数：无。
  */
 void PlayStarSparkleEffect(void);
@@ -4195,75 +5032,117 @@ void PlayStarSparkleEffect(void);
 /*
  * Counts recipe records whose learned flag is set. The cooking menu uses a
  * nonzero result to decide whether the recipe-list screen can be opened.
+ * Each marked recipe record contributes one, regardless of how many times
+ * it was cooked. The six separately stored failed-dish flags are not counted.
+ * This is not the pending Lou/Ruby reward-dialogue counter. MFoMT also uses
+ * this native record count when updating its all-recipes completion latch.
  * Parameters: none.
  * Return value: the number of known recipes.
  *
  * 统计已设置“学会”标志的料理记录。料理菜单以结果是否非零决定能否打开菜谱
  * 列表画面。
+ * 每条已标记的菜谱只计一次，不按烹饪次数累计；另外保存的六种失败料理标记
+ * 不计入此数量。它也不是 Lou／Ruby 待处理奖励对话计数。女孩版还会使用同一
+ * 原生记录计数来更新全部料理完成标记。
  * 参数：无。
  * 返回值：已经掌握的菜谱数量。
  */
-int GetKnownRecipeCount(void);
+MaryKnownRecipeCount GetKnownRecipeCount(void);
 
 /*
- * Generates the procedural 28-by-28 layout for one mine floor while excluding
- * tiles occupied by the floor's fixed entrance and exit entities.
+ * Generates the procedural 28-by-28 layout for one mine floor. Before calling
+ * the native generator, it looks up the basket, farm dog, and runtime entity
+ * 75. If an actor is currently on the requested mine floor, the actor's four
+ * tile-corner coordinates are passed as occupied cells (at most 12 cells in
+ * total). These are mobile/runtime actor exclusions, not fixed entrance or
+ * exit markers.
  * Parameters:
  * mine_kind selects MINE_SPRING or MINE_LAKE; floor_index is zero-based within
- * that mine's 256-floor range.
+ * that mine's 256-floor range. The wrapper assumes the enum and floor-index
+ * domains are valid; out-of-domain raw integers are still forwarded to the
+ * native generator rather than rejected locally.
  *
- * 为指定矿层生成程序化的 28×28 布局，同时排除该层固定入口和出口实体占用的
- * 格子。
+ * 为指定矿层生成程序化的 28×28 布局。调用原生生成器前，会依次查找篮子、
+ * 农场狗和运行时实体 75；若该实体当前位于目标矿层，则把实体矩形的四个格子
+ * 角坐标作为占用位置传入，合计最多 12 格。这些是可移动／运行时实体的排除
+ * 坐标，并非固定入口或出口标记。
  * 参数：mine_kind 选择 MINE_SPRING 或 MINE_LAKE；floor_index 是该矿场
- * 256 层范围内从 0 开始的层号。
+ * 256 层范围内从 0 开始的层号。包装层假定枚举值和层号有效；超出范围的原始
+ * 整数不会在本层被拒绝，而会继续传给原生生成器。
  */
-void GenerateMineFloorLayout(MaryMineKind mine_kind, int floor_index);
+void GenerateMineFloorLayout(MaryMineKind mine_kind, MaryMineFloorIndex floor_index);
 
 /*
- * Moves the player from the current spring- or lake-mine floor to the next
- * deeper floor and updates the active mine-floor state.
+ * Builds and enters the next deeper floor of the current spring or lake mine.
+ * It derives the target map and zero-based floor index from the current mine
+ * map, gathers the basket, farm dog, and runtime entity 75 footprints already
+ * assigned to that target floor, generates the new floor without covering
+ * those cells, finds the generated entrance tile, and starts the map change
+ * with the player positioned at that entrance.
  * Parameters: none.
  * The calling script handles the fade and the one-minute time advance around
- * this operation.
+ * this operation. The routine is a no-op outside the two mine-floor map ranges
+ * and has no local deepest-floor guard; vanilla floor data prevents descent
+ * from being requested beyond the supported mine depth.
  *
- * 将玩家从当前泉矿或湖矿楼层移动到下一层，并更新当前矿层状态。
+ * 构建并进入当前泉矿或湖矿的下一层。它根据当前矿层地图求出目标地图和从零
+ * 开始的层号，收集已经分配到目标层的篮子、农场狗与运行时实体 75 的占用
+ * 坐标，在不覆盖这些格子的前提下生成新楼层，查找生成的入口格，并把玩家
+ * 定位到入口后开始地图切换。
  * 参数：无。调用脚本负责在该操作前后处理淡入淡出以及经过一分钟的时间更新。
+ * 当前地图不属于两段矿层范围时，本函数不执行操作；函数内部没有最深层保护，
+ * 原版依靠楼层数据避免在支持深度以外请求继续下行。
  */
 void DescendMineFloor(void);
 
 /*
  * Returns whether the selected cursed tool's curse is still active. The
- * engine maps the six cursed tool IDs to six dedicated curse-state records.
+ * engine maps the six cursed tool IDs to six dedicated curse-state records
+ * in sickle, hoe, axe, hammer, watering-can, and fishing-rod order.
  * Parameter: tool_id is one of the six cursed TOOL_* IDs. Return value:
  * nonzero while that tool remains cursed; zero otherwise.
+ * Passing any other raw integer is unsafe: the native mapper falls back to
+ * the cursed-hoe record instead of reporting an invalid ID.
  *
  * 返回所选诅咒农具的诅咒是否仍然生效。引擎会把六种诅咒农具 ID 映射到六个
- * 独立的诅咒状态记录。
+ * 独立的诅咒状态记录，顺序为镰刀、锄头、斧头、锤子、洒水壶、钓竿。
  * 参数：tool_id 为六种诅咒 TOOL_* ID 之一。
  * 返回值：仍受诅咒时为非零，否则为零。
+ * 传入其他原始整数并不安全：原生映射器会回落到诅咒锄头记录，而不是报告
+ * 无效 ID。
  */
 MaryBool IsToolCursed(MaryToolId tool_id);
 
 /*
- * Advances the selected cursed tool's lift condition. Returns 1 only when
- * this update completes the condition and lifts the curse; otherwise returns
- * 0. Event scripts use the result to present the curse-lift sequence.
- * Parameter: tool_id is one of the six cursed TOOL_* IDs.
+ * Advances the consecutive-equipped-day lift condition for the cursed sickle
+ * or cursed hammer. Each call increments that tool's byte counter; on the
+ * tenth call it clears the active-curse byte, marks the tool blessed, and
+ * returns TRUE. All other cursed tools return FALSE without advancing their
+ * own lift condition. The sleeping script calls this once after a completed
+ * night, and uses TRUE to present the curse-lift sequence.
+ * Parameter: tool_id must be TOOL_SICKLE_CURSED or TOOL_HAMMER_CURSED.
  *
- * 推进所选诅咒农具的解除条件。仅当本次更新刚好完成条件并解除诅咒时返回 1，
- * 否则返回 0；事件脚本据此播放解除诅咒的演出。
- * 参数：tool_id 为六种诅咒 TOOL_* ID 之一。
+ * 推进诅咒镰刀或诅咒锤子的“连续装备天数”解除条件。每次调用把对应字节计数
+ * 加一；第十次会清除诅咒生效字节、标记工具已祝福并返回 TRUE。其他诅咒农具
+ * 返回 FALSE，且不会推进各自的解除条件。睡眠脚本在完成一夜后调用一次，并以
+ * TRUE 结果播放解除诅咒演出。
+ * 参数：tool_id 必须为 TOOL_SICKLE_CURSED 或 TOOL_HAMMER_CURSED。
  */
 MaryBool AdvanceCursedToolLiftProgress(MaryToolId tool_id);
 
 /*
- * Applies the church/confessional removal rule to the selected cursed tool.
- * Returns 1 when that attempt lifts the curse. This is the operation used
- * after the confessional script accepts the fee.
+ * Applies one paid church/confessional removal visit to the cursed hoe or
+ * cursed watering can. Their counters complete on the tenth call, which
+ * clears the active curse, marks the tool blessed, and returns TRUE. A cursed
+ * sickle or hammer instead has its consecutive-equipped-day counter reset to
+ * zero; axe and fishing rod are unchanged. Other paths return FALSE. The
+ * confessional script calls this only after accepting and charging the fee.
  * Parameter: tool_id is one of the six cursed TOOL_* IDs.
  *
- * 对所选诅咒农具应用教堂忏悔室的解除规则；本次尝试成功解除时返回 1。该函数
- * 用于忏悔室脚本确认并扣除费用之后。
+ * 对诅咒锄头或诅咒洒水壶应用一次付费的教堂／忏悔室解除次数；第十次调用会
+ * 清除诅咒生效字节、标记工具已祝福并返回 TRUE。若传入诅咒镰刀或诅咒锤子，
+ * 则把其连续装备天数计数清零；斧头和钓竿不变，其余路径返回 FALSE。忏悔室
+ * 脚本只在确认并扣除费用后调用本函数。
  * 参数：tool_id 为六种诅咒 TOOL_* ID 之一。
  */
 MaryBool AttemptChurchCursedToolRemoval(MaryToolId tool_id);
@@ -4271,15 +5150,24 @@ MaryBool AttemptChurchCursedToolRemoval(MaryToolId tool_id);
 /*
  * Creates a temporary event icon in an event-local scene slot. Coordinates
  * use the current map's local pixel space, like entity placement and camera
- * movement; layer selects the scene display layer, and icon_id may
+ * movement; layer selects the two-bit OBJ display priority (0 is highest,
+ * 3 lowest relative to backgrounds; it is not a map-layer ID), and icon_id may
  * be supplied by GetFoodIconId() or as an original numeric engine icon ID.
  * Scripts may keep several slots alive simultaneously, so slot is an
- * event-local handle rather than an icon ID.
+ * event-local handle rather than an icon ID. This coordinate interpretation
+ * is independently supported by all four script sets: family scenes place
+ * actors near (292, 84) and (327, 114), then create table-food icons at
+ * (288, 122/123) and (304, 124). X=288 and X=304 also exceed the GBA's
+ * 240-pixel display width, ruling out fixed visible-screen coordinates.
  *
  * 在带编号的场景槽中创建临时事件图标。x、y 与实体定位及镜头移动一样，使用
- * 当前地图的局部像素坐标；layer 选择场景显示层；icon_id 可由 GetFoodIconId()
+ * 当前地图的局部像素坐标；layer 选择两位 OBJ 显示优先级（相对背景 0 最高、
+ * 3 最低，不是地图层 ID）；icon_id 可由 GetFoodIconId()
  * 提供，也可使用原始引擎图标数字 ID。
  * 脚本可以同时保留多个槽，因此 slot 是事件局部句柄，而不是图标 ID。
+ * 四套脚本提供了相互独立的坐标证据：家庭场景先把人物放在 (292, 84) 与
+ * (327, 114) 附近，再把餐桌食物图标创建于 (288, 122/123) 和 (304, 124)。
+ * X=288、304 也超过 GBA 画面宽度 240，因此不可能是固定可见屏幕坐标。
  */
 void CreateEventIcon(
     MaryEventIconSlot slot,
@@ -4428,17 +5316,21 @@ void SetTextVariableToProductName(
 int GetEventContextValue(void);
 
 /*
- * Cycles backward through the tool rucksack until another cursed tool is
- * equipped, or all ten slots have been checked.
- * Parameters: none. The church
- * uses this after blessing the currently equipped cursed tool so a remaining
- * cursed tool, if any, becomes selected.
+ * Cycles the equipped-tool selection backward through the tool rucksack. If
+ * the newly selected tool is one of the six cursed tools, cycling continues;
+ * the operation stops at the first non-cursed tool or after ten cycles.
+ * Parameters: none. The church uses this after a paid curse-removal attempt,
+ * so the player is not left holding a cursed tool when another selectable
+ * tool is available. Despite the historical symbol name, it does not seek or
+ * select another cursed tool.
  *
- * 向后轮换工具背包，直到装备另一把诅咒农具，或检查完全部十个槽位。
- * 参数：无。教堂解除当前装备农具的诅咒后调用此函数，使仍存在的下一把诅咒
- * 农具自动成为当前选择。
+ * 在工具背包中向后轮换当前装备选择。若新选中的仍是六种诅咒农具之一，就
+ * 继续轮换；遇到第一把非诅咒工具或完成十次轮换时停止。
+ * 参数：无。教堂在一次付费解除尝试后调用它，使存在其他可选工具时玩家不会
+ * 继续拿着诅咒工具。与历史符号名的含义相反，它不会寻找或选择另一把诅咒
+ * 工具。
  */
-void SelectNextCursedTool(void);
+void CycleBackwardToNonCursedTool(void);
 #if defined(MARY_MFOMT)
 /*
  * Tests whether an egg already occupies the chicken incubator selected by the
@@ -4481,7 +5373,7 @@ MaryBool IsSheepPregnancySlotOccupied(void);
  * 返回值：所选八字节记录的第一个 32 位字段。MFoMT-US 与 MFoMT-JP 使用相同
  * 布局；编号 53-58 为鱼王。
  */
-int GetFishCatchCount(MaryFishingRecordId record_id);
+MaryFishCount GetFishCatchCount(MaryFishingRecordId record_id);
 
 /*
  * Returns the largest recorded size from one MFoMT fishing-record slot.
@@ -4493,7 +5385,7 @@ int GetFishCatchCount(MaryFishingRecordId record_id);
  * 参数：record_id 为完整 59 槽域中的 FISHING_RECORD_*。
  * 返回值：所选八字节记录的第二个 32 位字段，单位为引擎原生鱼尺寸单位。
  */
-int GetLargestCaughtFishSize(MaryFishingRecordId record_id);
+MaryFishSize GetLargestCaughtFishSize(MaryFishingRecordId record_id);
 
 /*
  * Returns whether map_id exists in MFoMT's initialized map-metadata registry.
@@ -4519,17 +5411,30 @@ MaryBool IsMapRegistered(MaryMapId map_id);
  * 参数：tool_kind 使用 TOOL_KIND_*，对外顺序为镰刀、锄头、斧头、锤子、
  * 洒水壶、钓竿。无效类别返回零。
  */
-int GetToolExperience(MaryToolKind tool_kind);
+MaryToolExperienceValue GetToolExperience(MaryToolKind tool_kind);
 
 /*
  * Returns the number of animals in the selected family whose festival-winner
- * bit is set.
+ * bit is set among the currently present animals, not the total number of
+ * historical festival victories. Cow and sheep slots are filtered by their
+ * stored animal type; empty slots are excluded. Barn/coop capacity is 8/16
+ * and 4/8 respectively, depending on the corresponding upgrade bit.
  * Parameter: animal_kind is ANIMAL_KIND_* in horse, cow, sheep,
- * chicken, and dog order. Invalid kinds return zero.
+ * chicken, and dog order. Only kinds 0-4 are valid. An invalid kind exits the
+ * native dispatcher without pushing a result onto the VM stack; it does not
+ * produce a script-visible zero and must not be used.
+ * Both MFoMT regions also have a native horse-branch defect: when a horse
+ * exists but its winner bit is clear, no result is pushed. No horse produces
+ * zero; a winning horse produces one (subject to VM stack capacity).
  *
- * 返回所选动物类别中已设置祭典优胜标志的动物数量。
- * 参数：animal_kind 使用 ANIMAL_KIND_*，顺序为马、牛、羊、鸡、狗；无效类别
- * 返回零。
+ * 返回当前仍存在、且已设置祭典优胜标志的指定类别动物数量，不是历史获奖次数。
+ * 牛羊按栏位中保存的动物类型筛选，空栏位不计数。畜棚容量为8/16、鸡舍为4/8，
+ * 分别由对应设施的升级位决定。
+ * 参数：animal_kind 使用 ANIMAL_KIND_*，顺序为马、牛、羊、鸡、狗；仅0-4有效。
+ * 无效类别直接退出原生分派器，不向虚拟栈压入返回值；并不会在脚本中返回零，
+ * 不应使用。
+ * 女孩版两区还存在马分支的原生缺陷：马存在但优胜位未设置时不压入结果。
+ * 无马时得到零，获奖马得到一（仍受虚拟栈容量限制）。
  */
-int CountFestivalWinningAnimals(MaryAnimalKind animal_kind);
+MaryFestivalWinningAnimalCount CountFestivalWinningAnimals(MaryAnimalKind animal_kind);
 #endif
