@@ -45,8 +45,9 @@ fn parse_string_inner(
             },
 
             Err(err) => match err.kind {
-                LexerErrorKind::InvalidToken => return Err(ScriptError::LexError(err.location)),
-                LexerErrorKind::Custom(_) => unimplemented!(),
+                LexerErrorKind::InvalidToken | LexerErrorKind::Custom(_) => {
+                    return Err(ScriptError::LexError(err.location));
+                }
             },
         }
     }

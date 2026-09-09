@@ -1,5 +1,6 @@
 #![cfg(feature = "test_with_roms")]
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -245,6 +246,33 @@ fn native_new_record_audio_slots_exist_only_in_mfomt() {
 }
 
 #[test]
+fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
+    const TABLES: [(&str, usize); 4] = [
+        ("rom/fomt.gba", 0x0E9605),
+        ("rom/fomtjp.gba", 0x0E8AA5),
+        ("rom/mfomt.gba", 0x0F1B49),
+        ("rom/mfomtjp.gba", 0x0F16C5),
+    ];
+    const EXPECTED: [u8; 15] = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+
+    for (path, table_offset) in TABLES {
+        let rom = fs::read(local_rom_path(path)).unwrap();
+        assert_eq!(
+            &rom[table_offset..table_offset + EXPECTED.len()],
+            EXPECTED.as_slice(),
+            "{path}: RecordPlayer album-to-audio table"
+        );
+        assert_eq!(
+            rom.windows(EXPECTED.len())
+                .filter(|window| *window == EXPECTED)
+                .count(),
+            1,
+            "{path}: RecordPlayer album-to-audio table must be unique"
+        );
+    }
+}
+
+#[test]
 fn native_audio_slots_28_through_31_are_identical_short_sequences() {
     const TABLES: [(&str, usize); 4] = [
         ("rom/fomt.gba", 0x13ABF0),
@@ -289,8 +317,13 @@ fn native_audio_slots_28_through_31_are_identical_short_sequences() {
 }
 
 #[test]
-fn native_mfomt_numbered_script_audio_tracks_match_between_regions() {
-    const TABLES: [(&str, usize); 2] = [("rom/mfomt.gba", 0x144FF4), ("rom/mfomtjp.gba", 0x146A64)];
+fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
+    const TABLES: [(&str, usize); 4] = [
+        ("rom/fomt.gba", 0x13ABF0),
+        ("rom/fomtjp.gba", 0x13BD34),
+        ("rom/mfomt.gba", 0x144FF4),
+        ("rom/mfomtjp.gba", 0x146A64),
+    ];
     const TRACKS: [(usize, usize, &[u8]); 7] = [
         (
             131,
@@ -353,13 +386,32 @@ fn native_mfomt_numbered_script_audio_tracks_match_between_regions() {
         ),
     ];
 
+    let mut expected_voice_metadata = None;
+    let mut expected_wave_data: Option<Vec<Vec<u8>>> = None;
     for (path, table_offset) in TABLES {
         let rom = fs::read(local_rom_path(path)).unwrap();
+        let sequence_addresses = (0..211)
+            .map(|slot| {
+                u32::from_le_bytes(
+                    rom[table_offset + slot * 8..table_offset + slot * 8 + 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
         let mut shared_voicegroup = None;
         for (slot, track_count, expected_track_bytes) in TRACKS {
             let entry_offset = table_offset + slot * 8;
             let sequence_address =
                 u32::from_le_bytes(rom[entry_offset..entry_offset + 4].try_into().unwrap());
+            assert_eq!(
+                sequence_addresses
+                    .iter()
+                    .filter(|&&address| address == sequence_address)
+                    .count(),
+                1,
+                "{path} slot {slot} unexpectedly aliases another physical audio slot"
+            );
             let sequence_offset = (sequence_address - 0x0800_0000) as usize;
             assert_eq!(
                 rom[sequence_offset] as usize, track_count,
@@ -389,6 +441,466 @@ fn native_mfomt_numbered_script_audio_tracks_match_between_regions() {
                 "{path} slot {slot} complete track region"
             );
         }
+
+        let voicegroup_offset = (shared_voicegroup.unwrap() - 0x0800_0000) as usize;
+        let voice_metadata = (0..128)
+            .flat_map(|program| {
+                let entry =
+                    &rom[voicegroup_offset + program * 12..voicegroup_offset + (program + 1) * 12];
+                entry[..4].iter().chain(&entry[8..]).copied()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            expected_voice_metadata.get_or_insert_with(|| voice_metadata.clone()),
+            &voice_metadata,
+            "{path} voicegroup metadata differs after pointer normalization"
+        );
+
+        let wave_data = [
+            (0usize, 8u8),
+            (1, 0),
+            (74, 0),
+            (76, 0),
+            (78, 0),
+            (98, 0),
+            (113, 0),
+        ]
+        .into_iter()
+        .map(|(program, expected_type)| {
+            let entry_offset = voicegroup_offset + program * 12;
+            assert_eq!(
+                rom[entry_offset], expected_type,
+                "{path} program {program} instrument type"
+            );
+            let wave_address =
+                u32::from_le_bytes(rom[entry_offset + 4..entry_offset + 8].try_into().unwrap());
+            let wave_offset = (wave_address - 0x0800_0000) as usize;
+            let sample_length =
+                u32::from_le_bytes(rom[wave_offset + 12..wave_offset + 16].try_into().unwrap())
+                    as usize;
+            rom[wave_offset..wave_offset + 16 + sample_length].to_vec()
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(
+            expected_wave_data.get_or_insert_with(|| wave_data.clone()),
+            &wave_data,
+            "{path} direct PCM wave data differs"
+        );
+    }
+}
+
+#[test]
+fn native_audio_slots_176_and_183_preserve_real_target_variants() {
+    const TABLES: [(&str, usize); 4] = [
+        ("rom/fomt.gba", 0x13ABF0),
+        ("rom/fomtjp.gba", 0x13BD34),
+        ("rom/mfomt.gba", 0x144FF4),
+        ("rom/mfomtjp.gba", 0x146A64),
+    ];
+
+    fn tracks(rom: &[u8], table_offset: usize, slot: usize) -> Vec<Vec<u8>> {
+        let entry_offset = table_offset + slot * 8;
+        let song_address =
+            u32::from_le_bytes(rom[entry_offset..entry_offset + 4].try_into().unwrap());
+        let song_offset = (song_address - 0x0800_0000) as usize;
+        let track_count = rom[song_offset] as usize;
+        let starts = (0..track_count)
+            .map(|track| {
+                let pointer_offset = song_offset + 8 + track * 4;
+                (u32::from_le_bytes(rom[pointer_offset..pointer_offset + 4].try_into().unwrap())
+                    - 0x0800_0000) as usize
+            })
+            .collect::<Vec<_>>();
+
+        starts
+            .iter()
+            .enumerate()
+            .map(|(track, &start)| {
+                let end = starts.get(track + 1).copied().unwrap_or(song_offset);
+                rom[start..end].to_vec()
+            })
+            .collect()
+    }
+
+    let roms = TABLES.map(|(path, table_offset)| {
+        let rom = fs::read(local_rom_path(path)).unwrap();
+        (
+            path,
+            tracks(&rom, table_offset, 176),
+            tracks(&rom, table_offset, 183),
+        )
+    });
+
+    assert_eq!(roms[0].1, roms[1].1, "FoMT slot 176 differs by region");
+    assert_eq!(roms[2].1, roms[3].1, "MFoMT slot 176 differs by region");
+    assert_eq!(roms[0].1.len(), 2);
+    for track in 0..2 {
+        let fomt = &roms[0].1[track];
+        let mfomt = &roms[2].1[track];
+        assert_eq!(&fomt[..2], &[0xBE, 0x7F]);
+        assert_eq!(&mfomt[..2], &[0xBE, 0x64]);
+        assert_eq!(
+            &fomt[2..],
+            &mfomt[2..],
+            "slot 176 track {track} has an unaccounted game-family difference"
+        );
+    }
+
+    assert_eq!(roms[0].2, roms[2].2, "slot 183 differs in MFoMT-US");
+    assert_eq!(roms[0].2, roms[3].2, "slot 183 differs in MFoMT-JP");
+    let common = &roms[0].2;
+    let fomt_jp = &roms[1].2;
+    assert_eq!(common.len(), 3);
+    assert_eq!(fomt_jp.len(), 3);
+
+    for (track, marker) in [(0usize, [0xF1, 0x2D, 0x7F]), (1, [0xF1, 0x2D, 0x82])] {
+        let mut normalized = fomt_jp[track].clone();
+        let note = normalized
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .unwrap();
+        normalized[note] = 0xF3;
+        assert_eq!(normalized.last(), Some(&0xB1));
+        normalized.insert(normalized.len() - 1, 0x83);
+        assert_eq!(
+            &normalized, &common[track],
+            "FoMT-JP slot 183 track {track} has an unaccounted difference"
+        );
+    }
+
+    fn through_fine(track: &[u8]) -> &[u8] {
+        let end = track.iter().rposition(|&byte| byte == 0xB1).unwrap();
+        &track[..=end]
+    }
+    assert_eq!(through_fine(&fomt_jp[2]), through_fine(&common[2]));
+    assert_eq!(&common[2][through_fine(&common[2]).len()..], &[0, 0, 0]);
+    assert_eq!(&fomt_jp[2][through_fine(&fomt_jp[2]).len()..], &[0]);
+}
+
+#[test]
+fn native_harvest_sprite_status_accessors_match_all_four_targets() {
+    const CURRENT_TASK: &[u8] = &[0x80, 0x7E, 0x80, 0x07, 0x80, 0x0F, 0x70, 0x47];
+    const WORK_DAYS: &[u8] = &[0x80, 0x7E, 0xC0, 0x06, 0x40, 0x0F, 0x70, 0x47];
+    const TASK_EXPERIENCE: &[u8] = &[
+        0x00, 0xB5, 0x02, 0x29, 0x01, 0xD9, 0x00, 0x20, 0x02, 0xE0, 0x14, 0x30, 0x40, 0x18, 0x00,
+        0x78, 0x02, 0xBC, 0x08, 0x47,
+    ];
+    const PLAYED_MINIGAME: &[u8] = &[0x80, 0x7E, 0x80, 0x06, 0xC0, 0x0F, 0x70, 0x47];
+    const MINIGAME_EXPERIENCE: &[u8] = &[
+        0x00, 0xB5, 0x02, 0x29, 0x01, 0xD9, 0x00, 0x20, 0x02, 0xE0, 0x17, 0x30, 0x40, 0x18, 0x00,
+        0x78, 0x02, 0xBC, 0x08, 0x47,
+    ];
+
+    for (case, dispatch, base_id, handlers, resolver, leaves) in [
+        (
+            &CASES[0],
+            0x3F904,
+            0x0CB,
+            [0x42610, 0x42654, 0x42698, 0x426F0, 0x42738],
+            0xA0930,
+            [0x9E65C, 0x9E664, 0x9E66C, 0x9E680, 0x9E688],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0x0CB,
+            [0x42284, 0x422C8, 0x4230C, 0x42364, 0x423AC],
+            0xA0368,
+            [0x9E094, 0x9E09C, 0x9E0A4, 0x9E0B8, 0x9E0C0],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0x0CE,
+            [0x42856, 0x42898, 0x428DC, 0x42934, 0x4297C],
+            0xA5B04,
+            [0xA37F0, 0xA37F8, 0xA3800, 0xA3814, 0xA381C],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0x0CE,
+            [0x425B2, 0x425F4, 0x42638, 0x42690, 0x426D8],
+            0xA5544,
+            [0xA3230, 0xA3238, 0xA3240, 0xA3254, 0xA325C],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, &handler) in handlers.iter().enumerate() {
+            let entry = dispatch + (base_id + index) * 4;
+            assert_eq!(
+                u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+                0x0800_0000 + handler as u32,
+                "{} Harvest Sprite accessor slot {index}",
+                case.name
+            );
+            let resolver_call = handler + if matches!(index, 2 | 4) { 0x3A } else { 0x28 };
+            let leaf_call = handler
+                + match index {
+                    2 => 0x4A,
+                    4 => 0x46,
+                    _ => 0x36,
+                };
+            assert_eq!(
+                thumb_call_target(&rom, resolver_call),
+                resolver,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, leaf_call),
+                leaves[index],
+                "{}",
+                case.name
+            );
+        }
+
+        for (leaf, expected) in leaves.into_iter().zip([
+            CURRENT_TASK,
+            WORK_DAYS,
+            TASK_EXPERIENCE,
+            PLAYED_MINIGAME,
+            MINIGAME_EXPERIENCE,
+        ]) {
+            assert_eq!(
+                &rom[leaf..leaf + expected.len()],
+                expected,
+                "{} Harvest Sprite leaf {leaf:#X}",
+                case.name
+            );
+        }
+
+        assert_eq!(&rom[handlers[0] + 0x2C..handlers[0] + 0x2E], &[0x03, 0x22]);
+        assert_eq!(&rom[handlers[1] + 0x2C..handlers[1] + 0x2E], &[0x00, 0x22]);
+        assert_eq!(&rom[handlers[2] + 0x3E..handlers[2] + 0x40], &[0x00, 0x22]);
+        assert_eq!(&rom[handlers[3] + 0x2C..handlers[3] + 0x2E], &[0x00, 0x22]);
+        assert_eq!(&rom[handlers[4] + 0x3E..handlers[4] + 0x40], &[0x00, 0x21]);
+        assert_eq!(
+            &rom[handlers[4] + 0x4A..handlers[4] + 0x50],
+            &[0x41, 0x42, 0x01, 0x43, 0xC9, 0x0F]
+        );
+    }
+}
+
+#[test]
+fn native_mfomt_outfit_color_accessors_preserve_the_six_value_contract() {
+    for (case, dispatch, getter, setter, getter_leaf, setter_leaf) in [
+        (&CASES[1], 0x3FAF0, 0x45478, 0x4549C, 0x0EA30, 0x0EFE4),
+        (&CASES[3], 0x3F84C, 0x451D4, 0x451F8, 0x0E9E4, 0x0EF98),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + 0x78 * 4..dispatch + 0x78 * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x08000000 + getter as u32,
+            "{} outfit getter slot",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + 0x79 * 4..dispatch + 0x79 * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x08000000 + setter as u32,
+            "{} outfit setter slot",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[getter + 0x20..getter + 0x24].try_into().unwrap()),
+            0x1BE8,
+            "{} getter state offset",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[setter + 0x28..setter + 0x2C].try_into().unwrap()),
+            0x1BE8,
+            "{} setter state offset",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, getter + 0x0C), getter_leaf);
+        assert_eq!(thumb_call_target(&rom, setter + 0x22), setter_leaf);
+        assert_eq!(
+            &rom[getter_leaf..getter_leaf + 10],
+            &[0x52, 0x30, 0x00, 0x78, 0x40, 0x07, 0x40, 0x0F, 0x70, 0x47]
+        );
+        assert_eq!(
+            &rom[setter_leaf..setter_leaf + 42],
+            &[
+                0x00, 0xB5, 0x05, 0x29, 0x0F, 0xD8, 0x03, 0x1C, 0x52, 0x33, 0x1A, 0x78, 0x50, 0x07,
+                0x40, 0x0F, 0x88, 0x42, 0x08, 0xD0, 0x07, 0x20, 0x01, 0x40, 0x08, 0x20, 0x40, 0x42,
+                0x10, 0x40, 0x08, 0x43, 0x08, 0x21, 0x08, 0x43, 0x18, 0x70, 0x01, 0xBC, 0x00, 0x47,
+            ],
+            "{} outfit setter bounds/preserve/dirty-bit contract",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_incubator_capacity_is_one_plus_the_coop_upgrade_bit_on_all_targets() {
+    const CAPACITY_LEAF: &[u8] = &[
+        0x00, 0xB5, 0x01, 0x78, 0x01, 0x20, 0x08, 0x40, 0x02, 0x21, 0x00, 0x28, 0x00, 0xD1, 0x01,
+        0x21, 0x08, 0x1C, 0x02, 0xBC, 0x08, 0x47,
+    ];
+    for (case, dispatch, slot, handler, leaf, coop_offset_bytes) in [
+        (
+            &CASES[0],
+            0x3F904,
+            0xBB,
+            0x44B4E,
+            0x0C660,
+            &[0x82, 0x26, 0xF6, 0x00][..],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0xBE,
+            0x44DAE,
+            0x0C6D4,
+            &[0x84, 0x26, 0xF6, 0x00][..],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0xBB,
+            0x447C2,
+            0x0C640,
+            &[0x82, 0x26, 0xF6, 0x00][..],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0xBE,
+            0x44B0A,
+            0x0C688,
+            &[0x84, 0x26, 0xF6, 0x00][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x08000000 + handler as u32,
+            "{} incubator-capacity slot",
+            case.name
+        );
+        // FoMT adds 0x82 << 2 (0x208); MFoMT adds 0x84 << 3
+        // (0x420). Both addresses are their family's Coop object.
+        assert_eq!(&rom[handler + 8..handler + 12], coop_offset_bytes);
+        assert_eq!(thumb_call_target(&rom, handler + 0x0E), leaf);
+        assert_eq!(
+            &rom[leaf..leaf + CAPACITY_LEAF.len()],
+            CAPACITY_LEAF,
+            "{} capacity reads bit 0 and returns 1 or 2",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_pregnancy_stall_capacity_is_one_plus_the_barn_upgrade_bit_on_all_targets() {
+    const CAPACITY_LEAF: &[u8] = &[0x00, 0x78, 0xC0, 0x07, 0xC0, 0x0F, 0x01, 0x30, 0x70, 0x47];
+    for (case, dispatch, slot, handler, leaf, barn_offset_bytes) in [
+        (
+            &CASES[0],
+            0x3F904,
+            0xC1,
+            0x44BFE,
+            0x0CE9C,
+            &[0xBE, 0x21, 0xC9, 0x00][..],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0xC4,
+            0x44E56,
+            0x0CF10,
+            &[0xC0, 0x21, 0xC9, 0x00][..],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0xC1,
+            0x44872,
+            0x0CE7C,
+            &[0xBE, 0x21, 0xC9, 0x00][..],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0xC4,
+            0x44BB2,
+            0x0CEC4,
+            &[0xC0, 0x21, 0xC9, 0x00][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x08000000 + handler as u32,
+            "{} pregnancy-stall-capacity slot",
+            case.name
+        );
+        // FoMT adds 0xBE << 1 (0x17C); MFoMT adds 0xC0 << 1
+        // (0x180). Both addresses are their family's Barn object.
+        assert_eq!(&rom[handler + 8..handler + 12], barn_offset_bytes);
+        assert_eq!(thumb_call_target(&rom, handler + 0x0E), leaf);
+        assert_eq!(
+            &rom[leaf..leaf + CAPACITY_LEAF.len()],
+            CAPACITY_LEAF,
+            "{} capacity extracts bit 0 and adds one",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_shipment_box_deposit_animation_only_dispatches_the_scene_action() {
+    let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    for (case, dispatch, slot, handler, leaf) in [
+        (&CASES[0], 0x3F904, 0x0C0, 0x423D8, 0x140F4),
+        (&CASES[1], 0x3FAF0, 0x0C3, 0x42624, 0x14280),
+        (&CASES[2], 0x3F578, 0x0C0, 0x4204C, 0x13FC8),
+        (&CASES[3], 0x3F84C, 0x0C3, 0x42380, 0x14128),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} shipment-animation physical slot",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x10), leaf);
+
+        // Complete leaf through return. It reads event context +4, obtains the
+        // scene object at +A8 and invokes virtual +80. The sole difference is
+        // the relocated indirect-call helper BL at +0x0E.
+        for offset in 0..22 {
+            if (0x0E..0x12).contains(&offset) {
+                continue;
+            }
+            assert_eq!(
+                rom[leaf + offset],
+                reference[0x140F4 + offset],
+                "{} shipment-animation leaf +{offset:#x}",
+                case.name
+            );
+        }
     }
 }
 
@@ -412,6 +924,12 @@ fn native_audio_null_slot_topology_matches_neutral_symbols_on_all_targets() {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let null_sequence =
             u32::from_le_bytes(rom[table_offset..table_offset + 4].try_into().unwrap());
+        let null_sequence_offset = (null_sequence - 0x0800_0000) as usize;
+        assert_eq!(
+            rom[null_sequence_offset], 0,
+            "{} null SongEnt track count",
+            case.name
+        );
         let actual_nulls = (0..211)
             .filter(|slot| {
                 let offset = table_offset + slot * 8;
@@ -432,15 +950,68 @@ fn native_audio_null_slot_topology_matches_neutral_symbols_on_all_targets() {
                 .typed_int_const_name(audio_type, slot as i64)
                 .unwrap();
             assert!(
-                name.starts_with("AUDIO_SEQUENCE_"),
-                "{} null audio slot {slot} has misleading semantic name {name}",
+                name == format!("AUDIO_UNUSED_SLOT_{slot:03}"),
+                "{} null audio slot {slot} lacks its physical unused-slot name: {name}",
                 case.name
             );
         }
     }
 }
 
-fn direct_numeric_argument(call: &str, argument_index: usize) -> bool {
+#[test]
+fn native_animation_tables_are_complete_and_region_identical_within_each_game() {
+    fn animation_script(rom: &[u8], table: usize, pool: usize, id: usize) -> Vec<(u16, u16)> {
+        let record =
+            u32::from_le_bytes(rom[table + id * 4..table + id * 4 + 4].try_into().unwrap());
+        let count = (record & 0xFFFF) as usize;
+        let first = (record >> 16) as usize;
+        assert!(count > 0, "animation {id} has a zero-frame record");
+        (0..count)
+            .map(|index| {
+                let offset = pool + (first + index) * 4;
+                (
+                    u16::from_le_bytes(rom[offset..offset + 2].try_into().unwrap()),
+                    u16::from_le_bytes(rom[offset + 2..offset + 4].try_into().unwrap()),
+                )
+            })
+            .collect()
+    }
+
+    for (game, us_path, us_table, us_pool, jp_path, jp_table, jp_pool, last_id) in [
+        (
+            "FoMT",
+            "rom/fomt.gba",
+            0x58BA2C,
+            0x663208,
+            "rom/fomtjp.gba",
+            0x311B88,
+            0x3E9364,
+            2551,
+        ),
+        (
+            "MFoMT",
+            "rom/mfomt.gba",
+            0x522C4C,
+            0x6036B8,
+            "rom/mfomtjp.gba",
+            0x52455C,
+            0x604FC8,
+            2635,
+        ),
+    ] {
+        let us = fs::read(local_rom_path(us_path)).unwrap();
+        let jp = fs::read(local_rom_path(jp_path)).unwrap();
+        for id in 0..=last_id {
+            assert_eq!(
+                animation_script(&us, us_table, us_pool, id),
+                animation_script(&jp, jp_table, jp_pool, id),
+                "{game} animation {id} differs between US and JP"
+            );
+        }
+    }
+}
+
+fn direct_numeric_argument(call: &str, argument_index: usize) -> Option<i64> {
     let mut depth = 0usize;
     let mut current_index = 0usize;
     let mut argument_start = 0usize;
@@ -448,21 +1019,15 @@ fn direct_numeric_argument(call: &str, argument_index: usize) -> bool {
         match character {
             '(' => depth += 1,
             ')' if depth == 0 => {
-                let argument = call[argument_start..offset].trim_start();
-                return current_index == argument_index
-                    && argument
-                        .strip_prefix('-')
-                        .unwrap_or(argument)
-                        .starts_with(|character: char| character.is_ascii_digit());
+                let argument = call[argument_start..offset].trim();
+                return (current_index == argument_index)
+                    .then(|| argument.parse().ok())
+                    .flatten();
             }
             ')' => depth -= 1,
             ',' if depth == 0 => {
                 if current_index == argument_index {
-                    let argument = call[argument_start..offset].trim_start();
-                    return argument
-                        .strip_prefix('-')
-                        .unwrap_or(argument)
-                        .starts_with(|character: char| character.is_ascii_digit());
+                    return call[argument_start..offset].trim().parse().ok();
                 }
                 current_index += 1;
                 argument_start = offset + character.len_utf8();
@@ -470,40 +1035,79 @@ fn direct_numeric_argument(call: &str, argument_index: usize) -> bool {
             _ => {}
         }
     }
-    false
+    None
 }
 
-const COMPLETE_ARGUMENTS: &[(&str, &[usize])] = &[
-    ("SetTalkPortrait", &[0]),
-    ("ShowTalkHeartIndicator", &[0]),
-    ("ChangeMap", &[0]),
-    ("PlaySong", &[0, 1]),
-    ("GetCharacterLove", &[0]),
-    ("GetNpcFriendship", &[0]),
-    ("DoesAnimalExist", &[0]),
-    ("VarGet", &[0]),
-    ("VarSet", &[0]),
-    ("SetEntityFacing", &[1]),
-    ("SetEntitySpritePriority", &[1]),
-    ("StartEntityEffect", &[1, 2]),
-    ("GetFoodIconId", &[0]),
-    ("GetArticleIconId", &[0]),
-    ("GetToolIconId", &[0]),
-    ("AddFoodToRucksack", &[0]),
-    ("AddArticleToRucksack", &[0]),
-    ("AddToolToRucksack", &[0]),
-    ("HasReceivedLetter", &[0]),
-    ("CallScript", &[0]),
-];
+fn assert_statically_typed_arguments_are_symbolic(
+    case: &RomCase,
+    script_id: usize,
+    source: &str,
+    callables: &mary::mary_c::CallableTable,
+) {
+    // These Mary types intentionally describe open quantities or context-local
+    // indices.  A bare integer is therefore meaningful even when no global
+    // symbolic constant exists for that exact value.  Every other user type is
+    // a closed semantic domain: if a retail script still renders a bare integer
+    // for it, either the constant table is incomplete or propagation regressed.
+    const NUMERIC_USER_TYPES: &[&str] = &[
+        "MaryAnimalAffectionDelta",
+        "MaryCharacterLoveDelta",
+        "MaryClockHour",
+        "MaryClockMinute",
+        "MaryFatigueDelta",
+        "MaryFrameCount",
+        "MaryMineFloorIndex",
+        "MaryMoneyAmount",
+        "MaryNpcFriendshipDelta",
+        "MaryNpcFriendshipValue",
+        "MaryRequestedInventoryCount",
+        "MaryRequestedToolStackCount",
+        "MaryRgb5Channel",
+        "MaryStaminaDelta",
+        "MaryTextNumberFieldWidth",
+    ];
 
-fn assert_complete_semantic_arguments_are_symbolic(case: &RomCase, script_id: usize, source: &str) {
-    for (callable, argument_indices) in COMPLETE_ARGUMENTS {
+    for (callable, (_, shape)) in callables.scope.callable_map() {
+        let argument_indices = shape
+            .parameter_types()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value_type)| {
+                matches!(value_type, mary::ir::ValueType::UserType(_)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if argument_indices.is_empty() {
+            continue;
+        }
         let marker = format!("{callable}(");
         for call in source.split(&marker).skip(1) {
-            for &argument_index in *argument_indices {
+            for &argument_index in &argument_indices {
+                let Some(value) = direct_numeric_argument(call, argument_index) else {
+                    continue;
+                };
+                let mary::ir::ValueType::UserType(type_id) =
+                    shape.parameter_types()[argument_index]
+                else {
+                    unreachable!();
+                };
+                let has_semantic_constant = callables
+                    .scope
+                    .typed_int_const_name(type_id, value)
+                    .is_some();
                 assert!(
-                    !direct_numeric_argument(call, argument_index),
-                    "{} script {} renders complete semantic argument {} of {} as a direct number:\n{}",
+                    !has_semantic_constant,
+                    "{} script {} renders statically typed argument {} of {} as {value}, although that value has a semantic constant:\n{}",
+                    case.name,
+                    script_id,
+                    argument_index,
+                    callable,
+                    source
+                );
+                assert!(
+                    NUMERIC_USER_TYPES.iter().any(|type_name| {
+                        callables.scope.user_type(type_name) == Some(type_id)
+                    }),
+                    "{} script {} renders bare integer {value} for closed-domain argument {} of {}; add the missing semantic constant or repair type propagation:\n{}",
                     case.name,
                     script_id,
                     argument_index,
@@ -516,7 +1120,7 @@ fn assert_complete_semantic_arguments_are_symbolic(case: &RomCase, script_id: us
 }
 
 #[test]
-fn semantic_argument_checklist_references_current_callables() {
+fn every_target_exposes_statically_typed_callable_arguments() {
     for case in CASES {
         let options = Options::default().define(case.target).unwrap();
         let constants = parse_constant_header(
@@ -530,21 +1134,18 @@ fn semantic_argument_checklist_references_current_callables() {
             &constants,
         )
         .unwrap();
-        for &(name, indices) in COMPLETE_ARGUMENTS {
-            let (_, shape) = callables.scope.callable_map().get(name).unwrap_or_else(|| {
-                panic!("{}: stale semantic checklist callable {name}", case.name)
-            });
-            for &index in indices {
-                assert!(
-                    matches!(
-                        shape.parameter_types().get(index),
-                        Some(mary::ir::ValueType::UserType(_))
-                    ),
-                    "{}: {name} argument {index} no longer has a semantic domain",
-                    case.name
-                );
-            }
-        }
+        assert!(
+            callables
+                .scope
+                .callable_map()
+                .values()
+                .any(|(_, shape)| shape
+                    .parameter_types()
+                    .iter()
+                    .any(|value_type| matches!(value_type, mary::ir::ValueType::UserType(_)))),
+            "{} exposes no statically typed callable arguments",
+            case.name
+        );
     }
 }
 
@@ -584,6 +1185,8 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut verified = 0;
     let mut symbolic_script_calls = 0;
+    let mut numbered_audio_sequences = HashSet::new();
+    let mut numbered_audio_usage: HashMap<String, HashMap<String, usize>> = HashMap::new();
     let preamble = format!("#define {}\n#include \"mary_constants.mary.h\"\n#include \"mary_callables.mary.h\"\n#include \"mary_scripts.mary.h\"\n\n", case.target);
     let mut outputs = Vec::new();
     let mut table = String::from("mary_script_table\n{\n");
@@ -642,7 +1245,294 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|error| format!("{} script {id} decompile: {error}", case.name))?;
         let source = format_named_script_with_charmap(&name, &ast, &charmap)
             .map_err(|error| format!("{} script {id} format: {error}", case.name))?;
-        assert_complete_semantic_arguments_are_symbolic(case, id, &source);
+        if name == "EventScript_SystemEvent_OneHundredQuestionQuiz" {
+            assert!(
+                source.contains("switch (RandomIntInclusive(1, 255))"),
+                "{} quiz must select from the physical 255-question pool",
+                case.name
+            );
+            assert!(
+                source.contains("while (var_1 < 100);"),
+                "{} quiz must require 100 successful rounds",
+                case.name
+            );
+        }
+        if name == "EventScript_NPCEvent_DougAndDuke_ArgumentChoice" {
+            if case.target.contains("FOMT") && !case.target.contains("MFOMT") {
+                // This is the vanilla script's physical behavior: the event
+                // awards Ann love but asks the heart UI to read Popuri's love.
+                // Keep the mismatch visible instead of silently rewriting it.
+                assert!(source.contains("ShowTalkHeartIndicator(CHARACTER_POPURI)"));
+                assert!(source.contains("AddCharacterLove(CHARACTER_ANN, 3000)"));
+            } else {
+                assert!(!source.contains("ShowTalkHeartIndicator("));
+                assert!(source.contains("AddNpcFriendship(CHARACTER_ANN, 20)"));
+            }
+        }
+        if name == "EventScript_NPCEvent_DougAndDuke_Argument_FollowupAnnDialogue" {
+            if case.target.contains("FOMT") && !case.target.contains("MFOMT") {
+                assert!(source.contains("ShowTalkHeartIndicator(CHARACTER_POPURI)"));
+            } else {
+                assert!(!source.contains("ShowTalkHeartIndicator("));
+            }
+        }
+        if name == "EventScript_NPCEvent_Cliff_DialogueAndGiftResponses"
+            && case.target.contains("MFOMT")
+        {
+            // The vanilla MFoMT bytecode tests >= green first and only enters
+            // the following >= yellow/orange/red chain when that test is false.
+            // Those later branches are therefore unreachable.  Preserve this
+            // original behavior byte-for-byte instead of silently repairing it.
+            let green_needle = "if (GetCharacterLove(CHARACTER_CLIFF) >= LOVE_HEART_GREEN_MIN)";
+            let chains = source.match_indices(green_needle).collect::<Vec<_>>();
+            assert_eq!(
+                chains.len(),
+                2,
+                "{}: expected morning and afternoon copies of Cliff's original threshold bug",
+                case.name
+            );
+            for (offset, _) in chains {
+                let tail = &source[offset..source.len().min(offset + 12_000)];
+                let yellow = tail
+                    .find("if (GetCharacterLove(CHARACTER_CLIFF) >= LOVE_HEART_YELLOW_MIN)")
+                    .expect("MFoMT Cliff unreachable yellow threshold");
+                let orange = tail
+                    .find("if (GetCharacterLove(CHARACTER_CLIFF) >= LOVE_HEART_ORANGE_MIN)")
+                    .expect("MFoMT Cliff unreachable orange threshold");
+                let red = tail
+                    .find("if (GetCharacterLove(CHARACTER_CLIFF) >= LOVE_HEART_RED_MIN)")
+                    .expect("MFoMT Cliff unreachable red threshold");
+                assert!(
+                    yellow < orange && orange < red,
+                    "{}: Cliff's original unreachable threshold chain changed",
+                    case.name
+                );
+            }
+        }
+        if name == "EventScript_LocationTransition_EnterInn1FWithEventDispatch" {
+            assert!(source.contains(
+                "VarGet(VAR_ANN_CLIFF_WEDDING_EVENT_STATE) == EVENT_LIFECYCLE_COMPLETED"
+            ));
+            assert!(source
+                .contains("VarGet(VAR_ANN_CLIFF_RIVAL_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED"));
+            assert!(source.contains(
+                "CallScript(EventScript_RivalMarriageEvent_AnnAndCliff_06_SiblingComparisonArgument)"
+            ));
+        }
+        if name == "EventScript_NPCEvent_Gotz_LosesMotivation" {
+            assert!(source.contains(
+                "VarSet(VAR_GOTZ_LOSES_MOTIVATION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("VarSet(VAR_GOTZ_WORK_SUSPENDED, TRUE)"));
+        }
+        if name == "EventScript_NPCEvent_Gotz_RegainsMotivation" {
+            assert!(source.contains(
+                "VarSet(VAR_GOTZ_REGAINS_MOTIVATION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("VarSet(VAR_GOTZ_WORK_SUSPENDED, FALSE)"));
+        }
+        if name == "EventScript_LocationTransition_EnterGotzHouseWithEventDispatch" {
+            assert!(source.contains("GetNpcFriendship(CHARACTER_GOTZ) < 100"));
+            assert!(source.contains("GetNpcFriendship(CHARACTER_GOTZ) >= 150"));
+            assert!(source.contains("var_1 == SEASON_SUMMER"));
+            assert!(source.contains("var_1 != SEASON_SUMMER"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Gotz_LosesMotivation)"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Gotz_RegainsMotivation)"));
+            assert!(
+                source.contains("CallScript(EventScript_NPCEvent_GotzAndHarris_PatrolDiscussion)")
+            );
+        }
+        if name == "EventScript_NPCEvent_GotzAndHarris_PatrolDiscussion" {
+            assert!(source.contains(
+                "VarSet(VAR_GOTZ_AND_HARRIS_PATROL_DISCUSSION_EVENT_STATE, EVENT_LIFECYCLE_IN_PROGRESS)"
+            ));
+            assert!(source.contains(
+                "SetEntityEventScript(ENTITY_GOTZ, EventScript_NPCEvent_GotzAndHarris_PatrolDiscussion_FollowupGotzDialogue)"
+            ));
+            assert!(source.contains(
+                "SetEntityEventScript(ENTITY_HARRIS, EventScript_NPCEvent_GotzAndHarris_PatrolDiscussion_FollowupHarrisDialogue)"
+            ));
+        }
+        if name == "EventScript_LocationTransition_ExitGotzHouseWithEventStateCleanupAndDispatch" {
+            assert!(source.contains(
+                "VarSet(VAR_GOTZ_AND_HARRIS_PATROL_DISCUSSION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("ClearEntityEventScript(ENTITY_GOTZ)"));
+            assert!(source.contains("ClearEntityEventScript(ENTITY_HARRIS)"));
+        }
+        if name == "EventScript_NPCEvent_Zack_GivesFishingRod" {
+            assert!(source.contains("SetPlayerHeldTool(TOOL_FISHING_ROD_IRON, 1)"));
+            assert!(source.contains("AddToolToRucksack(TOOL_FISHING_ROD_IRON, 1)"));
+            assert!(source.contains(
+                "VarSet(VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE, EVENT_LIFECYCLE_IN_PROGRESS)"
+            ));
+            assert!(source.contains(
+                "SetEntityEventScript(ENTITY_ZACK, EventScript_NPCEvent_Zack_GivesFishingRod_FollowupZackDialogue)"
+            ));
+        }
+        if name == "EventScript_AchievementEvent_Fishing_CaughtEveryFishSpeciesZackCongratulations"
+        {
+            assert!(source.contains("AddNpcFriendship(CHARACTER_ZACK, 10)"));
+            assert!(source.contains(
+                "VarSet(VAR_ZACK_CONGRATULATES_CATCHING_EVERY_FISH_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_LocationTransition_EnterZackHouseWithEventDispatch" {
+            assert!(source.contains("GetFirstFreeRucksackToolSlot() >= RUCKSACK_SLOT_1"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Zack_GivesFishingRod)"));
+        }
+        if name == "EventScript_LocationTransition_EnterFarmWithDailyEventDispatch" {
+            assert!(source.contains(
+                "VarGet(VAR_ACHIEVEMENT_CAUGHT_EVERY_FISH_SPECIES_STATE) == ACHIEVEMENT_EVENT_COMPLETED"
+            ));
+            assert!(source.contains(
+                "CallScript(EventScript_AchievementEvent_Fishing_CaughtEveryFishSpeciesZackCongratulations)"
+            ));
+        }
+        if name == "EventScript_LocationTransition_ExitSeasideLodge" {
+            assert!(source.contains(
+                "VarSet(VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("ClearEntityEventScript(ENTITY_ZACK)"));
+            assert!(source.contains("ClearEntityEventScript(ENTITY_WON)"));
+        }
+        if name == "EventScript_NPCEvent_Zack_VisitsSickLillia" {
+            assert!(source.contains(
+                "VarSet(VAR_ZACK_VISITS_SICK_LILLIA_EVENT_STATE, EVENT_LIFECYCLE_IN_PROGRESS)"
+            ));
+            assert!(source.contains(
+                "SetEntityEventScript(ENTITY_LILLIA, EventScript_NPCEvent_Zack_VisitsSickLillia_FollowupLilliaDialogue)"
+            ));
+        }
+        if name == "EventScript_LocationTransition_EnterPoultryFarmHouse1FWithEventDispatch" {
+            assert!(source.contains("var_6 >= 4"));
+            assert!(source.contains("var_1 == SEASON_SUMMER"));
+            assert!(source.contains("var_3 == DAY_OF_WEEK_SUNDAY"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Zack_VisitsSickLillia)"));
+        }
+        if name == "EventScript_LocationTransition_ExitPoultryFarmHouse" {
+            assert!(source.contains(
+                "VarSet(VAR_ZACK_VISITS_SICK_LILLIA_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("ClearEntityEventScript(ENTITY_LILLIA)"));
+        }
+        if name == "EventScript_NPCEvent_Won_Introduction" {
+            assert!(source
+                .contains("VarSet(VAR_WON_INTRODUCTION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"));
+        }
+        if name == "EventScript_NPCEvent_Won_AppleChallenge" {
+            for food in ["FOOD_SUGDW_APPLE", "FOOD_HMSGB_APPLE", "FOOD_AEPFE_APPLE"] {
+                assert!(source.contains(&format!("SetPlayerHeldFood({food})")));
+            }
+            assert!(source.contains("SubtractMoney(500)"));
+            assert!(source.contains(
+                "VarSet(VAR_WON_APPLE_CHALLENGE_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_NPCEvent_Won_VasePurchase" {
+            assert!(source.contains("VarSet(VAR_HAS_VASE, TRUE)"));
+            assert!(source.contains("SubtractMoney(5000)"));
+            assert!(source
+                .contains("VarSet(VAR_WON_VASE_PURCHASE_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"));
+        }
+        if name == "EventScript_NPCEvent_Van_Introduction" {
+            assert!(source.contains("SetTalkNameplateCharacter(CHARACTER_VAN)"));
+            assert!(source
+                .contains("VarSet(VAR_VAN_INTRODUCTION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"));
+        }
+        if name == "EventScript_NPCEvent_LouOrRuby_Introduction" {
+            assert!(source.contains("SetTalkNameplateCharacter(CHARACTER_LOU_OR_RUBY)"));
+            assert!(source.contains(
+                "VarSet(VAR_LOU_OR_RUBY_INTRODUCTION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_FestivalEvent_HarvestSpriteTeaParty" {
+            assert!(source.contains("SetPlayerHeldFood(FOOD_RELAX_TEA_LEAVES)"));
+            for sprite in ["STAID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY", "TIMID"] {
+                assert!(source.contains(&format!("AddNpcFriendship(CHARACTER_{sprite}, 10)")));
+            }
+            assert!(source.contains("SetGameTime(18, 1)"));
+            assert!(source.contains(
+                "VarSet(VAR_HARVEST_SPRITE_TEA_PARTY_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_AchievementEvent_Collection_HarvestGoddessJewelsExchange" {
+            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_HARVEST_GODDESS_JEWEL)"));
+            assert!(source.contains("TOOL_GEM_GODDESS"));
+            assert!(source.contains(
+                "VarSet(VAR_HARVEST_GODDESS_JEWEL_EXCHANGE_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_AchievementEvent_Collection_KappaJewelsExchange" {
+            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_KAPPA_JEWEL)"));
+            assert!(source.contains("TOOL_GEM_KAPPA"));
+            assert!(source
+                .contains("VarSet(VAR_KAPPA_JEWEL_EXCHANGE_STATE, EVENT_LIFECYCLE_COMPLETED)"));
+        }
+        if name == "EventScript_AchievementEvent_Collection_JewelsOfTruthExchange" {
+            assert!(source.contains("GetFirstFreeRucksackToolSlot()"));
+            assert!(source.contains(
+                "VarSet(VAR_JEWELS_OF_TRUTH_EXCHANGE_RETRY_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_JEWEL_OF_TRUTH)"));
+            assert!(source.contains("TOOL_GEM_TRUTH"));
+            assert!(source
+                .contains("VarSet(VAR_JEWELS_OF_TRUTH_REWARD_STATE, EVENT_LIFECYCLE_COMPLETED)"));
+        }
+        if name == "EventScript_NPCEvent_Kappa_DailyOfferingAppearance" {
+            assert!(source.contains(
+                "VarSet(VAR_KAPPA_DAILY_APPEARANCE_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"
+            ));
+        }
+        if name == "EventScript_NPCEvent_Staid_DialogueAndWorkChoices" {
+            let invitation = if case.target.contains("MFOMT") {
+                "ARTICLE_HARVEST_SPRITE_INVITATION"
+            } else {
+                "ARTICLE_INVITATION"
+            };
+            assert!(source.contains(&format!("case {invitation}:")));
+            assert!(source.contains("var_0 = HARVEST_SPRITE_INTERACTION_TEA_PARTY_INVITATION"));
+            assert!(source.contains("VarGet(VAR_SEASON) != SEASON_SPRING"));
+            assert!(source.contains("VarGet(VAR_HOUR) >= 10 && VarGet(VAR_HOUR) < 17"));
+            for sprite in ["NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY", "TIMID"] {
+                assert!(source.contains(&format!(
+                    "GetEntityLocation(ENTITY_{sprite}) == MAP_HARVEST_SPRITES_HUT"
+                )));
+            }
+            assert!(source.contains("UsePlayerHeldItem()"));
+            assert!(source.contains("CallScript(EventScript_FestivalEvent_HarvestSpriteTeaParty)"));
+        }
+        if name == "EventScript_LocationTransition_EnterFarmWithDailyEventDispatch" {
+            assert!(source.contains("var_1 == SEASON_SPRING && var_2 == DAY_OF_MONTH_03"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Won_Introduction)"));
+            assert!(source.contains("GetMoney() >= 500"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Won_AppleChallenge)"));
+            assert!(source.contains("GetMoney() >= 5000"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Won_VasePurchase)"));
+            assert!(source.contains("VarGet(VAR_GAMECUBE_LINK_VAN_INTRODUCTION_AVAILABLE) == TRUE"));
+            assert!(source.contains("var_3 == DAY_OF_WEEK_WEDNESDAY"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_Van_Introduction)"));
+            assert!(source
+                .contains("VarGet(VAR_GAMECUBE_LINK_LOU_OR_RUBY_INTRODUCTION_AVAILABLE) == TRUE"));
+            assert!(source.contains("var_3 == DAY_OF_WEEK_SUNDAY"));
+            assert!(source.contains("CallScript(EventScript_NPCEvent_LouOrRuby_Introduction)"));
+        }
+        for token in source
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .filter(|token| {
+                token.strip_prefix("AUDIO_SEQUENCE_").is_some_and(|suffix| {
+                    suffix.len() == 3 && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            })
+        {
+            numbered_audio_sequences.insert(token.to_owned());
+            *numbered_audio_usage
+                .entry(token.to_owned())
+                .or_default()
+                .entry(name.to_owned())
+                .or_default() += 1;
+        }
+        assert_statically_typed_arguments_are_symbolic(case, id, &source, &callables);
         symbolic_script_calls += source.matches("CallScript(EventScript_").count();
         let rebuilt = parse_named_scripts_with_charmap(
             &source,
@@ -675,6 +1565,44 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
         "{} did not render any CallScript target as a script symbol",
         case.name
     );
+    let expected_numbered_audio = if case.target.contains("MFOMT") {
+        HashSet::from([
+            "AUDIO_SEQUENCE_144".to_owned(),
+            "AUDIO_SEQUENCE_170".to_owned(),
+        ])
+    } else {
+        HashSet::new()
+    };
+    assert_eq!(
+        numbered_audio_sequences, expected_numbered_audio,
+        "{} numbered audio inventory changed and needs semantic review",
+        case.name
+    );
+    let expected_numbered_audio_usage = if case.target.contains("MFOMT") {
+        HashMap::from([
+            (
+                "AUDIO_SEQUENCE_144".to_owned(),
+                HashMap::from([(
+                    "EventScript_WeatherEvent_TyphoonOrSnowstormFarmhousePowerOutage".to_owned(),
+                    4,
+                )]),
+            ),
+            (
+                "AUDIO_SEQUENCE_170".to_owned(),
+                HashMap::from([(
+                    "EventScript_FestivalEvent_NewYearsEve_BadDreams".to_owned(),
+                    1,
+                )]),
+            ),
+        ])
+    } else {
+        HashMap::new()
+    };
+    assert_eq!(
+        numbered_audio_usage, expected_numbered_audio_usage,
+        "{} numbered audio call sites changed and need renewed semantic review",
+        case.name
+    );
     publish_verified_outputs(case.name, &outputs)?;
     println!("{} Mary-C strict round-trip: {verified} scripts", case.name);
     Ok(())
@@ -693,6 +1621,61 @@ fn assert_numbered_script_name_matches_slot(name: &str, id: usize) {
     // An unproven event may contain real instructions or text. Retaining its
     // physical ID is honest, not a decompilation failure. The caller still
     // parses every instruction and compares the complete recompiled bytes.
+}
+
+#[test]
+fn numbered_script_symbols_are_only_empty_or_terminal_placeholders_in_roms() {
+    for case in CASES {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entries = get_script_table(&rom).unwrap();
+        let options = Options::default().define(case.target).unwrap();
+        let symbols = parse_text_name_table(
+            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let mut empty = 0;
+        let mut terminal = 0;
+
+        for entry in entries {
+            let ScriptTableEntry::Script { id, data, backing } = entry else {
+                continue;
+            };
+            let Some(name) = symbols.script_name(id) else {
+                continue;
+            };
+            if name != format!("EventScript_{id:04}") {
+                continue;
+            }
+
+            let decoded = decode_script_with_backing(data, backing).unwrap();
+            assert!(
+                decoded.strings.is_empty(),
+                "{} numbered slot {id} contains text and needs an event-level name",
+                case.name
+            );
+            match decoded.instructions.as_slice() {
+                [] => empty += 1,
+                [Ins::Exit] => terminal += 1,
+                instructions => panic!(
+                    "{} numbered slot {id} contains semantic instructions and needs review: {instructions:?}",
+                    case.name
+                ),
+            }
+        }
+
+        let expected = if case.target.contains("MFOMT") {
+            (35, 9)
+        } else {
+            (22, 7)
+        };
+        assert_eq!(
+            (empty, terminal),
+            expected,
+            "{} numbered placeholder shape inventory changed",
+            case.name
+        );
+    }
 }
 
 #[test]
@@ -754,6 +1737,14 @@ fn publish_verified_outputs(name: &str, outputs: &[(String, String)]) -> std::io
         }
         return Err(error);
     }
+    if had_previous {
+        if let Err(error) = fs::remove_dir_all(&previous) {
+            eprintln!(
+                "warning: verified output was published, but stale backup {} could not be removed: {error}",
+                previous.display()
+            );
+        }
+    }
     println!("Verified scripts saved to {}", destination.display());
     Ok(())
 }
@@ -790,9 +1781,9 @@ fn native_remaining_retail_noops_have_no_hidden_business_handler() {
         );
         // Pop one VM operand, test the current-script-entity pointer, then
         // either leave immediately or call a two-byte BX LR leaf before leaving.
-        assert_eq!(thumb_bl_target(&rom, handler + 0x22), epilogue as i32);
+        assert_eq!(thumb_bl_target(&rom, handler + 0x22), epilogue);
         assert_eq!(thumb_bl_target(&rom, handler + 0x26), empty_leaf as i32);
-        assert_eq!(thumb_bl_target(&rom, handler + 0x2A), epilogue as i32);
+        assert_eq!(thumb_bl_target(&rom, handler + 0x2A), epilogue);
         assert_eq!(&rom[empty_leaf..empty_leaf + 2], &[0x70, 0x47]);
 
         let animal_entry = dispatch_table + animal_slot * 4;
@@ -855,6 +1846,308 @@ fn native_retail_tutorial_placeholders_share_the_zero_return_epilogue() {
 }
 
 #[test]
+fn native_callable_dispatch_tables_have_only_the_audited_shared_handlers() {
+    for (case, dispatch_table, slot_count, expected_groups) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0x147usize,
+            vec![vec![0x13E, 0x13F, 0x140, 0x141, 0x143]],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0x153,
+            vec![vec![0x122, 0x123], vec![0x142, 0x143, 0x144, 0x145, 0x147]],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0x147,
+            vec![vec![0x13E, 0x13F, 0x140, 0x141, 0x143]],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0x153,
+            vec![vec![0x122, 0x123], vec![0x142, 0x143, 0x144, 0x145, 0x147]],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let mut slots_by_handler = HashMap::<u32, Vec<usize>>::new();
+        for slot in 0..slot_count {
+            let entry = dispatch_table + slot * 4;
+            let handler = u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap());
+            slots_by_handler.entry(handler).or_default().push(slot);
+        }
+
+        let mut actual_groups = slots_by_handler
+            .into_values()
+            .filter(|slots| slots.len() > 1)
+            .collect::<Vec<_>>();
+        actual_groups.sort();
+        assert_eq!(
+            actual_groups, expected_groups,
+            "{} callable handler-sharing topology changed",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_character_birthday_callable_uses_the_verified_physical_handlers() {
+    for (case, dispatch_table, slot, expected_handler) in [
+        (&CASES[0], 0x3F904usize, 0x07Busize, 0x41B5Cusize),
+        (&CASES[1], 0x3FAF0, 0x07E, 0x41DA4),
+        (&CASES[2], 0x3F578, 0x07B, 0x417D0),
+        (&CASES[3], 0x3F84C, 0x07E, 0x41B00),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entry = dispatch_table + slot * 4;
+        let handler = (u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()) & !1)
+            .wrapping_sub(0x0800_0000) as usize;
+        assert_eq!(handler, expected_handler, "{} birthday handler", case.name);
+        assert_eq!(
+            &rom[handler..handler + 40],
+            &[
+                0x24, 0x24, 0x64, 0x19, 0xA0, 0x46, 0xDA, 0x20, 0x40, 0x00, 0x2E, 0x18, 0x32, 0x68,
+                0x90, 0x00, 0x04, 0x38, 0x40, 0x44, 0x07, 0x68, 0x00, 0x2A, 0x01, 0xD0, 0x50, 0x1E,
+                0x30, 0x60, 0xD4, 0x21, 0x89, 0x00, 0x68, 0x18, 0x00, 0x68, 0x45, 0x7C,
+            ],
+            "{} birthday argument/date setup",
+            case.name
+        );
+        assert!(
+            rom[handler..handler + 0x70].windows(16).any(|window| {
+                window
+                    == [
+                        0x00, 0x23, 0x7F, 0x21, 0x0A, 0x1C, 0x2A, 0x40, 0x01, 0x40, 0x8A, 0x42,
+                        0x00, 0xD1, 0x01, 0x23,
+                    ]
+            }),
+            "{} birthday handler must compare the low seven encoded date bits",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_callable_stack_pop_counts_match_every_public_declaration() {
+    for (case, dispatch_table, no_op_slots) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            &[0x13E, 0x13F, 0x140, 0x141, 0x143][..],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0usize,
+            &[0x142, 0x143, 0x144, 0x145, 0x147][..],
+        ),
+        (
+            &CASES[2],
+            0x3F578usize,
+            &[0x13E, 0x13F, 0x140, 0x141, 0x143][..],
+        ),
+        (
+            &CASES[3],
+            0x3F84Cusize,
+            &[0x142, 0x143, 0x144, 0x145, 0x147][..],
+        ),
+    ] {
+        let rom = fs::read(case.rom).unwrap();
+        let options = Options::default().define(case.target).unwrap();
+        let constants = parse_constant_header(
+            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
+            &options,
+        )
+        .unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let by_id = callables
+            .scope
+            .callable_map()
+            .iter()
+            .map(|(name, (id, shape))| (id.0, (name.as_str(), shape.num_parameters())))
+            .collect::<HashMap<_, _>>();
+        let handlers = (0..callables.next_id)
+            .map(|slot| {
+                (u32::from_le_bytes(
+                    rom[dispatch_table + slot * 4..dispatch_table + slot * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize
+                    & !1)
+                    - 0x08000000
+            })
+            .collect::<Vec<_>>();
+        let mut unique_handlers = handlers.clone();
+        unique_handlers.sort_unstable();
+        unique_handlers.dedup();
+
+        for (slot, handler) in handlers.into_iter().enumerate().skip(2) {
+            let &(name, declared_count) = by_id
+                .get(&slot)
+                .unwrap_or_else(|| panic!("{} slot 0x{slot:03X} is undeclared", case.name));
+            let end = unique_handlers
+                .iter()
+                .copied()
+                .find(|candidate| *candidate > handler)
+                .unwrap_or(handler + 0x400)
+                .min(handler + 0x400);
+            let halfwords = rom[handler..end]
+                .chunks_exact(2)
+                .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+                .collect::<Vec<_>>();
+            let mut writes_by_base = HashMap::<usize, usize>::new();
+            for (index, instruction) in halfwords.iter().copied().enumerate() {
+                // Thumb SUB (immediate 3): `subs Rd, Rn, #1`.
+                if instruction & 0xFE00 != 0x1E00 || (instruction >> 6) & 7 != 1 {
+                    continue;
+                }
+                let destination = instruction as usize & 7;
+                for following in halfwords.iter().copied().skip(index + 1).take(3) {
+                    // Thumb STR (immediate): `str Rd, [Rb, #0]`.
+                    if following & 0xF800 == 0x6000
+                        && (following >> 6) & 0x1F == 0
+                        && following as usize & 7 == destination
+                    {
+                        *writes_by_base
+                            .entry((following as usize >> 3) & 7)
+                            .or_default() += 1;
+                        break;
+                    }
+                }
+            }
+            let native_count = writes_by_base.values().copied().max().unwrap_or(0);
+            if no_op_slots.contains(&slot) {
+                assert_eq!(
+                    native_count, 0,
+                    "{} {name} stopped being a true native no-op",
+                    case.name
+                );
+            } else {
+                assert_eq!(
+                    native_count, declared_count,
+                    "{} slot 0x{slot:03X} {name} native stack-pop count changed",
+                    case.name
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_fade_in_variants_differ_by_active_scene_hook_on_all_targets() {
+    for (case, dispatch_table, fade_in_slot, no_hook_slot, fade_in, no_hook) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0x034usize,
+            0x035usize,
+            0x40EF6usize,
+            0x40F44usize,
+        ),
+        (&CASES[1], 0x3FAF0, 0x035, 0x036, 0x41122, 0x41170),
+        (&CASES[2], 0x3F578, 0x034, 0x035, 0x40B6A, 0x40BB8),
+        (&CASES[3], 0x3F84C, 0x035, 0x036, 0x40E7E, 0x40ECC),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let pointer = |slot: usize| {
+            let entry = dispatch_table + slot * 4;
+            u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap())
+        };
+        assert_eq!(pointer(fade_in_slot), 0x0800_0000 + fade_in as u32);
+        assert_eq!(pointer(no_hook_slot), 0x0800_0000 + no_hook as u32);
+        assert_ne!(fade_in, no_hook, "{} fade-in entries", case.name);
+
+        // Both handlers pop style and speed, request the inward transition
+        // (r3 = 0), and call the same core routine. The stack byte consumed by
+        // that routine is the sole semantic difference: 1 executes the entity
+        // manager's vtable+0xB8 hook, while 0 skips it.
+        assert_eq!(
+            &rom[fade_in + 0x3C..fade_in + 0x48],
+            &[0x6B, 0x46, 0x01, 0x20, 0x18, 0x70, 0x08, 0x1C, 0x31, 0x1C, 0x00, 0x23]
+        );
+        assert_eq!(
+            &rom[no_hook + 0x3C..no_hook + 0x48],
+            &[0x6B, 0x46, 0x00, 0x20, 0x18, 0x70, 0x08, 0x1C, 0x31, 0x1C, 0x00, 0x23]
+        );
+        assert_eq!(
+            thumb_call_target(&rom, fade_in + 0x48),
+            thumb_call_target(&rom, no_hook + 0x48),
+            "{} shared inward-transition routine",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_screen_fade_styles_and_speeds_match_all_targets() {
+    for (case, core) in CASES.iter().zip([0x1297C, 0x12B08, 0x1284C, 0x129AC]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+
+        // The five-entry style jump table reaches these register assignments:
+        // r6 = 2/1 selects brightness decrease/increase, while r7 = 1 enables
+        // all four MOSAIC size fields. Style 4 leaves r6 at zero (mosaic only).
+        let table = core + 0x28;
+        let targets = (0..5)
+            .map(|index| {
+                (u32::from_le_bytes(
+                    rom[table + index * 4..table + index * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize
+                    & !1)
+                    - 0x0800_0000
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            targets,
+            [
+                core + 0x3C,
+                core + 0x42,
+                core + 0x48,
+                core + 0x4C,
+                core + 0x50
+            ],
+            "{} fade-style dispatch",
+            case.name
+        );
+        assert_eq!(&rom[core + 0x3C..core + 0x40], &[0x02, 0x26, 0x00, 0x27]);
+        assert_eq!(&rom[core + 0x42..core + 0x46], &[0x01, 0x26, 0x00, 0x27]);
+        assert_eq!(&rom[core + 0x48..core + 0x4C], &[0x02, 0x26, 0x02, 0xE0]);
+        assert_eq!(&rom[core + 0x4C..core + 0x50], &[0x01, 0x26, 0x00, 0xE0]);
+        assert_eq!(&rom[core + 0x50..core + 0x54], &[0x00, 0x26, 0x01, 0x27]);
+
+        // Speed 0, 1, and 2 load the exact Q0.16 progress increments used by
+        // the public FAST, NORMAL, and SLOW names.
+        assert_eq!(
+            u32::from_le_bytes(rom[core + 0x6C..core + 0x70].try_into().unwrap()),
+            0x1112,
+            "{} fast fade increment",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[core + 0x74..core + 0x78].try_into().unwrap()),
+            0x0889,
+            "{} normal fade increment",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[core + 0xB0..core + 0xB4].try_into().unwrap()),
+            0x0444,
+            "{} slow fade increment",
+            case.name
+        );
+    }
+}
+
+#[test]
 fn native_event_icon_priority_and_capacity_evidence_matches_all_four_roms() {
     // Independent native-evidence gate, not a replacement for script round trips.
     // Addresses were located from the FoMT source and Ghidra Headless; the
@@ -910,18 +2203,166 @@ fn native_event_icon_priority_and_capacity_evidence_matches_all_four_roms() {
 }
 
 #[test]
+fn native_event_icon_callables_and_item_icon_fallbacks_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, scene_create, scene_remove, item_leaves)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x139,
+                [0x45054, 0x450E2, 0x4513A, 0x4517A, 0x4510C],
+                0x16EC4,
+                0x16EF0,
+                [0xDCE0, 0xDF84, 0xDB60],
+            ),
+            (
+                0x3FAF0,
+                0x13D,
+                [0x452E2, 0x45372, 0x453CE, 0x453FC, 0x453A0],
+                0x16F44,
+                0x16F70,
+                [0xDD54, 0xDFF8, 0xDBD4],
+            ),
+            (
+                0x3F578,
+                0x139,
+                [0x44CC8, 0x44D56, 0x44DAE, 0x44DEE, 0x44D80],
+                0x16C58,
+                0x16C84,
+                [0xDCC0, 0xDF64, 0xDB40],
+            ),
+            (
+                0x3F84C,
+                0x13D,
+                [0x4503E, 0x450CE, 0x4512A, 0x45158, 0x450FC],
+                0x16DB8,
+                0x16DE4,
+                [0xDD08, 0xDFAC, 0xDB88],
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                ),
+                0x0800_0000 + handler as u32,
+                "{} event/item icon slot {slot:#x}",
+                case.name
+            );
+        }
+
+        assert_eq!(thumb_call_target(&rom, handlers[0] + 0x88), scene_create);
+        let remove_call = if case.name.starts_with("fomt-") {
+            0x24
+        } else {
+            0x26
+        };
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + remove_call),
+            scene_remove
+        );
+
+        // Table order is Food, Article, Tool even though the three handlers
+        // are laid out as Tool, Food, Article in native code.
+        for ((handler, leaf), call_offset) in handlers[2..]
+            .iter()
+            .copied()
+            .zip(item_leaves)
+            .zip([0x24, 0x28, 0x28])
+        {
+            assert_eq!(thumb_call_target(&rom, handler + call_offset), leaf);
+        }
+
+        // Complete public validity domains and their native fallback icon IDs.
+        // The family differences are intentional and must not be inferred from
+        // the FoMT-US C++ source alone.
+        assert_eq!(
+            &rom[item_leaves[0] + 0x06..item_leaves[0] + 0x08],
+            &[0xAA, 0x29]
+        );
+        assert_eq!(
+            &rom[item_leaves[2] + 0x06..item_leaves[2] + 0x08],
+            &[0x50, 0x2A]
+        );
+        let (article_max, food_fallback, article_tool_fallback) = if case.name.starts_with("fomt-")
+        {
+            (0x5Eu8, 428u16, 457u16)
+        } else {
+            (0x69, 439, 468)
+        };
+        assert_eq!(rom[item_leaves[1] + 0x06], article_max);
+
+        let food_actual = if case.name.starts_with("fomt-") {
+            u16::from(rom[item_leaves[0] + 0x10]) << 1
+        } else {
+            u16::from_le_bytes(
+                rom[item_leaves[0] + 0x14..item_leaves[0] + 0x16]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        assert_eq!(food_actual, food_fallback, "{} food fallback", case.name);
+
+        for leaf in [item_leaves[1], item_leaves[2]] {
+            let actual = if case.name.starts_with("fomt-") {
+                u16::from_le_bytes(rom[leaf + 0x14..leaf + 0x16].try_into().unwrap())
+            } else {
+                u16::from(rom[leaf + 0x10]) << 1
+            };
+            assert_eq!(actual, article_tool_fallback, "{} item fallback", case.name);
+        }
+    }
+}
+
+#[test]
 fn native_actor_animation_offsets_and_absent_facing_match_all_four_roms() {
     // SetAnimFacing stores an 8-bit direction; SetAnim stores a 16-bit base.
     // Both reload the fields and add base + facing before refreshing sprites.
     // This tests native evidence independently of the Mary-C bytecode compiler.
     let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
-    for (case, (facing, animation, getter_tail)) in CASES.iter().zip([
-        (0x32198, 0x321B0, 0x12124),
-        (0x32554, 0x3256C, 0x1220C),
-        (0x31F2C, 0x31F44, 0x11FF4),
-        (0x323C8, 0x323E0, 0x120B0),
-    ]) {
+    for (case, (dispatch, handler, leaf, resolver, facing, animation, getter_tail)) in
+        CASES.iter().zip([
+            (
+                0x3F904, 0x401D6, 0x121EC, 0xD3914, 0x32198, 0x321B0, 0x12124,
+            ),
+            (
+                0x3FAF0, 0x403EA, 0x122D8, 0xDB53C, 0x32554, 0x3256C, 0x1220C,
+            ),
+            (
+                0x3F578, 0x3FE4A, 0x120BC, 0xD30CC, 0x31F2C, 0x31F44, 0x11FF4,
+            ),
+            (
+                0x3F84C, 0x40146, 0x1217C, 0xDB050, 0x323C8, 0x323E0, 0x120B0,
+            ),
+        ])
+    {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + 0x0D * 4..dispatch + 0x0D * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} SetEntityAnim physical slot",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x3E), leaf);
+        assert_eq!(thumb_call_target(&rom, leaf + 0x0E), resolver);
+        assert_eq!(thumb_call_target(&rom, leaf + 0x22), animation);
+        // The wrapper compares the stored 16-bit base at +0x22 and avoids
+        // restarting the animation when the requested group is unchanged.
+        assert_eq!(
+            &rom[leaf + 0x12..leaf + 0x22],
+            &[
+                0x01, 0x1C, 0x00, 0x29, 0x06, 0xD0, 0x48, 0x8C, 0xA0, 0x42, 0x03, 0xD0, 0x08, 0x1C,
+                0x21, 0x1C
+            ]
+        );
         for (actual, expected, length, role) in [
             (facing, 0x32198, 24, "direction byte and base addition"),
             (
@@ -999,8 +2440,8 @@ fn native_mfomt_opening_dog_animation_group_maps_to_fomt_resource_group() {
     }
 
     // The MFoMT opening supplies base 978 after setting facing left (2), so the
-    // renderer selects physical entry 980. This deliberately does not assign a
-    // visual action name until the resource frame itself is independently shown.
+    // renderer selects physical entry 980. Direct reconstruction of the matching
+    // FoMT 942..945 records proves the four stationary puppy directions.
     assert_eq!(978 + 2, 980);
 }
 
@@ -1052,7 +2493,7 @@ fn native_cliff_hospital_and_collapse_animations_align_across_all_targets() {
 }
 
 #[test]
-fn native_child_sleeping_animations_align_across_all_targets() {
+fn native_child_age_selected_off_map_animations_align_across_all_targets() {
     fn animation_script(rom: &[u8], table: usize, pool: usize, id: usize) -> Vec<(u16, u16)> {
         let record =
             u32::from_le_bytes(rom[table + id * 4..table + id * 4 + 4].try_into().unwrap());
@@ -1075,12 +2516,12 @@ fn native_child_sleeping_animations_align_across_all_targets() {
         .collect();
     let tables = [0x58BA2C, 0x522C4C, 0x311B88, 0x52455C];
     let pools = [0x663208, 0x6036B8, 0x3E9364, 0x604FC8];
-    let infant = [(5, 50), (6, 50)];
+    let slot_12_script = [(5, 50), (6, 50)];
     for index in 0..4 {
         assert_eq!(
             animation_script(&roms[index], tables[index], pools[index], 12),
-            infant,
-            "{} infant sleeping animation",
+            slot_12_script,
+            "{} child age-selected off-map animation 12",
             CASES[index].name
         );
     }
@@ -1229,13 +2670,15 @@ fn native_audio_pool_insertion_continuations_match_all_targets() {
 }
 
 #[test]
-fn native_relocation_slots_forward_zero_facing_on_all_targets() {
-    for (case, (table, slot, call, target)) in CASES.iter().zip([
-        (0x3F904, 0x12E, 0x70, 0x16FA4),
-        (0x3FAF0, 0x132, 0x6E, 0x17024),
-        (0x3F578, 0x12E, 0x70, 0x16D38),
-        (0x3F84C, 0x132, 0x6E, 0x16E98),
-    ]) {
+fn native_relocation_slots_forward_zero_facing_and_family_side_effects() {
+    for (case, (table, slot, call, target, visit_call, visit_target, mine_call, mine_target)) in
+        CASES.iter().zip([
+            (0x3F904, 0x12E, 0x70, 0x16FA4, 0x180, 0xA0A90, 0x1BA, 0xEECC),
+            (0x3FAF0, 0x132, 0x6E, 0x17024, 0x280, 0xA5BF0, 0x2C6, 0xEF6C),
+            (0x3F578, 0x12E, 0x70, 0x16D38, 0x180, 0xA04C8, 0x1BA, 0xEEAC),
+            (0x3F84C, 0x132, 0x6E, 0x16E98, 0x280, 0xA5630, 0x2C6, 0xEF20),
+        ])
+    {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let entry = table + slot * 4;
         let handler =
@@ -1259,6 +2702,60 @@ fn native_relocation_slots_forward_zero_facing_on_all_targets() {
             "{} relocation target",
             case.name
         );
+        assert_eq!(
+            thumb_call_target(&rom, target as usize + visit_call as usize),
+            visit_target as usize,
+            "{} guarded visit-counter updater",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, target as usize + mine_call as usize),
+            mine_target as usize,
+            "{} deepest-mine-floor updater",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_chicken_feed_queries_preserve_capacity_and_boolean_contract() {
+    const CAPACITY: &[u8] = &[
+        0x00, 0xB5, 0x82, 0xB0, 0x08, 0x21, 0x00, 0x91, 0x00, 0x78, 0xC0, 0x07, 0xC0, 0x0F, 0x80,
+        0x00, 0x04, 0x30, 0x01, 0x90, 0x01, 0xAA, 0x6B, 0x46, 0x81, 0x42, 0x00, 0xD9, 0x13, 0x1C,
+        0x18, 0x68, 0x02, 0xB0, 0x02, 0xBC, 0x08, 0x47,
+    ];
+    const QUERY: &[u8] = &[
+        0x30, 0xB5, 0x04, 0x1C, 0x0D, 0x1C, 0xFF, 0xF7, 0xE7, 0xFF, 0x85, 0x42, 0x01, 0xD3, 0x00,
+        0x20, 0x08, 0xE0, 0x21, 0x68, 0x09, 0x03, 0x09, 0x0E, 0x01, 0x20, 0xA8, 0x40, 0x01, 0x40,
+        0x48, 0x42, 0x08, 0x43, 0xC0, 0x0F, 0x30, 0xBC, 0x02, 0xBC, 0x08, 0x47,
+    ];
+
+    for (case, (dispatch, slot, handler, query, capacity)) in CASES.iter().zip([
+        (0x3F904, 0xB7, 0x422A8, 0xC598, 0xC570),
+        (0x3FAF0, 0xBA, 0x424F4, 0xC60C, 0xC5E4),
+        (0x3F578, 0xB7, 0x41F1C, 0xC578, 0xC550),
+        (0x3F84C, 0xBA, 0x42250, 0xC5C0, 0xC598),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} chicken-feed query slot",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x2A), query);
+        assert_eq!(thumb_call_target(&rom, query + 6), capacity);
+        assert_eq!(
+            &rom[capacity..capacity + CAPACITY.len()],
+            CAPACITY,
+            "{}",
+            case.name
+        );
+        assert_eq!(&rom[query..query + QUERY.len()], QUERY, "{}", case.name);
     }
 }
 
@@ -1387,13 +2884,32 @@ fn native_barn_birth_readiness_and_link_clear_match_all_targets() {
         }
         if jp {
             // Actual FoMT-JP sheep path passes NULL to the affection getter.
-            // Preserve the evidence, not a guessed replacement parent pointer.
+            // Its byte result is halved, used as the PRNG remainder divisor,
+            // then written as newborn affection. Preserve this shipped flow,
+            // not a guessed replacement parent pointer or fixed outcome.
             assert_eq!(&rom[birth + 0x11C..birth + 0x11E], &[0x00, 0x20]);
             let getter = target(birth + 0x11E);
             assert_eq!(
                 &rom[getter..getter + 8],
                 &[0x80, 0x69, 0xC0, 0x02, 0x00, 0x0E, 0x70, 0x47]
             );
+            assert_eq!(
+                &rom[birth + 0x122..birth + 0x128],
+                &[0x01, 0x1C, 0x49, 0x08, 0x20, 0x1C]
+            );
+            let remainder = target(birth + 0x128);
+            assert_eq!(remainder, 0xD0706);
+            // Positive operands take the BIOS Div path and return its remainder;
+            // a zero divisor takes the local zero-return path.
+            assert_eq!(
+                &rom[remainder..remainder + 14],
+                &[
+                    0x03, 0x1C, 0x0B, 0x43, 0xBD, 0xD5, 0x00, 0x29, 0xB3, 0xD0, 0x01, 0x23, 0x88,
+                    0x42
+                ]
+            );
+            let affection_setter = target(birth + 0x130);
+            assert_eq!(affection_setter, 0x9ACE0);
         }
         let regional_reference = if jp {
             fs::read(local_rom_path(CASES[2].rom)).unwrap()
@@ -1742,15 +3258,33 @@ fn native_wedding_exclusion_tables_preserve_fomt_jp_differences() {
 
 #[test]
 fn native_cooking_theme_getter_and_rating_share_the_same_field() {
-    for (case, table, id, getter, rating, field) in [
-        (&CASES[0], 0x45934, 397, 0x48188, 0x43198, 0x219B),
-        (&CASES[1], 0x46050, 441, 0x48E2C, 0x433E4, 0x21BC),
-        (&CASES[2], 0x4575C, 397, 0x47FB0, 0x42E0C, 0x219B),
-        (&CASES[3], 0x45DAC, 441, 0x48B88, 0x43140, 0x21BC),
+    for (case, table, id, getter, dispatch, slot, handler, rating, field) in [
+        (
+            &CASES[0], 0x45934, 397, 0x48188, 0x3F904, 0x120, 0x4315A, 0x43198, 0x219B,
+        ),
+        (
+            &CASES[1], 0x46050, 441, 0x48E2C, 0x3FAF0, 0x124, 0x433A8, 0x433E4, 0x21BC,
+        ),
+        (
+            &CASES[2], 0x4575C, 397, 0x47FB0, 0x3F578, 0x120, 0x42DCE, 0x42E0C, 0x219B,
+        ),
+        (
+            &CASES[3], 0x45DAC, 441, 0x48B88, 0x3F84C, 0x124, 0x43104, 0x43140, 0x21BC,
+        ),
     ] {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let word = |p| u32::from_le_bytes(rom[p..p + 4].try_into().unwrap());
         assert_eq!(word(table + id * 4), getter as u32 + 0x08000000);
+        assert_eq!(
+            word(dispatch + slot * 4),
+            handler as u32 + 0x08000000,
+            "{} cooking-rating physical callable",
+            case.name
+        );
+        // Empty/non-food hands take the ineligible path; valid food reaches
+        // the rating block below. This binds the public physical slot to the
+        // same implementation whose category/threshold behavior is tested.
+        assert!(handler < rating);
         assert_eq!(
             &rom[getter..getter + 18],
             &[
@@ -1855,6 +3389,7 @@ fn native_food_bonus_addition_saturates_signed_bytes_in_four_targets() {
 fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
     let mut reference = None;
     let vanilla_us = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    let charmap = Charmap::parse(&fs::read_to_string("charmap_jp.txt").unwrap()).unwrap();
     let thresholds = [
         100, 80, 50, 30, 80, 60, 30, 10, 80, 50, 20, 10, 100, 70, 40, 20, 80, 60, 30, 20,
     ];
@@ -1895,6 +3430,50 @@ fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
                     .unwrap(),
             ) as usize
                 - 0x08000000;
+            if offset == 2 {
+                let name_pointer = |id: usize| {
+                    u32::from_le_bytes(
+                        rom[food_table + id * 16..food_table + id * 16 + 4]
+                            .try_into()
+                            .unwrap(),
+                    )
+                };
+                let description_pointer = |id: usize| {
+                    u32::from_le_bytes(
+                        rom[food_table + id * 16 + 12..food_table + id * 16 + 16]
+                            .try_into()
+                            .unwrap(),
+                    )
+                };
+                if case.target.ends_with("_US") {
+                    assert_eq!(name_pointer(0x86), name_pointer(0x89), "{}", case.name);
+                    assert_eq!(
+                        description_pointer(0x86),
+                        description_pointer(0x89),
+                        "{}",
+                        case.name
+                    );
+                } else {
+                    assert_ne!(name_pointer(0x86), name_pointer(0x89), "{}", case.name);
+                    assert_ne!(
+                        description_pointer(0x86),
+                        description_pointer(0x89),
+                        "{}",
+                        case.name
+                    );
+                    for (id, expected_text) in [(0x86, "焼きうどん"), (0x89, "焼きそば")] {
+                        let expected = charmap.encode_text(expected_text).unwrap();
+                        let name = (name_pointer(id) - 0x0800_0000) as usize;
+                        assert_eq!(
+                            &rom[name..name + expected.len()],
+                            expected.as_slice(),
+                            "{} food 0x{id:02X} name",
+                            case.name
+                        );
+                        assert_eq!(rom[name + expected.len()], 0, "{}", case.name);
+                    }
+                }
+            }
             for id in 0..171 {
                 assert_eq!(
                     &rom[food_table + id * 16 + 5..food_table + id * 16 + 7],
@@ -1924,6 +3503,188 @@ fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
             assert_eq!(classify(i32::from(*threshold)), index + 1);
             assert_eq!(classify(i32::from(*threshold) + 1), index);
         }
+    }
+}
+
+#[test]
+fn native_wool_p_and_x_article_records_preserve_target_specific_text_pointers() {
+    let charmap = Charmap::parse(&fs::read_to_string("charmap_jp.txt").unwrap()).unwrap();
+
+    for (case, (table, expected_icons)) in CASES.iter().zip([
+        (0xEFED4usize, [487u16, 489u16]),
+        (0xF8648, [498, 500]),
+        (0xEF738, [487, 489]),
+        (0xF8624, [498, 500]),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let record = |id: usize| table + id * 12;
+        let pointer = |offset: usize| {
+            let address = u32::from_le_bytes(rom[offset..offset + 4].try_into().unwrap());
+            assert!(
+                (0x0800_0000..0x0A00_0000).contains(&address),
+                "{} article text pointer 0x{address:08X}",
+                case.name
+            );
+            (address - 0x0800_0000) as usize
+        };
+
+        let p = record(0x09);
+        let x = record(0x0A);
+        assert_eq!(
+            [
+                u16::from_le_bytes(rom[p + 4..p + 6].try_into().unwrap()),
+                u16::from_le_bytes(rom[x + 4..x + 6].try_into().unwrap()),
+            ],
+            expected_icons,
+            "{} Wool P/X icon identity",
+            case.name
+        );
+
+        let p_name = pointer(p);
+        let x_name = pointer(x);
+        let p_description = pointer(p + 8);
+        let x_description = pointer(x + 8);
+        if case.target == "MARY_FOMT_US" {
+            assert_eq!(p_name, x_name, "{} localized name-pointer bug", case.name);
+            assert_eq!(
+                p_description, x_description,
+                "{} localized description-pointer bug",
+                case.name
+            );
+            assert_eq!(&rom[x_name..x_name + 9], b"Wool (P)\0");
+        } else {
+            assert_ne!(p_name, x_name, "{} distinct Wool X name", case.name);
+            assert_ne!(
+                p_description, x_description,
+                "{} distinct Wool X description",
+                case.name
+            );
+            if case.target == "MARY_MFOMT_US" {
+                assert_eq!(&rom[p_name..p_name + 9], b"Wool (P)\0");
+                assert_eq!(&rom[x_name..x_name + 9], b"Wool (X)\0");
+            } else {
+                for (name, expected_text) in [(p_name, "羊毛Ｐサイズ"), (x_name, "羊毛Ｘサイズ")]
+                {
+                    let expected = charmap.encode_text(expected_text).unwrap();
+                    assert_eq!(
+                        &rom[name..name + expected.len()],
+                        expected.as_slice(),
+                        "{} {expected_text}",
+                        case.name
+                    );
+                    assert_eq!(rom[name + expected.len()], 0, "{}", case.name);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_final_player_event_timer_accessors_reproduce_rival_timer_bug() {
+    const BUGGED_GETTER: [u8; 8] = [0xC0, 0x7D, 0x00, 0x07, 0x40, 0x0F, 0x70, 0x47];
+
+    for (case, (table, player_handlers, rival_handlers, player_getter, rival_getter)) in
+        CASES.iter().zip([
+            (
+                0x45934usize,
+                0x46728usize,
+                0x46754usize,
+                0x9E4A4usize,
+                0x9E4B4usize,
+            ),
+            (0x46050, 0x47068, 0x470A0, 0xA3638, 0xA3648),
+            (0x4575C, 0x46550, 0x4657C, 0x9DEDC, 0x9DEEC),
+            (0x45DAC, 0x46DC4, 0x46DFC, 0xA3078, 0xA3088),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let player_count = if case.target.contains("MFOMT") { 8 } else { 6 };
+        let rival_start = if case.target.contains("MFOMT") {
+            62
+        } else {
+            60
+        };
+
+        for index in 0..player_count {
+            let slot = 54 + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[table + slot * 4..table + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ) as usize,
+                0x0800_0000 + player_handlers + index * 6,
+                "{} player-event timer slot {slot}",
+                case.name
+            );
+        }
+        for index in 0..5 {
+            let slot = rival_start + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[table + slot * 4..table + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ) as usize,
+                0x0800_0000 + rival_handlers + index * 6,
+                "{} rival-event timer slot {slot}",
+                case.name
+            );
+        }
+
+        let final_player_handler = player_handlers + (player_count - 1) * 6;
+        let final_rival_handler = rival_handlers + 4 * 6;
+        assert_eq!(
+            &rom[final_player_handler + 4..final_player_handler + 6],
+            &[0, 0x22]
+        );
+        assert_eq!(
+            &rom[final_rival_handler + 4..final_rival_handler + 6],
+            &[1, 0x22]
+        );
+        assert_eq!(
+            &rom[player_getter..player_getter + BUGGED_GETTER.len()],
+            &BUGGED_GETTER,
+            "{} bugged player-event getter",
+            case.name
+        );
+        assert_eq!(
+            &rom[rival_getter..rival_getter + BUGGED_GETTER.len()],
+            &BUGGED_GETTER,
+            "{} rival-event getter",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_script_string_lookup_retains_off_by_one_bug_on_all_targets() {
+    const PREFIX: [u8; 12] = [
+        0x00, 0xB5, 0x02, 0x1C, 0x10, 0x69, 0x81, 0x42, 0x04, 0xD9, 0x01, 0x48,
+    ];
+    const SUFFIX: [u8; 12] = [
+        0x50, 0x69, 0x89, 0x00, 0x09, 0x18, 0x90, 0x69, 0x09, 0x68, 0x40, 0x18,
+    ];
+
+    for (case, handler) in CASES.iter().zip([0x3F7E0usize, 0x3F9CC, 0x3F454, 0x3F728]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            &rom[handler..handler + PREFIX.len()],
+            &PREFIX,
+            "{}",
+            case.name
+        );
+        assert_eq!(
+            &rom[handler + 20..handler + 20 + SUFFIX.len()],
+            &SUFFIX,
+            "{}",
+            case.name
+        );
+        // CMP id,string_count followed by BLS enters the table lookup when
+        // id <= count.  Equality is the original off-by-one bug: valid IDs
+        // stop at count - 1. Mary-C intentionally requires a declared symbol
+        // and does not expose this unsafe extra entry.
+        assert_eq!(&rom[handler + 6..handler + 10], &[0x81, 0x42, 0x04, 0xD9]);
     }
 }
 
@@ -2217,6 +3978,85 @@ fn native_mfomt_roster_copy_preserves_unknown_53_byte() {
             assert_eq!(lo & 0xF800, 0xF800);
             let delta = (((i32::from(hi & 0x7FF) << 12) | (i32::from(lo & 0x7FF) << 1)) << 9) >> 9;
             assert_eq!((pc as i32 + 4 + delta) as usize, target);
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_winter_thanksgiving_interleaved_slots_preserve_two_bit_domains() {
+    for (case, get_table, set_table, getters, setters) in [
+        (
+            &CASES[1],
+            0x46050,
+            0x4A430,
+            [0x49140, 0x49164, 0x4918C, 0x491B0, 0x491D8],
+            [0x4E170, 0x4E1B4, 0x4E1F4, 0x4E234, 0x4E274],
+        ),
+        (
+            &CASES[3],
+            0x45DAC,
+            0x4A18C,
+            [0x48E9C, 0x48EC0, 0x48EE8, 0x48F0C, 0x48F34],
+            [0x4DECC, 0x4DF10, 0x4DF50, 0x4DF90, 0x4DFD0],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for ((id, getter), setter) in [482usize, 484, 486, 488, 490]
+            .into_iter()
+            .zip(getters)
+            .zip(setters)
+        {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[get_table + id * 4..get_table + id * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x08000000 + getter as u32,
+                "{} getter slot {id}",
+                case.name
+            );
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[set_table + (id - 28) * 4..set_table + (id - 28) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x08000000 + setter as u32,
+                "{} setter slot {id}",
+                case.name
+            );
+            if id == 486 {
+                // This packed position uses the top two bits: its shared getter
+                // loads a byte then shifts right by six. The setter reaches the
+                // matching preserve-low-six-bits path rather than using the
+                // inline `value & 3` shape of the other four fields.
+                let getter_leaf = if case.target == "MARY_MFOMT_US" {
+                    0x497AA
+                } else {
+                    0x49506
+                };
+                assert_eq!(
+                    &rom[getter_leaf..getter_leaf + 6],
+                    &[0x80, 0x18, 0x00, 0x78, 0x80, 0x09],
+                    "{} top-two-bit getter for slot {id}",
+                    case.name
+                );
+                assert_eq!(
+                    &rom[setter + 16..setter + 20],
+                    &[0x3F, 0x20, 0x01, 0xF0],
+                    "{} preserve-low-six-bits setter path for slot {id}",
+                    case.name
+                );
+            } else {
+                // MOV r0,#3; AND r0,r0,r? proves the input is limited to two bits.
+                assert_eq!(
+                    &rom[setter + 12..setter + 16],
+                    &[0x03, 0x20, 0x06, 0x40],
+                    "{} two-bit setter mask for slot {id}",
+                    case.name
+                );
+            }
         }
     }
 }
@@ -2540,6 +4380,197 @@ fn native_fomt_unknown_237_and_242_are_two_bit_fields_in_both_regions() {
 }
 
 #[test]
+fn native_fomt_unknown_236_242_storage_references_only_expose_known_slot_244() {
+    for (case, fields, slot_244_extract) in [
+        (
+            &CASES[0],
+            [
+                (
+                    0x2173u32,
+                    &[
+                        0x474A0usize,
+                        0x474B4,
+                        0x474C8,
+                        0x474DC,
+                        0x4AF6C,
+                        0x4AF90,
+                        0x4AFB0,
+                        0x4AFD0,
+                    ][..],
+                ),
+                (
+                    0x2175,
+                    &[
+                        0x3DE88usize,
+                        0x47540,
+                        0x47554,
+                        0x47568,
+                        0x4757C,
+                        0x47590,
+                        0x475A4,
+                        0x4B06C,
+                        0x4B090,
+                        0x4B0B0,
+                        0x4B0D0,
+                        0x4B0F0,
+                        0x4B104,
+                    ][..],
+                ),
+            ],
+            0x3DE88usize,
+        ),
+        (
+            &CASES[2],
+            [
+                (
+                    0x2173,
+                    &[
+                        0x472C8usize,
+                        0x472DC,
+                        0x472F0,
+                        0x47304,
+                        0x4AD94,
+                        0x4ADB8,
+                        0x4ADD8,
+                        0x4ADF8,
+                    ][..],
+                ),
+                (
+                    0x2175,
+                    &[
+                        0x3DAFCusize,
+                        0x47368,
+                        0x4737C,
+                        0x47390,
+                        0x473A4,
+                        0x473B8,
+                        0x473CC,
+                        0x4AE94,
+                        0x4AEB8,
+                        0x4AED8,
+                        0x4AEF8,
+                        0x4AF18,
+                        0x4AF2C,
+                    ][..],
+                ),
+            ],
+            0x3DAFC,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_references) in fields {
+            let literal_pools: HashSet<_> = (0..0x100000usize)
+                .step_by(4)
+                .filter(|&offset| {
+                    u32::from_le_bytes(rom[offset..offset + 4].try_into().unwrap()) == field
+                })
+                .collect();
+            let references = (0..0xE0000usize)
+                .step_by(2)
+                .filter(|&instruction| {
+                    let opcode =
+                        u16::from_le_bytes(rom[instruction..instruction + 2].try_into().unwrap());
+                    if opcode & 0xF800 != 0x4800 {
+                        return false;
+                    }
+                    let pool = ((instruction + 4) & !3) + 4 * (opcode as usize & 0xFF);
+                    literal_pools.contains(&pool)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                references, expected_references,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+
+        // The sole business read of +0x2175 tests bit 4, the independently
+        // named slot 244, rather than unknown slot 242 at bits 0..1.
+        assert_eq!(
+            &rom[slot_244_extract..slot_244_extract + 12],
+            &[0x03, 0x49, 0x68, 0x18, 0x00, 0x78, 0xC0, 0x06, 0x00, 0x28, 0x03, 0xDA]
+        );
+    }
+}
+
+#[test]
+fn native_fomt_unknown_224_and_225_preserve_physical_domains_without_direct_users() {
+    for (case, get_table, set_table, entries, expected_literals) in [
+        (
+            &CASES[0],
+            0x45934usize,
+            0x49034usize,
+            [
+                (224usize, 0x473D0usize, 0x4AE24usize, 0x48662usize, 5u8),
+                (225, 0x473E4, 0x4AE44, 0x48626, 7),
+            ],
+            &[
+                0x473B8usize,
+                0x473CC,
+                0x473E0,
+                0x473F4,
+                0x4AE00,
+                0x4AE20,
+                0x4AE40,
+                0x4AE60,
+            ][..],
+        ),
+        (
+            &CASES[2],
+            0x4575C,
+            0x48E5C,
+            [
+                (224, 0x471F8, 0x4AC4C, 0x4848A, 5),
+                (225, 0x4720C, 0x4AC6C, 0x4844E, 7),
+            ],
+            &[
+                0x471E0usize,
+                0x471F4,
+                0x47208,
+                0x4721C,
+                0x4AC28,
+                0x4AC48,
+                0x4AC68,
+                0x4AC88,
+            ][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+        for (id, getter, setter, getter_leaf, shift) in entries {
+            assert_eq!(word(get_table + id * 4), 0x0800_0000 + getter as u32);
+            assert_eq!(word(set_table + (id - 28) * 4), 0x0800_0000 + setter as u32);
+            assert_eq!(word(getter + 16), 0x2170);
+            assert_eq!(word(setter + 28), 0x2170);
+            assert_eq!(thumb_call_target(&rom, getter + 10), getter_leaf);
+            let expected_leaf = if id == 224 {
+                [0x80, 0x18, 0x00, 0x78, 0x40, 0x06, 0x80, 0x0F]
+            } else {
+                [0x80, 0x18, 0x00, 0x88, 0xC0, 0x05, 0x80, 0x0F]
+            };
+            assert_eq!(&rom[getter_leaf..getter_leaf + 8], &expected_leaf);
+
+            for old in 0u16..=u16::MAX {
+                for input in 0u16..=3 {
+                    let mask = 3u16 << shift;
+                    let stored = (old & !mask) | ((input & 3) << shift);
+                    assert_eq!((stored >> shift) & 3, input & 3);
+                    assert_eq!(stored & !mask, old & !mask);
+                }
+            }
+        }
+
+        let field_bytes = 0x2170u32.to_le_bytes();
+        let actual_literals = rom[..0x100000]
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(actual_literals, expected_literals, "{}", case.name);
+    }
+}
+
+#[test]
 fn native_fomt_unknown_275_and_276_preserve_physical_domains_in_both_regions() {
     for (case, get_table, set_table, entries) in [
         (
@@ -2597,6 +4628,143 @@ fn native_fomt_unknown_275_and_276_preserve_physical_domains_in_both_regions() {
                 }
             }
         }
+
+        let getter_extractors = if case.target == "MARY_FOMT_US" {
+            [
+                (0x47CBCusize, 0x48966usize, [0x40, 0x07, 0x80, 0x0F]),
+                (0x47CD0, 0x486B2, [0xC0, 0x06, 0x80, 0x0F]),
+                (0x47CE4, 0x48662, [0x40, 0x06, 0x80, 0x0F]),
+                (0x47D78, 0x48FC6, [0x80, 0x06, 0xC0, 0x0F]),
+                (0x47D8C, 0x48E36, [0x80, 0x09, 0xD7, 0xE0]),
+                (0x48048, 0x48F2E, [0x80, 0x07, 0x80, 0x0F]),
+                (0x4805C, 0x48E5E, [0x00, 0x07, 0x80, 0x0F]),
+                (0x48070, 0x48E76, [0x80, 0x06, 0x80, 0x0F]),
+                (0x48098, 0x48F2E, [0x80, 0x07, 0x80, 0x0F]),
+            ]
+        } else {
+            [
+                (0x47AE4usize, 0x4878Eusize, [0x40, 0x07, 0x80, 0x0F]),
+                (0x47AF8, 0x484DA, [0xC0, 0x06, 0x80, 0x0F]),
+                (0x47B0C, 0x4848A, [0x40, 0x06, 0x80, 0x0F]),
+                (0x47BA0, 0x48DEE, [0x80, 0x06, 0xC0, 0x0F]),
+                (0x47BB4, 0x48C5E, [0x80, 0x09, 0xD7, 0xE0]),
+                (0x47E70, 0x48D56, [0x80, 0x07, 0x80, 0x0F]),
+                (0x47E84, 0x48C86, [0x00, 0x07, 0x80, 0x0F]),
+                (0x47E98, 0x48C9E, [0x80, 0x06, 0x80, 0x0F]),
+                (0x47EC0, 0x48D56, [0x80, 0x07, 0x80, 0x0F]),
+            ]
+        };
+        for (getter, leaf, extraction) in getter_extractors {
+            assert_eq!(thumb_call_target(&rom, getter + 10), leaf);
+            assert_eq!(&rom[leaf + 4..leaf + 8], &extraction);
+        }
+    }
+}
+
+#[test]
+fn native_ellen_stocking_gate_unknowns_have_no_direct_business_literal_users() {
+    for (case, field, expected_literals) in [
+        (
+            &CASES[0],
+            0x217Cu32,
+            &[
+                0x477A8usize,
+                0x477BC,
+                0x477D0,
+                0x477E4,
+                0x477F8,
+                0x4B438,
+                0x4B458,
+                0x4B478,
+                0x4B498,
+                0x4B4B4,
+            ][..],
+        ),
+        (
+            &CASES[2],
+            0x217Cu32,
+            &[
+                0x475D0usize,
+                0x475E4,
+                0x475F8,
+                0x4760C,
+                0x47620,
+                0x4B260,
+                0x4B280,
+                0x4B2A0,
+                0x4B2C0,
+                0x4B2DC,
+            ][..],
+        ),
+        (
+            &CASES[0],
+            0x217Du32,
+            &[
+                0x4780Cusize,
+                0x47820,
+                0x47834,
+                0x47848,
+                0x4B4D8,
+                0x4B4F8,
+                0x4B518,
+                0x4B534,
+            ][..],
+        ),
+        (
+            &CASES[2],
+            0x217Du32,
+            &[
+                0x47634usize,
+                0x47648,
+                0x4765C,
+                0x47670,
+                0x4B300,
+                0x4B320,
+                0x4B340,
+                0x4B35C,
+            ][..],
+        ),
+        (
+            &CASES[1],
+            0x2195u32,
+            &[
+                0x48200usize,
+                0x48214,
+                0x48228,
+                0x4823C,
+                0x4CA8C,
+                0x4CAAC,
+                0x4CACC,
+                0x4CAE8,
+            ][..],
+        ),
+        (
+            &CASES[3],
+            0x2195u32,
+            &[
+                0x47F5Cusize,
+                0x47F70,
+                0x47F84,
+                0x47F98,
+                0x4C7E8,
+                0x4C808,
+                0x4C828,
+                0x4C844,
+            ][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let field_bytes = field.to_le_bytes();
+        let actual_literals = rom[..0x100000]
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_literals, expected_literals,
+            "{} Ellen-adjacent storage-byte literals escaped the audited variable accessor cluster",
+            case.name
+        );
     }
 }
 
@@ -2858,7 +5026,7 @@ fn native_fomt_remaining_unknown_slots_preserve_physical_domains() {
             0x45934,
             0x49034,
             [
-                (334, 0x47CBC, 0x4BC48, 0x218C, 0, 3),
+                (334, 0x47CBC, 0x4BC48, 0x218C, 1, 3),
                 (335, 0x47CD0, 0x4BC68, 0x218C, 3, 3),
                 (336, 0x47CE4, 0x4BC88, 0x218C, 5, 3),
                 (343, 0x47D78, 0x4BD70, 0x218E, 5, 1),
@@ -2874,7 +5042,7 @@ fn native_fomt_remaining_unknown_slots_preserve_physical_domains() {
             0x4575C,
             0x48E5C,
             [
-                (334, 0x47AE4, 0x4BA70, 0x218C, 0, 3),
+                (334, 0x47AE4, 0x4BA70, 0x218C, 1, 3),
                 (335, 0x47AF8, 0x4BA90, 0x218C, 3, 3),
                 (336, 0x47B0C, 0x4BAB0, 0x218C, 5, 3),
                 (343, 0x47BA0, 0x4BB98, 0x218E, 5, 1),
@@ -2905,6 +5073,475 @@ fn native_fomt_remaining_unknown_slots_preserve_physical_domains() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn native_fomt_unknown_327_and_333_preserve_cross_byte_domains() {
+    for (case, get_table, set_table, slot_327, slot_333) in [
+        (
+            &CASES[0],
+            0x45934,
+            0x49034,
+            (0x47C10, 0x4BB4C),
+            (0x47C90, 0x4BC10),
+        ),
+        (
+            &CASES[2],
+            0x4575C,
+            0x48E5C,
+            (0x47A38, 0x4B974),
+            (0x47AB8, 0x4BA38),
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+
+        for (id, getter, setter) in [
+            (327usize, slot_327.0, slot_327.1),
+            (333usize, slot_333.0, slot_333.1),
+        ] {
+            assert_eq!(word(get_table + id * 4), 0x0800_0000 + getter as u32);
+            assert_eq!(word(set_table + (id - 28) * 4), 0x0800_0000 + setter as u32);
+        }
+
+        // Slot 327 is a four-bit word field at save offset +0x2188 bits 14..17.
+        // Both the getter and setter use a 32-bit load/store because the field
+        // crosses the +0x2189/+0x218A byte boundary.
+        assert_eq!(
+            &rom[slot_327.0 + 12..slot_327.0 + 18],
+            &[0x00, 0x68, 0x80, 0x03, 0x00, 0x0F]
+        );
+        assert_eq!(word(slot_327.0 + 24), 0x2188);
+        assert_eq!(word(slot_327.1 + 28), 0x2188);
+
+        // Slot 333 joins +0x218B bits 5..7 with +0x218C bit 0. The two literal
+        // offsets and the split extraction are fixed explicitly so this field
+        // cannot later be mistaken for an entire byte-sized gameplay flag.
+        assert_eq!(
+            &rom[slot_333.0 + 12..slot_333.0 + 26],
+            &[0x0A, 0x78, 0x52, 0x09, 0x05, 0x49, 0x40, 0x18, 0x00, 0x78, 0x01, 0x21, 0x08, 0x40]
+        );
+        assert_eq!(word(slot_333.0 + 36), 0x218B);
+        assert_eq!(word(slot_333.0 + 40), 0x218C);
+        assert_eq!(word(slot_333.1 + 48), 0x218B);
+        assert_eq!(word(slot_333.1 + 52), 0x218C);
+
+        let representative_words = [
+            0u32,
+            u32::MAX,
+            0xAAAA_AAAA,
+            0x5555_5555,
+            0x0000_C000,
+            0x0003_0000,
+        ];
+        for old in representative_words {
+            for input in 0u32..=255 {
+                let stored = (old & !(0xFu32 << 14)) | ((input & 0xF) << 14);
+                assert_eq!((stored >> 14) & 0xF, input & 0xF);
+                assert_eq!(stored & !(0xF << 14), old & !(0xF << 14));
+            }
+        }
+
+        for old in [0u16, u16::MAX, 0xAAAA, 0x5555, 0x00E0, 0x0100] {
+            for input in 0u16..=255 {
+                let stored = (old & !(0xFu16 << 5)) | ((input & 0xF) << 5);
+                assert_eq!((stored >> 5) & 0xF, input & 0xF);
+                assert_eq!(stored & !(0xF << 5), old & !(0xF << 5));
+            }
+        }
+    }
+}
+
+#[test]
+fn native_fomt_late_unknown_storage_references_do_not_absorb_adjacent_fields() {
+    fn thumb_literal_references(rom: &[u8], value: u32) -> Vec<usize> {
+        let literal_locations = (0..0x100000usize)
+            .step_by(4)
+            .filter(|&at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap()) == value)
+            .collect::<HashSet<_>>();
+
+        (0..0xE0000usize)
+            .step_by(2)
+            .filter(|&at| {
+                let opcode = u16::from_le_bytes(rom[at..at + 2].try_into().unwrap());
+                if opcode & 0xF800 != 0x4800 {
+                    return false;
+                }
+                let literal = ((at + 4) & !3) + usize::from(opcode & 0xFF) * 4;
+                literal_locations.contains(&literal)
+            })
+            .collect()
+    }
+
+    for (case, expected) in [
+        (
+            &CASES[0],
+            [
+                (
+                    0x218Bu32,
+                    &[
+                        0x2B0CEusize,
+                        0x3076C,
+                        0x47C70,
+                        0x47C84,
+                        0x47C98,
+                        0x4BBD4,
+                        0x4BBF8,
+                        0x4BC1C,
+                    ][..],
+                ),
+                (
+                    0x218C,
+                    &[
+                        0x47CA0usize,
+                        0x47CC4,
+                        0x47CD8,
+                        0x47CEC,
+                        0x47D00,
+                        0x47D3C,
+                        0x4BC30,
+                        0x4BC50,
+                        0x4BC70,
+                        0x4BC90,
+                        0x4BCB0,
+                        0x4BD14,
+                        0x5D5D8,
+                        0x80084,
+                    ][..],
+                ),
+                (
+                    0x218E,
+                    &[
+                        0x1B8D8usize,
+                        0x47D58,
+                        0x47D6C,
+                        0x47D80,
+                        0x47D94,
+                        0x4BD38,
+                        0x4BD58,
+                        0x4BD78,
+                        0x4BD98,
+                    ][..],
+                ),
+                (
+                    0x2198,
+                    &[
+                        0x48050usize,
+                        0x48064,
+                        0x48078,
+                        0x4808C,
+                        0x48118,
+                        0x4C1D0,
+                        0x4C1F4,
+                        0x4C214,
+                        0x4C234,
+                        0x4C308,
+                    ][..],
+                ),
+                (
+                    0x2199,
+                    &[
+                        0x480A0usize,
+                        0x480B4,
+                        0x480C8,
+                        0x480DC,
+                        0x480F0,
+                        0x48104,
+                        0x4C250,
+                        0x4C274,
+                        0x4C294,
+                        0x4C2B4,
+                        0x4C2D4,
+                        0x4C2F4,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[2],
+            [
+                (
+                    0x218B,
+                    &[
+                        0x2AE62usize,
+                        0x30500,
+                        0x47A98,
+                        0x47AAC,
+                        0x47AC0,
+                        0x4B9FC,
+                        0x4BA20,
+                        0x4BA44,
+                    ][..],
+                ),
+                (
+                    0x218C,
+                    &[
+                        0x47AC8usize,
+                        0x47AEC,
+                        0x47B00,
+                        0x47B14,
+                        0x47B28,
+                        0x47B64,
+                        0x4BA58,
+                        0x4BA78,
+                        0x4BA98,
+                        0x4BAB8,
+                        0x4BAD8,
+                        0x4BB3C,
+                        0x5D320,
+                        0x7FBEC,
+                    ][..],
+                ),
+                (
+                    0x218E,
+                    &[
+                        0x1B66Cusize,
+                        0x47B80,
+                        0x47B94,
+                        0x47BA8,
+                        0x47BBC,
+                        0x4BB60,
+                        0x4BB80,
+                        0x4BBA0,
+                        0x4BBC0,
+                    ][..],
+                ),
+                (
+                    0x2198,
+                    &[
+                        0x47E78usize,
+                        0x47E8C,
+                        0x47EA0,
+                        0x47EB4,
+                        0x47F40,
+                        0x4BFF8,
+                        0x4C01C,
+                        0x4C03C,
+                        0x4C05C,
+                        0x4C130,
+                    ][..],
+                ),
+                (
+                    0x2199,
+                    &[
+                        0x47EC8usize,
+                        0x47EDC,
+                        0x47EF0,
+                        0x47F04,
+                        0x47F18,
+                        0x47F2C,
+                        0x4C078,
+                        0x4C09C,
+                        0x4C0BC,
+                        0x4C0DC,
+                        0x4C0FC,
+                        0x4C11C,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, references) in expected {
+            assert_eq!(
+                thumb_literal_references(&rom, field),
+                references,
+                "{} +{field:#06X}",
+                case.name
+            );
+        }
+
+        let (byte_218b_bits_3_4, byte_218b_bits_0_1, word_218c_bits_13_16, byte_218e_bits_3_4) =
+            if case.target == "MARY_FOMT_US" {
+                (0x2B0D2, 0x30770, 0x5D5DC, 0x1B8DC)
+            } else {
+                (0x2AE66, 0x30504, 0x5D324, 0x1B670)
+            };
+
+        // The only non-accessor users of +0x218B read bits 3..4 and 0..1;
+        // slot 333 occupies bits 5..7 and therefore does not own either use.
+        assert_eq!(
+            &rom[byte_218b_bits_3_4..byte_218b_bits_3_4 + 8],
+            &[0x00, 0x78, 0x18, 0x24, 0x04, 0x40, 0x00, 0x2C]
+        );
+        assert_eq!(
+            &rom[byte_218b_bits_0_1..byte_218b_bits_0_1 + 8],
+            &[0x00, 0x78, 0x03, 0x24, 0x04, 0x40, 0x00, 0x2C]
+        );
+
+        // The two non-accessor +0x218C paths use the same word extraction
+        // (original bits 13..16); it does not overlap +0x218C bit 0 of slot 333.
+        assert_eq!(
+            &rom[word_218c_bits_13_16..word_218c_bits_13_16 + 8],
+            &[0x13, 0x68, 0xD9, 0x03, 0x09, 0x0F, 0x01, 0x31]
+        );
+        let second_word_user = if case.target == "MARY_FOMT_US" {
+            0x80088
+        } else {
+            0x7FBF0
+        };
+        assert_eq!(
+            &rom[second_word_user..second_word_user + 8],
+            &[0x13, 0x68, 0xD9, 0x03, 0x09, 0x0F, 0x01, 0x31]
+        );
+
+        // The sole non-accessor +0x218E path extracts bits 3..4. Unknown slots
+        // 343 and 344 occupy bits 5 and 6..7, respectively.
+        assert_eq!(
+            &rom[byte_218e_bits_3_4..byte_218e_bits_3_4 + 8],
+            &[0x00, 0x78, 0xC0, 0x06, 0x80, 0x0F, 0x01, 0x28]
+        );
+    }
+}
+
+#[test]
+fn native_fomt_unknown_314_320_storage_references_only_expose_known_introductions() {
+    for (case, fields, van_extractors, lou_or_ruby_extract) in [
+        (
+            &CASES[0],
+            [
+                (
+                    0x2186u32,
+                    &[
+                        0x3EA70usize,
+                        0x47AE8,
+                        0x47AFC,
+                        0x47B18,
+                        0x47B2C,
+                        0x4B970,
+                        0x4B994,
+                        0x4B9B4,
+                        0x4B9D4,
+                        0xA69F8,
+                    ][..],
+                ),
+                (
+                    0x2187,
+                    &[
+                        0x3E420usize,
+                        0x47B40,
+                        0x47B54,
+                        0x47B68,
+                        0x47B7C,
+                        0x4B9F8,
+                        0x4BA18,
+                        0x4BA38,
+                        0x4BA5E,
+                    ][..],
+                ),
+                (
+                    0x2188,
+                    &[
+                        0x47B84usize,
+                        0x47BA0,
+                        0x47BB4,
+                        0x47BC8,
+                        0x47BDC,
+                        0x47C18,
+                        0x4BA70,
+                        0x4BA90,
+                        0x4BAB0,
+                        0x4BAD0,
+                        0x4BAF0,
+                        0x4BB54,
+                    ][..],
+                ),
+            ],
+            &[0x3EA70usize, 0xA69F8][..],
+            0x3E420usize,
+        ),
+        (
+            &CASES[2],
+            [
+                (
+                    0x2186,
+                    &[
+                        0x3E6E4usize,
+                        0x47910,
+                        0x47924,
+                        0x47940,
+                        0x47954,
+                        0x4B798,
+                        0x4B7BC,
+                        0x4B7DC,
+                        0x4B7FC,
+                        0xA6430,
+                    ][..],
+                ),
+                (
+                    0x2187,
+                    &[
+                        0x3E094usize,
+                        0x47968,
+                        0x4797C,
+                        0x47990,
+                        0x479A4,
+                        0x4B820,
+                        0x4B840,
+                        0x4B860,
+                        0x4B886,
+                    ][..],
+                ),
+                (
+                    0x2188,
+                    &[
+                        0x479ACusize,
+                        0x479C8,
+                        0x479DC,
+                        0x479F0,
+                        0x47A04,
+                        0x47A40,
+                        0x4B898,
+                        0x4B8B8,
+                        0x4B8D8,
+                        0x4B8F8,
+                        0x4B918,
+                        0x4B97C,
+                    ][..],
+                ),
+            ],
+            &[0x3E6E4usize, 0xA6430][..],
+            0x3E094,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_references) in fields {
+            let literal_pools: HashSet<_> = (0..0x100000usize)
+                .step_by(4)
+                .filter(|&offset| {
+                    u32::from_le_bytes(rom[offset..offset + 4].try_into().unwrap()) == field
+                })
+                .collect();
+            let references = (0..0xE0000usize)
+                .step_by(2)
+                .filter(|&instruction| {
+                    let opcode =
+                        u16::from_le_bytes(rom[instruction..instruction + 2].try_into().unwrap());
+                    if opcode & 0xF800 != 0x4800 {
+                        return false;
+                    }
+                    let pool = ((instruction + 4) & !3) + 4 * (opcode as usize & 0xFF);
+                    literal_pools.contains(&pool)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                references, expected_references,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+
+        for &extractor in van_extractors {
+            assert_eq!(
+                &rom[extractor + 6..extractor + 10],
+                &[0x40, 0x06, 0x80, 0x0F]
+            );
+        }
+        assert_eq!(
+            &rom[lou_or_ruby_extract + 6..lou_or_ruby_extract + 10],
+            &[0xC0, 0x06, 0x80, 0x0F]
+        );
     }
 }
 
@@ -2957,9 +5594,267 @@ fn native_mfomt_early_unknown_slots_are_matching_boolean_fields() {
 }
 
 #[test]
+fn native_mfomt_unknown_94_96_115_have_no_extra_direct_offset_literal_users() {
+    for (case, fields) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x2173u32,
+                    &[
+                        0x47628usize,
+                        0x4763C,
+                        0x476DC,
+                        0x476F0,
+                        0x47704,
+                        0x47718,
+                        0x4B894,
+                        0x4B8B4,
+                        0x4B9A4,
+                        0x4B9C8,
+                        0x4B9E8,
+                        0x4BA08,
+                    ][..],
+                ),
+                (
+                    0x2174,
+                    &[
+                        0x47650usize,
+                        0x47664,
+                        0x4772C,
+                        0x47740,
+                        0x47754,
+                        0x47768,
+                        0x4777C,
+                        0x4B8D0,
+                        0x4B8F0,
+                        0x4BA28,
+                        0x4BA4C,
+                        0x4BA6C,
+                        0x4BA8C,
+                        0x4BAAC,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x2173,
+                    &[
+                        0x47384usize,
+                        0x47398,
+                        0x47438,
+                        0x4744C,
+                        0x47460,
+                        0x47474,
+                        0x4B5F0,
+                        0x4B610,
+                        0x4B700,
+                        0x4B724,
+                        0x4B744,
+                        0x4B764,
+                    ][..],
+                ),
+                (
+                    0x2174,
+                    &[
+                        0x473ACusize,
+                        0x473C0,
+                        0x47488,
+                        0x4749C,
+                        0x474B0,
+                        0x474C4,
+                        0x474D8,
+                        0x4B62C,
+                        0x4B64C,
+                        0x4B784,
+                        0x4B7A8,
+                        0x4B7C8,
+                        0x4B7E8,
+                        0x4B808,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_references) in fields {
+            let literal_pools: HashSet<_> = (0..0x100000usize)
+                .step_by(4)
+                .filter(|&offset| {
+                    u32::from_le_bytes(rom[offset..offset + 4].try_into().unwrap()) == field
+                })
+                .collect();
+            let references: Vec<_> = (0..0xE0000usize)
+                .step_by(2)
+                .filter(|&instruction| {
+                    let opcode =
+                        u16::from_le_bytes(rom[instruction..instruction + 2].try_into().unwrap());
+                    if opcode & 0xF800 != 0x4800 {
+                        return false;
+                    }
+                    let pool = ((instruction + 4) & !3) + 4 * (opcode as usize & 0xFF);
+                    literal_pools.contains(&pool)
+                })
+                .collect();
+
+            assert_eq!(
+                references, expected_references,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_86_disables_two_null_schedule_branches() {
+    for (
+        case,
+        selector_a,
+        schedule_a,
+        selector_b,
+        schedule_b,
+        may_constructor,
+        may_literal,
+        stu_constructor,
+        stu_literal,
+        var_set_dispatcher,
+        var_set_caller,
+    ) in [
+        (
+            &CASES[1], 0x3E978, 0xFE8BC, 0x3EFB8, 0x100CA4, 0x3DB0C, 0x3DCB8, 0x3DBA0, 0x3DCE4,
+            0x4A3F8, 0x413E6,
+        ),
+        (
+            &CASES[3], 0x3E6D4, 0xFE85C, 0x3ED14, 0x100C44, 0x3D868, 0x3DA14, 0x3D8FC, 0x3DA40,
+            0x4A154, 0x41142,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+
+        // Both ScheduleInfo records point at selectors that directly read
+        // save byte 0x2172 and shift bit 7 down to the boolean result.
+        assert_eq!(word(schedule_a), 0x08000001 + selector_a as u32);
+        assert_eq!(word(schedule_b), 0x08000001 + selector_b as u32);
+        assert_eq!(word(selector_a + 0x68), 0x2172);
+        assert_eq!(word(selector_b + 0x5C), 0x2172);
+        assert_eq!(
+            &rom[selector_a + 0x5C..selector_a + 0x60],
+            &[0x00, 0x78, 0xC0, 0x09]
+        );
+        assert_eq!(
+            &rom[selector_b + 0x50..selector_b + 0x54],
+            &[0x00, 0x78, 0xC0, 0x09]
+        );
+
+        // Index zero is a real null pointer in both schedule arrays. Returning
+        // zero therefore suppresses the entity schedule rather than selecting
+        // an ordinary route. This test intentionally does not guess the event
+        // that owns or produces slot 86.
+        for schedule_info in [schedule_a, schedule_b] {
+            let schedule_count = word(schedule_info + 4);
+            let schedule_array = word(schedule_info + 8) as usize - 0x08000000;
+            assert!(schedule_count >= 1);
+            assert_eq!(word(schedule_array), 0);
+        }
+
+        // The schedule manager constructs the May-shaped route table in the
+        // fifth roster-order object (+0xC4) and the Stu-shaped route table in
+        // the sixteenth (+0x1A8). These positions agree with character IDs 5
+        // and 16, independently of the exact route-location matches in the
+        // retail dialogue scripts. They identify the disabled schedules, not
+        // the event that produces slot 86.
+        assert_eq!(word(may_literal), 0x08000000 + schedule_b as u32);
+        assert_eq!(word(stu_literal), 0x08000000 + schedule_a as u32);
+        assert_eq!(
+            &rom[may_constructor..may_constructor + 4],
+            &[0x20, 0x1C, 0xC4, 0x30]
+        );
+        assert_eq!(
+            &rom[stu_constructor..stu_constructor + 6],
+            &[0xD4, 0x21, 0x49, 0x00, 0x60, 0x18]
+        );
+
+        // In the first MiB of executable code, the generic VarSet dispatcher
+        // has one direct Thumb BL caller: the script-VM opcode handler. Thus a
+        // native producer would have to use a computed/indirect call or bypass
+        // VarSet; the four retail script sets contain no slot-86 access.
+        let mut direct_callers = Vec::new();
+        for instruction in (0..0x100000usize.min(rom.len() - 3)).step_by(2) {
+            let high = u16::from_le_bytes(rom[instruction..instruction + 2].try_into().unwrap());
+            let low = u16::from_le_bytes(rom[instruction + 2..instruction + 4].try_into().unwrap());
+            if high & 0xF800 != 0xF000 || low & 0xF800 != 0xF800 {
+                continue;
+            }
+            let mut displacement =
+                (((high & 0x07FF) as i32) << 12) | (((low & 0x07FF) as i32) << 1);
+            if displacement & (1 << 22) != 0 {
+                displacement -= 1 << 23;
+            }
+            let target = 0x08000000i32 + instruction as i32 + 4 + displacement;
+            if target == 0x08000000i32 + var_set_dispatcher {
+                direct_callers.push(instruction);
+            }
+        }
+        assert_eq!(direct_callers, [var_set_caller]);
+    }
+}
+
+#[test]
 fn native_mfomt_unknown_232_and_233_are_preserved_by_event_structure_copy() {
     let us = fs::read(local_rom_path(CASES[1].rom)).unwrap();
     let jp = fs::read(local_rom_path(CASES[3].rom)).unwrap();
+
+    for (case, rom, get_table, set_table, entries) in [
+        (
+            &CASES[1],
+            &us,
+            0x46050usize,
+            0x4A430usize,
+            [
+                (232usize, 0x47DFCusize, 0x4C468usize, 0x4A2DEusize, 3u8),
+                (233, 0x47E10, 0x4C488, 0x4A2F6, 5),
+            ],
+        ),
+        (
+            &CASES[3],
+            &jp,
+            0x45DAC,
+            0x4A18C,
+            [
+                (232, 0x47B58, 0x4C1C4, 0x4A03A, 3),
+                (233, 0x47B6C, 0x4C1E4, 0x4A052, 5),
+            ],
+        ),
+    ] {
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+        for (id, getter, setter, getter_leaf, shift) in entries {
+            assert_eq!(word(get_table + id * 4), 0x0800_0000 + getter as u32);
+            assert_eq!(word(set_table + (id - 28) * 4), 0x0800_0000 + setter as u32);
+            assert_eq!(word(getter + 16), 0x2189);
+            assert_eq!(thumb_call_target(rom, getter + 10), getter_leaf);
+            let expected_leaf = if shift == 3 {
+                [0x80, 0x18, 0x00, 0x78, 0xC0, 0x06, 0x80, 0x0F]
+            } else {
+                [0x80, 0x18, 0x00, 0x78, 0x40, 0x06, 0x80, 0x0F]
+            };
+            assert_eq!(&rom[getter_leaf..getter_leaf + 8], &expected_leaf);
+            assert_eq!(word(setter + 28), 0x2189, "{} slot {id}", case.name);
+
+            for old in 0u8..=255 {
+                for input in 0u8..=255 {
+                    let mask = 3u8 << shift;
+                    let stored = (old & !mask) | ((input & 3) << shift);
+                    assert_eq!((stored >> shift) & 3, input & 3);
+                    assert_eq!(stored & !mask, old & !mask);
+                }
+            }
+        }
+    }
 
     // The copy path transfers the +0x25 byte in three independent two-bit
     // groups. Slots 232/233 are bits 3..4 and 5..6 respectively; this proves
@@ -3021,6 +5916,89 @@ fn native_mfomt_unknown_244_250_and_284_are_two_bit_fields() {
                     assert_eq!(stored & !mask, old & !mask);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_244_245_and_250_storage_bytes_have_no_direct_business_literals() {
+    for (case, fields) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x218Cu32,
+                    &[
+                        0x47EE8usize,
+                        0x47EFC,
+                        0x47F10,
+                        0x47F24,
+                        0x4C5D8,
+                        0x4C5F8,
+                        0x4C618,
+                        0x4C634,
+                    ][..],
+                ),
+                (
+                    0x218D,
+                    &[
+                        0x47F38usize,
+                        0x47F4C,
+                        0x47F60,
+                        0x47F74,
+                        0x4C658,
+                        0x4C678,
+                        0x4C698,
+                        0x4C6B4,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x218C,
+                    &[
+                        0x47C44usize,
+                        0x47C58,
+                        0x47C6C,
+                        0x47C80,
+                        0x4C334,
+                        0x4C354,
+                        0x4C374,
+                        0x4C390,
+                    ][..],
+                ),
+                (
+                    0x218D,
+                    &[
+                        0x47C94usize,
+                        0x47CA8,
+                        0x47CBC,
+                        0x47CD0,
+                        0x4C3B4,
+                        0x4C3D4,
+                        0x4C3F4,
+                        0x4C410,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
         }
     }
 }
@@ -3092,6 +6070,111 @@ fn native_mfomt_unknown_324_328_preserve_adjacent_two_bit_fields() {
 }
 
 #[test]
+fn native_mfomt_unknown_324_328_storage_literals_only_expose_adjacent_known_fields() {
+    for (case, fields, lou_or_ruby_extract) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x219Fu32,
+                    &[
+                        0x3EB1Cusize,
+                        0x48544,
+                        0x48558,
+                        0x4856C,
+                        0x4858C,
+                        0x4CFC4,
+                        0x4CFE4,
+                        0x4D004,
+                        0x4D038,
+                        0xABCA4,
+                    ][..],
+                ),
+                (
+                    0x21A0,
+                    &[
+                        0x3E6C4usize,
+                        0x48590,
+                        0x485A4,
+                        0x485B8,
+                        0x485CC,
+                        0x485E0,
+                        0x4D03C,
+                        0x4D05C,
+                        0x4D07C,
+                        0x4D09C,
+                        0x4D0B0,
+                    ][..],
+                ),
+            ],
+            0x3E6ACusize,
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x219F,
+                    &[
+                        0x3E878usize,
+                        0x482A0,
+                        0x482B4,
+                        0x482C8,
+                        0x482E8,
+                        0x4CD20,
+                        0x4CD40,
+                        0x4CD60,
+                        0x4CD94,
+                        0xAB6E4,
+                    ][..],
+                ),
+                (
+                    0x21A0,
+                    &[
+                        0x3E420usize,
+                        0x482EC,
+                        0x48300,
+                        0x48314,
+                        0x48328,
+                        0x4833C,
+                        0x4CD98,
+                        0x4CDB8,
+                        0x4CDD8,
+                        0x4CDF8,
+                        0x4CE0C,
+                    ][..],
+                ),
+            ],
+            0x3E408,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+
+        // The only business-code literal for +0x21A0 extracts bits 1..2,
+        // which belong to known slot 326, not unknown slots 327/328.
+        assert_eq!(
+            &rom[lou_or_ruby_extract..lou_or_ruby_extract + 16],
+            &[
+                0x05, 0x48, 0x24, 0x18, 0x20, 0x78, 0x40, 0x07, 0x80, 0x0F, 0x02, 0x28, 0x06, 0xD1,
+                0x00, 0x29,
+            ]
+        );
+    }
+}
+
+#[test]
 fn native_mfomt_unknown_335_352_keep_mixed_width_domains() {
     for (case, get_table, set_table, entries) in [
         (
@@ -3144,6 +6227,215 @@ fn native_mfomt_unknown_335_352_keep_mixed_width_domains() {
 }
 
 #[test]
+fn native_mfomt_unknown_335_344_storage_literals_only_expose_adjacent_jewel_fields() {
+    for (case, fields, goddess_extract, kappa_extract) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x21A2u32,
+                    &[
+                        0x2B328usize,
+                        0x48634,
+                        0x48648,
+                        0x4865C,
+                        0x4D130,
+                        0x4D150,
+                        0x4D16C,
+                    ][..],
+                ),
+                (
+                    0x21A4,
+                    &[
+                        0x2B330usize,
+                        0x486C0,
+                        0x486D4,
+                        0x486E8,
+                        0x48738,
+                        0x4D20C,
+                        0x4D22C,
+                        0x4D240,
+                        0x4D2B4,
+                    ][..],
+                ),
+                (
+                    0x21A5,
+                    &[0x486FCusize, 0x48710, 0x48724, 0x4D260, 0x4D280, 0x4D2A0][..],
+                ),
+            ],
+            0x2B260usize,
+            0x2B2BEusize,
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x21A2,
+                    &[
+                        0x2B19Cusize,
+                        0x48390,
+                        0x483A4,
+                        0x483B8,
+                        0x4CE8C,
+                        0x4CEAC,
+                        0x4CEC8,
+                    ][..],
+                ),
+                (
+                    0x21A4,
+                    &[
+                        0x2B1A4usize,
+                        0x4841C,
+                        0x48430,
+                        0x48444,
+                        0x48494,
+                        0x4CF68,
+                        0x4CF88,
+                        0x4CF9C,
+                        0x4D010,
+                    ][..],
+                ),
+                (
+                    0x21A5,
+                    &[0x48458usize, 0x4846C, 0x48480, 0x4CFBC, 0x4CFDC, 0x4CFFC][..],
+                ),
+            ],
+            0x2B0D4,
+            0x2B132,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+
+        let common_prefix = [0x68, 0x6B];
+        assert_eq!(&rom[goddess_extract..goddess_extract + 2], &common_prefix);
+        assert_eq!(
+            &rom[goddess_extract + 8..goddess_extract + 12],
+            &[0x0C, 0x24, 0x04, 0x40]
+        );
+        assert_eq!(&rom[kappa_extract..kappa_extract + 2], &common_prefix);
+        assert_eq!(
+            &rom[kappa_extract + 8..kappa_extract + 12],
+            &[0x06, 0x24, 0x04, 0x40]
+        );
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_351_and_352_are_not_the_same_byte_shooting_star_selector() {
+    for (
+        case,
+        get_table,
+        known_getter,
+        known_leaf,
+        unknown_351_getter,
+        unknown_352_getter,
+        unknown_352_leaf,
+        business_read,
+        expected_literals,
+    ) in [
+        (
+            &CASES[1],
+            0x46050usize,
+            0x48778usize,
+            0x4A2C6usize,
+            0x4878Cusize,
+            0x487A0usize,
+            0x494E2usize,
+            0x1BA56usize,
+            &[
+                0x1BA78usize,
+                0x48788,
+                0x4879C,
+                0x487B0,
+                0x487C4,
+                0x4D328,
+                0x4D348,
+                0x4D368,
+                0x4D384,
+            ][..],
+        ),
+        (
+            &CASES[3],
+            0x45DAC,
+            0x484D4,
+            0x4A022,
+            0x484E8,
+            0x484FC,
+            0x4923E,
+            0x1B8CA,
+            &[
+                0x1B8ECusize,
+                0x484E4,
+                0x484F8,
+                0x4850C,
+                0x48520,
+                0x4D084,
+                0x4D0A4,
+                0x4D0C4,
+                0x4D0E0,
+            ][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+
+        assert_eq!(word(get_table + 350 * 4), 0x0800_0000 + known_getter as u32);
+        assert_eq!(
+            word(get_table + 351 * 4),
+            0x0800_0000 + unknown_351_getter as u32
+        );
+        assert_eq!(
+            word(get_table + 352 * 4),
+            0x0800_0000 + unknown_352_getter as u32
+        );
+        assert_eq!(word(known_getter + 16), 0x21A7);
+        assert_eq!(word(unknown_351_getter + 16), 0x21A7);
+        assert_eq!(word(unknown_352_getter + 16), 0x21A7);
+        assert_eq!(thumb_call_target(&rom, known_getter + 10), known_leaf);
+        assert_eq!(
+            thumb_call_target(&rom, unknown_352_getter + 10),
+            unknown_352_leaf
+        );
+        assert_eq!(
+            &rom[known_leaf..known_leaf + 8],
+            &[0x80, 0x18, 0x00, 0x78, 0x40, 0x07, 0x80, 0x0F]
+        );
+        assert_eq!(
+            &rom[unknown_352_leaf..unknown_352_leaf + 8],
+            &[0x80, 0x18, 0x00, 0x78, 0x80, 0x06, 0x80, 0x0F]
+        );
+        assert_eq!(
+            &rom[business_read..business_read + 18],
+            &[
+                0x07, 0x49, 0x70, 0x18, 0x00, 0x68, 0x06, 0x49, 0x40, 0x18, 0x00, 0x78, 0x40, 0x07,
+                0x80, 0x0F, 0x01, 0x28,
+            ]
+        );
+
+        let field_bytes = 0x21A7u32.to_le_bytes();
+        let actual_literals = rom[..0x100000]
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(actual_literals, expected_literals, "{}", case.name);
+    }
+}
+
+#[test]
 fn native_mfomt_unknown_411_415_are_two_bit_fields() {
     for (case, get_table, set_table, entries) in [
         (
@@ -3187,6 +6479,97 @@ fn native_mfomt_unknown_411_415_are_two_bit_fields() {
                     assert_eq!(stored & !mask, old & !mask);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_411_415_storage_bytes_have_no_direct_business_literals() {
+    for (case, fields) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x21B6u32,
+                    &[
+                        0x48BC0usize,
+                        0x48BD4,
+                        0x48BE8,
+                        0x48BFC,
+                        0x4D9E8,
+                        0x4DA08,
+                        0x4DA28,
+                        0x4DA44,
+                    ][..],
+                ),
+                (
+                    0x21B7,
+                    &[
+                        0x48C10usize,
+                        0x48C24,
+                        0x48C38,
+                        0x48C4C,
+                        0x48C60,
+                        0x48C74,
+                        0x4DA68,
+                        0x4DA88,
+                        0x4DAA8,
+                        0x4DAC8,
+                        0x4DADC,
+                        0x4DAF8,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x21B6,
+                    &[
+                        0x4891Cusize,
+                        0x48930,
+                        0x48944,
+                        0x48958,
+                        0x4D744,
+                        0x4D764,
+                        0x4D784,
+                        0x4D7A0,
+                    ][..],
+                ),
+                (
+                    0x21B7,
+                    &[
+                        0x4896Cusize,
+                        0x48980,
+                        0x48994,
+                        0x489A8,
+                        0x489BC,
+                        0x489D0,
+                        0x4D7C4,
+                        0x4D7E4,
+                        0x4D804,
+                        0x4D824,
+                        0x4D838,
+                        0x4D854,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
         }
     }
 }
@@ -3247,7 +6630,101 @@ fn native_mfomt_unknown_482_490_are_untyped_two_bit_fields() {
 }
 
 #[test]
-fn native_mfomt_unknown_584_591_and_628_preserve_physical_domains() {
+fn native_mfomt_unknown_482_490_have_no_direct_business_literal_reference() {
+    for (case, fields) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x21C5u32,
+                    &[
+                        0x4914Cusize,
+                        0x49160,
+                        0x49174,
+                        0x49188,
+                        0x49198,
+                        0x4E190,
+                        0x4E1B0,
+                        0x4E1D0,
+                        0x4E1F0,
+                        0x4E20C,
+                    ][..],
+                ),
+                (
+                    0x21C6u32,
+                    &[
+                        0x491ACusize,
+                        0x491C0,
+                        0x491D4,
+                        0x491E4,
+                        0x491F8,
+                        0x4920C,
+                        0x4E230,
+                        0x4E250,
+                        0x4E270,
+                        0x4E290,
+                        0x4E2A4,
+                        0x4E2B8,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x21C5u32,
+                    &[
+                        0x48EA8usize,
+                        0x48EBC,
+                        0x48ED0,
+                        0x48EE4,
+                        0x48EF4,
+                        0x4DEEC,
+                        0x4DF0C,
+                        0x4DF2C,
+                        0x4DF4C,
+                        0x4DF68,
+                    ][..],
+                ),
+                (
+                    0x21C6u32,
+                    &[
+                        0x48F08usize,
+                        0x48F1C,
+                        0x48F30,
+                        0x48F40,
+                        0x48F54,
+                        0x48F68,
+                        0x4DF8C,
+                        0x4DFAC,
+                        0x4DFCC,
+                        0x4DFEC,
+                        0x4E000,
+                        0x4E014,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field.to_le_bytes()).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_reserved_link_584_591_and_child_profile_628_preserve_physical_domains() {
     for (case, get_table, set_table, entries) in [
         (
             &CASES[1],
@@ -3306,7 +6783,69 @@ fn native_mfomt_unknown_584_591_and_628_preserve_physical_domains() {
 }
 
 #[test]
-fn native_late_unreferenced_unknown_slots_keep_target_specific_widths() {
+fn native_awl_child_profile_marker_uses_the_previously_unnamed_variable_on_all_targets() {
+    // Each retail ROM contains exactly one literal <321> profile-text marker.
+    // The reference-guide filter divides that marker by ten, dispatches quotient
+    // 32 through a 37-entry jump table, and compares the final digit with the
+    // stored two-bit level. The case-32 leaf independently reaches VarGet 536
+    // in FoMT and VarGet 628 in MFoMT; this is not inferred from adjacent IDs.
+    for (case, function, table_pointer, table, child_leaf, getter_table, child_id, getter) in [
+        (
+            &CASES[0], 0x7A2AC, 0x7A2CC, 0x7A2D0, 0x7A4E4, 0x45934, 536, 0x48C2C,
+        ),
+        (
+            &CASES[1], 0x7F164, 0x7F184, 0x7F188, 0x7F3C8, 0x46050, 628, 0x49D00,
+        ),
+        (
+            &CASES[2], 0x79E54, 0x79E74, 0x79E78, 0x7A08C, 0x4575C, 536, 0x48A54,
+        ),
+        (
+            &CASES[3], 0x7ED44, 0x7ED64, 0x7ED68, 0x7EFA8, 0x45DAC, 628, 0x49A5C,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+
+        assert_eq!(&rom[function..function + 2], &[0x70, 0xB5]);
+        assert_eq!(word(table_pointer), 0x08000000 + table as u32);
+        assert_eq!(word(table + 32 * 4), 0x08000000 + child_leaf as u32);
+        assert_eq!(
+            word(getter_table + child_id * 4),
+            0x08000000 + getter as u32
+        );
+
+        let marker_offsets = rom
+            .windows(5)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == b"<321>").then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(marker_offsets.len(), 1, "{} Child marker", case.name);
+
+        if child_id == 536 {
+            // save+0x21AB, bits 6..7
+            assert_eq!(
+                &rom[child_leaf..child_leaf + 16],
+                &[
+                    0xA0, 0x68, 0x02, 0x49, 0x40, 0x18, 0x00, 0x78, 0x84, 0x09, 0x26, 0xE0, 0xAB,
+                    0x21, 0x00, 0x00
+                ]
+            );
+        } else {
+            // save+0x21D1, bits 3..4
+            assert_eq!(
+                &rom[child_leaf..child_leaf + 14],
+                &[
+                    0xA0, 0x68, 0x03, 0x4A, 0x80, 0x18, 0x00, 0x78, 0xC0, 0x06, 0x84, 0x0F, 0x27,
+                    0xE0
+                ]
+            );
+            assert_eq!(word(child_leaf + 16), 0x21D1);
+        }
+    }
+}
+
+#[test]
+fn native_late_profile_and_unreferenced_unknown_slots_keep_target_specific_widths() {
     for (case, get_table, set_table, id, getter, setter, field, shift, input_mask) in [
         (
             &CASES[0], 0x45934, 0x49034, 536, 0x48C2C, 0x4D410, 0x21AB, 6, 3,
@@ -3340,6 +6879,370 @@ fn native_late_unreferenced_unknown_slots_keep_target_specific_widths() {
             }
         }
     }
+}
+
+#[test]
+fn native_mfomt_unknown_584_591_storage_bytes_have_no_direct_business_literals() {
+    for (case, fields) in [
+        (
+            &CASES[1],
+            [
+                (
+                    0x21E5u32,
+                    &[
+                        0x49908usize,
+                        0x4991C,
+                        0x49930,
+                        0x49944,
+                        0x49958,
+                        0x4996C,
+                        0x49980,
+                        0x49994,
+                        0x4ED6C,
+                        0x4ED8C,
+                        0x4EDAC,
+                        0x4EDCC,
+                        0x4EDEC,
+                        0x4EE0C,
+                        0x4EE20,
+                        0x4EE3C,
+                    ][..],
+                ),
+                (
+                    0x21E6,
+                    &[
+                        0x499A8usize,
+                        0x499BC,
+                        0x499D0,
+                        0x499E4,
+                        0x499F8,
+                        0x49A0C,
+                        0x49A20,
+                        0x49A34,
+                        0x4EE60,
+                        0x4EE80,
+                        0x4EEA0,
+                        0x4EEC0,
+                        0x4EEE0,
+                        0x4EF00,
+                        0x4EF14,
+                        0x4EF30,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            [
+                (
+                    0x21E5,
+                    &[
+                        0x49664usize,
+                        0x49678,
+                        0x4968C,
+                        0x496A0,
+                        0x496B4,
+                        0x496C8,
+                        0x496DC,
+                        0x496F0,
+                        0x4EAC8,
+                        0x4EAE8,
+                        0x4EB08,
+                        0x4EB28,
+                        0x4EB48,
+                        0x4EB68,
+                        0x4EB7C,
+                        0x4EB98,
+                    ][..],
+                ),
+                (
+                    0x21E6,
+                    &[
+                        0x49704usize,
+                        0x49718,
+                        0x4972C,
+                        0x49740,
+                        0x49754,
+                        0x49768,
+                        0x4977C,
+                        0x49790,
+                        0x4EBBC,
+                        0x4EBDC,
+                        0x4EBFC,
+                        0x4EC1C,
+                        0x4EC3C,
+                        0x4EC5C,
+                        0x4EC70,
+                        0x4EC8C,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (field, expected_literals) in fields {
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} field {field:#X}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_unknown_697_and_705_are_distinct_boolean_fields_without_direct_users() {
+    for (case, get_table, set_table, entries) in [
+        (
+            &CASES[1],
+            0x46050usize,
+            0x4A430usize,
+            [
+                (
+                    697usize,
+                    0x4A294usize,
+                    0x4FD30usize,
+                    0x21F9u32,
+                    6u8,
+                    0x4A3E0usize,
+                    &[
+                        0x4A158usize,
+                        0x4A168,
+                        0x4A178,
+                        0x4A188,
+                        0x4A290,
+                        0x4A2A0,
+                        0x4FAFC,
+                        0x4FB1C,
+                        0x4FB3C,
+                        0x4FB5C,
+                        0x4FD2C,
+                        0x4FD3C,
+                    ][..],
+                ),
+                (
+                    705,
+                    0x4A1AC,
+                    0x4FBA0,
+                    0x21FB,
+                    3,
+                    0x4A39E,
+                    &[
+                        0x4A198usize,
+                        0x4A1A8,
+                        0x4A1B8,
+                        0x4A1C8,
+                        0x4A1D8,
+                        0x4A1E8,
+                        0x4A1F8,
+                        0x4FB7C,
+                        0x4FB9C,
+                        0x4FBBC,
+                        0x4FBDC,
+                        0x4FBFC,
+                        0x4FC0C,
+                        0x4FC24,
+                    ][..],
+                ),
+            ],
+        ),
+        (
+            &CASES[3],
+            0x45DAC,
+            0x4A18C,
+            [
+                (
+                    697,
+                    0x49FF0,
+                    0x4FA8C,
+                    0x21F9,
+                    6,
+                    0x4A13C,
+                    &[
+                        0x49EB4usize,
+                        0x49EC4,
+                        0x49ED4,
+                        0x49EE4,
+                        0x49FEC,
+                        0x49FFC,
+                        0x4F858,
+                        0x4F878,
+                        0x4F898,
+                        0x4F8B8,
+                        0x4FA88,
+                        0x4FA98,
+                    ][..],
+                ),
+                (
+                    705,
+                    0x49F08,
+                    0x4F8FC,
+                    0x21FB,
+                    3,
+                    0x4A0FA,
+                    &[
+                        0x49EF4usize,
+                        0x49F04,
+                        0x49F14,
+                        0x49F24,
+                        0x49F34,
+                        0x49F44,
+                        0x49F54,
+                        0x4F8D8,
+                        0x4F8F8,
+                        0x4F918,
+                        0x4F938,
+                        0x4F958,
+                        0x4F968,
+                        0x4F980,
+                    ][..],
+                ),
+            ],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+        for (id, getter, setter, field, shift, getter_leaf, expected_literals) in entries {
+            assert_eq!(word(get_table + id * 4), 0x0800_0000 + getter as u32);
+            assert_eq!(word(set_table + (id - 28) * 4), 0x0800_0000 + setter as u32);
+            assert_eq!(word(getter + 12), field);
+            let expected_getter = if shift == 6 {
+                [0x80, 0x18, 0x00, 0x78, 0x40, 0x06, 0xC0, 0x0F]
+            } else {
+                [0x80, 0x18, 0x00, 0x78, 0x00, 0x07, 0xC0, 0x0F]
+            };
+            assert_eq!(&rom[getter_leaf..getter_leaf + 8], &expected_getter);
+
+            if id == 697 {
+                let setter_leaf = if case.name == "mfomt-us" {
+                    0x4FEDA
+                } else {
+                    0x4FC36
+                };
+                assert_eq!(
+                    &rom[setter_leaf..setter_leaf + 20],
+                    &[
+                        0x89, 0x18, 0x01, 0x20, 0x06, 0x40, 0xB3, 0x01, 0x0A, 0x78, 0x41, 0x20,
+                        0x40, 0x42, 0x10, 0x40, 0x18, 0x43, 0x08, 0x70,
+                    ]
+                );
+            } else {
+                assert_eq!(
+                    &rom[setter + 12..setter + 24],
+                    &[0x01, 0x20, 0x06, 0x40, 0xF3, 0x00, 0x0A, 0x78, 0x09, 0x20, 0x40, 0x42]
+                );
+            }
+
+            let field_bytes = field.to_le_bytes();
+            let actual_literals = rom[..0x100000]
+                .windows(4)
+                .enumerate()
+                .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual_literals, expected_literals,
+                "{} slot {id} storage literals escaped the audited variable accessor cluster",
+                case.name
+            );
+
+            for old in 0u8..=255 {
+                for input in 0u8..=255 {
+                    let mask = 1u8 << shift;
+                    let stored = (old & !mask) | ((input & 1) << shift);
+                    assert_eq!((stored >> shift) & 1, input & 1);
+                    assert_eq!(stored & !mask, old & !mask);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_van_schedule_reads_slot_323_not_unknown_slot_322() {
+    for (
+        case,
+        schedule_gate,
+        schedule_literal,
+        map_overlay,
+        overlay_literal,
+        npc_ctor_literals,
+        schedule_table,
+    ) in [
+        (
+            &CASES[1],
+            0x3EAF0usize,
+            0x3EB1Cusize,
+            0xABC3Cusize,
+            0xABCA4usize,
+            0x370BCusize,
+            0xFF1D0usize,
+        ),
+        (
+            &CASES[3],
+            0x3E84Cusize,
+            0x3E878usize,
+            0xAB67Cusize,
+            0xAB6E4usize,
+            0x36F30usize,
+            0xFF170usize,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let word = |at| u32::from_le_bytes(rom[at..at + 4].try_into().unwrap());
+
+        assert_eq!(
+            word(schedule_literal),
+            0x219F,
+            "{} schedule field",
+            case.name
+        );
+        assert_eq!(word(overlay_literal), 0x219F, "{} overlay field", case.name);
+        // <<27 >>30 extracts bits 3..4 (slot 323), not bits 0..2 (slot 322).
+        assert_eq!(
+            &rom[schedule_gate + 0x18..schedule_gate + 0x20],
+            &[0x20, 0x78, 0xC0, 0x06, 0x80, 0x0F, 0x02, 0x28],
+            "{} Van schedule extraction",
+            case.name,
+        );
+        assert_eq!(
+            &rom[map_overlay + 4..map_overlay + 12],
+            &[0x00, 0x78, 0xC0, 0x06, 0x80, 0x0F, 0x02, 0x28],
+            "{} Van map-overlay extraction",
+            case.name,
+        );
+        assert_eq!(word(npc_ctor_literals), 0x0800_0000 + schedule_table as u32);
+        assert_eq!(
+            word(npc_ctor_literals + 4),
+            2324,
+            "{} Van idle animation",
+            case.name
+        );
+        assert_eq!(word(schedule_table), 0x0800_0001 + schedule_gate as u32);
+    }
+
+    let us = fs::read(local_rom_path(CASES[1].rom)).unwrap();
+    let jp = fs::read(local_rom_path(CASES[3].rom)).unwrap();
+    let us_copy = 0xDCCB0usize;
+    let jp_copy = 0xDC7C4usize;
+    // The save-structure copy treats bits 0..2 and bits 3..4 as separate
+    // fields before preserving the remaining groups. It copies values; it
+    // does not establish a gameplay producer or semantic name for slot 322.
+    assert_eq!(&us[us_copy..us_copy + 0x54], &jp[jp_copy..jp_copy + 0x54]);
+    assert_eq!(
+        &us[us_copy..us_copy + 0x30],
+        &[
+            0x50, 0x46, 0x3B, 0x30, 0x02, 0x78, 0x50, 0x07, 0x3B, 0x23, 0xDB, 0x19, 0x98, 0x46,
+            0x40, 0x0F, 0x19, 0x78, 0x47, 0x3D, 0x0D, 0x40, 0x05, 0x43, 0x18, 0x20, 0x10, 0x40,
+            0x19, 0x21, 0x49, 0x42, 0x0D, 0x40, 0x05, 0x43, 0x60, 0x20, 0x10, 0x40, 0x61, 0x23,
+            0x5B, 0x42, 0x1D, 0x40, 0x05, 0x43,
+        ]
+    );
 }
 
 #[test]
@@ -3436,6 +7339,24 @@ fn native_event_initialization_clears_family_specific_unknown_storage() {
             &[7, 0x1C]
         );
         if base == 0x2164 {
+            // The MFoMT constructor explicitly zeroes event-structure bytes
+            // +0x32..+0x3B. The final byte contains slot 322 in bits 0..2
+            // and slot 323 in bits 3..4; initialization alone is not a
+            // gameplay producer for either semantic state.
+            let mut cursor = constructor as usize + 0x2DA;
+            assert_eq!(
+                &rom[cursor..cursor + 6],
+                &[0x39, 0x1C, 0x32, 0x31, 0x00, 0x20]
+            );
+            cursor += 6;
+            for index in 0..10 {
+                if index != 0 {
+                    assert_eq!(&rom[cursor..cursor + 2], &[0x01, 0x31]);
+                    cursor += 2;
+                }
+                assert_eq!(&rom[cursor..cursor + 2], &[0x08, 0x70]);
+                cursor += 2;
+            }
             assert_eq!(
                 &rom[clear..clear + 26],
                 &[
@@ -3463,6 +7384,10 @@ fn native_fomt_unknown_449_preserves_two_bit_storage() {
         (&CASES[2], 0x4575C, 0x48E5C, 0x483B4, 0x4C758),
     ] {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        // VarSet subtracts 28 before dispatch.  Thus source-disassembly jump
+        // table comments call public slot 449 "case 421"; the ROM lookup below
+        // deliberately uses the normalized table index rather than that label
+        // as a public variable ID.
         for (table, index, expected) in [(get_table, 449, get), (set_table, 449 - 28, set)] {
             let p = table + index * 4;
             assert_eq!(
@@ -3498,6 +7423,198 @@ fn native_fomt_unknown_449_preserves_two_bit_storage() {
             let next = (old & !0x60) | (((value as u32 & 3) as u8) << 5);
             assert_eq!(next & !0x60, old & !0x60);
             assert_eq!((next >> 5) & 3, (value as u32 & 3) as u8);
+        }
+    }
+}
+
+#[test]
+fn native_fomt_unknown_449_is_not_the_same_byte_low_two_bit_selector() {
+    for (case, expected_literals, getter_leaf, selector_extract) in [
+        (
+            &CASES[0],
+            &[
+                0x3E5E4usize,
+                0x48564,
+                0x48578,
+                0x48588,
+                0x48598,
+                0x4C8EC,
+                0x4C90C,
+                0x4C92C,
+                0x4C94C,
+            ][..],
+            0x48662usize,
+            0x3E5D2usize,
+        ),
+        (
+            &CASES[2],
+            &[
+                0x3E258usize,
+                0x4838C,
+                0x483A0,
+                0x483B0,
+                0x483C0,
+                0x4C714,
+                0x4C734,
+                0x4C754,
+                0x4C774,
+            ][..],
+            0x4848Ausize,
+            0x3E246usize,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let actual_literals = rom[..0x100000]
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == 0x21A5u32.to_le_bytes()).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_literals, expected_literals,
+            "{} direct literals for the slot-449 storage byte",
+            case.name
+        );
+        // Slot 449 extracts bits 5..6: left 25, then right 30.
+        assert_eq!(
+            &rom[getter_leaf + 4..getter_leaf + 8],
+            &[0x40, 0x06, 0x80, 0x0F],
+            "{} slot 449 bit field",
+            case.name
+        );
+        // The only business-code literal extracts bits 0..1 instead.
+        assert_eq!(
+            &rom[selector_extract..selector_extract + 4],
+            &[0x80, 0x07, 0x80, 0x0F],
+            "{} same-byte low selector",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_harvest_boundary_unknown_boolean_is_not_the_adjacent_session_field() {
+    for (case, field, expected_literals, getter_leaf, session_extractors) in [
+        (
+            &CASES[0],
+            0x21A0u32,
+            &[
+                0x48354usize,
+                0x48368,
+                0x4837C,
+                0x48390,
+                0x483A0,
+                0x4C5F8,
+                0x4C618,
+                0x4C638,
+                0x4C658,
+                0x4C678,
+                0xA6518,
+                0xA6634,
+                0xA6824,
+            ][..],
+            0x48F76usize,
+            &[0xA64D2usize, 0xA65A6, 0xA66EA, 0xA6704][..],
+        ),
+        (
+            &CASES[2],
+            0x21A0,
+            &[
+                0x4817Cusize,
+                0x48190,
+                0x481A4,
+                0x481B8,
+                0x481C8,
+                0x4C420,
+                0x4C440,
+                0x4C460,
+                0x4C480,
+                0x4C4A0,
+                0xA5F50,
+                0xA606C,
+                0xA625C,
+            ][..],
+            0x48D9E,
+            &[0xA5F0Ausize, 0xA5FDE, 0xA6122, 0xA613C][..],
+        ),
+        (
+            &CASES[1],
+            0x21C1,
+            &[
+                0x48FF8usize,
+                0x4900C,
+                0x49020,
+                0x49034,
+                0x49048,
+                0x4DFB4,
+                0x4DFD4,
+                0x4DFF4,
+                0x4E014,
+                0x4E034,
+                0xAB74C,
+                0xAB868,
+                0xABA68,
+            ][..],
+            0x4A3B4,
+            &[0xAB706usize, 0xAB7DA, 0xAB93C, 0xABA28][..],
+        ),
+        (
+            &CASES[3],
+            0x21C1,
+            &[
+                0x48D54usize,
+                0x48D68,
+                0x48D7C,
+                0x48D90,
+                0x48DA4,
+                0x4DD10,
+                0x4DD30,
+                0x4DD50,
+                0x4DD70,
+                0x4DD90,
+                0xAB18C,
+                0xAB2A8,
+                0xAB4A8,
+            ][..],
+            0x4A110,
+            &[0xAB146usize, 0xAB21A, 0xAB37C, 0xAB468][..],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let field_bytes = field.to_le_bytes();
+        let actual_literals = rom[..0x100000]
+            .windows(4)
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == field_bytes).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_literals, expected_literals,
+            "{} direct literals for the shared festival byte",
+            case.name
+        );
+
+        // The logical unknown field is bit 4: left 27, then right 31.
+        assert_eq!(
+            &rom[getter_leaf + 4..getter_leaf + 8],
+            &[0xC0, 0x06, 0xC0, 0x0F],
+            "{} unknown festival-boundary bit",
+            case.name
+        );
+        // Every direct business-code reference outside the generic variable
+        // getter/setter cluster extracts bits 0..1 instead. Those accesses
+        // belong to the adjacent Harvest Festival session field, not this bit.
+        for &extractor in session_extractors {
+            let left = u16::from_le_bytes(rom[extractor..extractor + 2].try_into().unwrap());
+            let right = u16::from_le_bytes(rom[extractor + 2..extractor + 4].try_into().unwrap());
+            assert_eq!(left & 0xF800, 0, "{} low-bit left shift", case.name);
+            assert_eq!((left >> 6) & 0x1F, 30, "{} low-bit width", case.name);
+            assert_eq!(right & 0xF800, 0x0800, "{} low-bit right shift", case.name);
+            assert_eq!((right >> 6) & 0x1F, 30, "{} low-bit width", case.name);
+            assert_eq!(
+                (right >> 3) & 7,
+                left & 7,
+                "{} low-bit shift register flow",
+                case.name
+            );
         }
     }
 }
@@ -3964,7 +8081,7 @@ fn native_shooting_star_shipping_bonus_doubles_one_settlement_then_clears() {
 }
 
 #[test]
-fn native_cottage_unlocks_set_distinct_bits_in_one_persistent_facility_byte() {
+fn native_cottage_unlocks_and_vacation_villa_query_share_one_persistent_byte() {
     fn call_target(rom: &[u8], pc: usize) -> usize {
         let hi = u16::from_le_bytes(rom[pc..pc + 2].try_into().unwrap());
         let lo = u16::from_le_bytes(rom[pc + 2..pc + 4].try_into().unwrap());
@@ -3974,14 +8091,32 @@ fn native_cottage_unlocks_set_distinct_bits_in_one_persistent_facility_byte() {
         (pc as i32 + 4 + ((raw << 9) >> 9)) as usize
     }
 
-    for (case, (table, mountain_slot, seaside_slot, mountain_handler, seaside_handler)) in
-        CASES.iter().zip([
-            (0x3F904, 0xC4, 0xC5, 0x44E3C, 0x44E4A),
-            (0x3FAF0, 0xC7, 0xC8, 0x45098, 0x450A8),
-            (0x3F578, 0xC4, 0xC5, 0x44AB0, 0x44ABE),
-            (0x3F84C, 0xC7, 0xC8, 0x44DF4, 0x44E04),
-        ])
-    {
+    for (
+        case,
+        (
+            table,
+            mountain_slot,
+            seaside_slot,
+            mountain_handler,
+            seaside_handler,
+            vacation_slot,
+            vacation_handler,
+            save_offset,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904, 0xC4, 0xC5, 0x44E3C, 0x44E4A, 0xE3, 0x42C98, 0x1AA8u32,
+        ),
+        (
+            0x3FAF0, 0xC7, 0xC8, 0x45098, 0x450A8, 0xE6, 0x42EC4, 0x1AB8u32,
+        ),
+        (
+            0x3F578, 0xC4, 0xC5, 0x44AB0, 0x44ABE, 0xE3, 0x4290C, 0x1AA8u32,
+        ),
+        (
+            0x3F84C, 0xC7, 0xC8, 0x44DF4, 0x44E04, 0xE6, 0x42C20, 0x1AB8u32,
+        ),
+    ]) {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         for (slot, handler, mask) in [
             (mountain_slot, mountain_handler, 1u8),
@@ -4005,6 +8140,192 @@ fn native_cottage_unlocks_set_distinct_bits_in_one_persistent_facility_byte() {
                 case.name
             );
         }
+
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[table + vacation_slot * 4..table + vacation_slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + vacation_handler as u32,
+            "{} Vacation Villa query slot",
+            case.name
+        );
+        assert_eq!(
+            &rom[vacation_handler + 0x0C..vacation_handler + 0x12],
+            &[0x00, 0x79, 0x80, 0x07, 0xC4, 0x0F],
+            "{} Vacation Villa query extracts shared facility bit 1",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[vacation_handler + 0x20..vacation_handler + 0x24]
+                    .try_into()
+                    .unwrap()
+            ),
+            save_offset,
+            "{} cottage facility-byte owner offset",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_television_callables_keep_target_slots_and_viewer_protocol() {
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0xFB,
+            [0x44DF0, 0x423F0, 0x4241E],
+            [0x126BC, 0x142B8, 0x142D4],
+        ),
+        (
+            0x3FAF0,
+            0xFE,
+            [0x4504A, 0x4263C, 0x4266A],
+            [0x12848, 0x14444, 0x14460],
+        ),
+        (
+            0x3F578,
+            0xFB,
+            [0x44A64, 0x42064, 0x42092],
+            [0x1258C, 0x1418C, 0x141A8],
+        ),
+        (
+            0x3F84C,
+            0xFE,
+            [0x44DA6, 0x42398, 0x423C6],
+            [0x126EC, 0x142EC, 0x14308],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + index) * 4
+                        ..dispatch + (first_slot + index) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} television callable slot {}",
+                case.name,
+                first_slot + index
+            );
+        }
+        for ((handler, offset), leaf) in handlers.into_iter().zip([0x40, 0x26, 0x10]).zip(leaves) {
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} television viewer leaf",
+                case.name
+            );
+        }
+
+        // ShowTelevisionMessage submits text at native rate 0x40 and requests
+        // viewer state 0x11. This is distinct from ordinary TalkMessage.
+        assert_eq!(&rom[leaves[0] + 0x14..leaves[0] + 0x16], &[0x40, 0x22]);
+        assert_eq!(
+            &rom[leaves[0] + 0x1A..leaves[0] + 0x22],
+            &[0x21, 0x1C, 0x9C, 0x31, 0x11, 0x20, 0x08, 0x60]
+        );
+        // Set/End dispatch through adjacent viewer virtual methods 0x118/0x11C.
+        assert_eq!(
+            &rom[leaves[1] + 0x0A..leaves[1] + 0x12],
+            &[0x8C, 0x23, 0x5B, 0x00, 0xD2, 0x18, 0x12, 0x68]
+        );
+        assert_eq!(
+            &rom[leaves[2] + 0x0A..leaves[2] + 0x12],
+            &[0x8E, 0x22, 0x52, 0x00, 0x89, 0x18, 0x09, 0x68]
+        );
+    }
+}
+
+#[test]
+fn native_livestock_counts_scan_only_current_capacity_and_present_species_records() {
+    for (case, (dispatch, first_slot, handlers, leaves, capacity_getters, record_getters)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x115,
+                [0x441AC, 0x441C2, 0x441E4],
+                [0x0CFC4, 0x0CFF4, 0x0C630],
+                [0x0CE74, 0x0CE74, 0x0C570],
+                [0x0DA2C, 0x0DA48, 0x0CCB8],
+            ),
+            (
+                0x3FAF0,
+                0x118,
+                [0x4441E, 0x44440, 0x44462],
+                [0x0D038, 0x0D068, 0x0C6A4],
+                [0x0CEE8, 0x0CEE8, 0x0C5E4],
+                [0x0DAA0, 0x0DABC, 0x0CD2C],
+            ),
+            (
+                0x3F578,
+                0x115,
+                [0x43E20, 0x43E36, 0x43E58],
+                [0x0CFA4, 0x0CFD4, 0x0C610],
+                [0x0CE54, 0x0CE54, 0x0C550],
+                [0x0DA0C, 0x0DA28, 0x0CC98],
+            ),
+            (
+                0x3F84C,
+                0x118,
+                [0x4417A, 0x4419C, 0x441BE],
+                [0x0CFEC, 0x0D01C, 0x0C658],
+                [0x0CE9C, 0x0CE9C, 0x0C598],
+                [0x0DA54, 0x0DA70, 0x0CCE0],
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for index in 0..3 {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + index) * 4
+                        ..dispatch + (first_slot + index) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handlers[index] as u32,
+                "{} livestock-count callable slot {}",
+                case.name,
+                first_slot + index
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handlers[index] + 0x0E),
+                leaves[index],
+                "{} livestock-count leaf {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, leaves[index] + 0x04),
+                capacity_getters[index],
+                "{} livestock-count capacity getter {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, leaves[index] + 0x16),
+                record_getters[index],
+                "{} livestock-count species resolver {index}",
+                case.name
+            );
+        }
+
+        for leaf in &leaves[..2] {
+            assert_eq!(&rom[leaf + 0x12..leaf + 0x16], &[0x2C, 0x34, 0x20, 0x1C]);
+            assert_eq!(&rom[leaf + 0x20..leaf + 0x24], &[0x3C, 0x34, 0x01, 0x36]);
+        }
+        let chicken = leaves[2];
+        assert_eq!(
+            &rom[chicken + 0x12..chicken + 0x16],
+            &[0x18, 0x34, 0x20, 0x1C]
+        );
+        assert_eq!(
+            &rom[chicken + 0x20..chicken + 0x24],
+            &[0x30, 0x34, 0x01, 0x36]
+        );
     }
 }
 
@@ -4757,6 +9078,29 @@ fn native_completion_predicates_preserve_required_npc_exclusions_on_all_targets(
             0x2D13
         );
 
+        // The complete all-products predicate is byte-identical across all
+        // four ROMs. Crop and mineral predicates have identical executable
+        // bodies; only their final relocated table pointer differs.
+        let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+        assert_eq!(
+            &rom[product_leaf..product_leaf + 0x30],
+            &reference[0xB15C..0xB15C + 0x30],
+            "{} all-product predicate body",
+            case.name
+        );
+        assert_eq!(
+            &rom[crop_leaf..crop_leaf + 0x2C],
+            &reference[0xB18C..0xB18C + 0x2C],
+            "{} crop predicate body",
+            case.name
+        );
+        assert_eq!(
+            &rom[mineral_leaf..mineral_leaf + 0x2C],
+            &reference[0xB1CC..0xB1CC + 0x2C],
+            "{} mineral predicate body",
+            case.name
+        );
+
         let crop_table =
             u32::from_le_bytes(rom[crop_leaf + 0x2C..crop_leaf + 0x30].try_into().unwrap())
                 as usize
@@ -5276,7 +9620,7 @@ fn native_mfomt_church_visit_gate_excludes_romance_events_and_music_festival() {
                 _ => {
                     let mov = u16::from_le_bytes(rom[pc..pc + 2].try_into().unwrap());
                     assert_eq!(mov & 0xFF00, 0x2100);
-                    (mov & 0xFF) as u16
+                    mov & 0xFF
                 }
             };
             assert_eq!(value, expected);
@@ -5601,6 +9945,67 @@ fn native_friendship_add_and_set_have_distinct_boundaries() {
 }
 
 #[test]
+fn native_npc_relationship_and_love_leaf_implementations_match_all_targets() {
+    // These are the complete native leaf bodies used by the public relationship
+    // callables, not only their dispatch-table positions or VM wrapper targets.
+    // Exact equality proves that the bit fields, first-meeting branch, reset
+    // behavior, byte/halfword widths, and clamping rules do not diverge among
+    // the four vanilla targets. FoMT-US is only the byte template here; the
+    // independently addressed leaf in every target must match it in full.
+    let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    let reference_leaves = [
+        (0x9E33Cusize, 4usize), // GetFriendship
+        (0x9E340, 8),           // GetDaysSinceLastSpoken
+        (0x9E348, 8),           // HasBeenGiftedToday
+        (0x9E350, 8),           // HasBeenSpokenToToday
+        (0x9E358, 8),           // HasBeenSpokenToJustNow
+        (0x9E360, 8),           // HasBeenMet
+        (0x9E370, 40),          // AddFriendship
+        (0x9E398, 4),           // SetFriendship
+        (0x9E39C, 48),          // SetSpokenTo
+        (0x9E3CC, 20),          // SetGifted
+        (0x9E498, 4),           // GetLove
+        (0x9E4C4, 44),          // AddLove
+        (0x9E4F4, 4),           // SetLove
+    ];
+    let target_leaves = [
+        [
+            0x9E33C, 0x9E340, 0x9E348, 0x9E350, 0x9E358, 0x9E360, 0x9E370, 0x9E398, 0x9E39C,
+            0x9E3CC, 0x9E498, 0x9E4C4, 0x9E4F4,
+        ],
+        [
+            0xA34D0, 0xA34D4, 0xA34DC, 0xA34E4, 0xA34EC, 0xA34F4, 0xA3504, 0xA352C, 0xA3530,
+            0xA3560, 0xA362C, 0xA3658, 0xA3688,
+        ],
+        [
+            0x9DD74, 0x9DD78, 0x9DD80, 0x9DD88, 0x9DD90, 0x9DD98, 0x9DDA8, 0x9DDD0, 0x9DDD4,
+            0x9DE04, 0x9DED0, 0x9DEFC, 0x9DF2C,
+        ],
+        [
+            0xA2F10, 0xA2F14, 0xA2F1C, 0xA2F24, 0xA2F2C, 0xA2F34, 0xA2F44, 0xA2F6C, 0xA2F70,
+            0xA2FA0, 0xA306C, 0xA3098, 0xA30C8,
+        ],
+    ];
+
+    for (case_index, case) in CASES.iter().enumerate() {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (leaf_index, ((reference_offset, length), target_offset)) in reference_leaves
+            .iter()
+            .copied()
+            .zip(target_leaves[case_index])
+            .enumerate()
+        {
+            assert_eq!(
+                &rom[target_offset..target_offset + length],
+                &reference[reference_offset..reference_offset + length],
+                "{} relationship/love native leaf {leaf_index}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
 fn native_link_reward_counter_reads_four_bits() {
     for (case, table, slot, handler, expected) in [
         (
@@ -5661,6 +10066,85 @@ fn native_link_reward_counter_reads_four_bits() {
             "{}",
             case.name
         );
+    }
+}
+
+#[test]
+fn native_link_reward_counter_producers_use_the_same_ten_recipe_transitions() {
+    for (us_case, us, jp_case, jp, relocation_bytes) in [
+        (
+            &CASES[0],
+            0x97800usize,
+            &CASES[2],
+            0x972BCusize,
+            &[0x2Cusize, 0x2D, 0x90, 0xB4][..],
+        ),
+        (
+            &CASES[1],
+            0x9C728,
+            &CASES[3],
+            0x9C1F0,
+            &[0x2Cusize, 0x2D, 0x88, 0xAC][..],
+        ),
+    ] {
+        let us_rom = fs::read(local_rom_path(us_case.rom)).unwrap();
+        let jp_rom = fs::read(local_rom_path(jp_case.rom)).unwrap();
+        for offset in 0..0xDC {
+            if !relocation_bytes.contains(&offset) {
+                assert_eq!(
+                    us_rom[us + offset],
+                    jp_rom[jp + offset],
+                    "{} / {} recipe producer byte +{offset:#x}",
+                    us_case.name,
+                    jp_case.name
+                );
+            }
+        }
+    }
+
+    for (case, producer, failure_recorder, record_copy, recipe_writer, copy_bl, writer_bl) in [
+        (&CASES[0], 0x97800, 0x9AA58, 0x9A970, 0x9A9C0, 0x8E, 0xB2),
+        (&CASES[1], 0x9C728, 0x9F994, 0x9F890, 0x9F8E0, 0x86, 0xAA),
+        (&CASES[2], 0x972BC, 0x9A490, 0x9A3A8, 0x9A3F8, 0x8E, 0xB2),
+        (&CASES[3], 0x9C1F0, 0x9F3D4, 0x9F2D0, 0x9F320, 0x86, 0xAA),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        // Result selectors 0x9B through 0xA0 form the six first-time failed
+        // dish transitions.  The unsigned subtract/range check is identical
+        // in all four versions.
+        assert_eq!(
+            &rom[producer + 0x10..producer + 0x1A],
+            &[0x08, 0x88, 0x9B, 0x38, 0x00, 0x04, 0x00, 0x0C, 0x05, 0x28],
+            "{} failed-dish selector range",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, producer + 0x2A), failure_recorder);
+        assert_eq!(thumb_call_target(&rom, producer + copy_bl), record_copy);
+        assert_eq!(thumb_call_target(&rom, producer + writer_bl), recipe_writer);
+
+        // The successful first-record transitions are one-based recipe result
+        // selectors 0x19, 0x50, 0x7E and 0x8D.  Their branch displacements may
+        // differ between the FoMT and MFoMT storage layouts, but the compared
+        // selector opcodes themselves are invariant.
+        let first_compare = if copy_bl == 0x86 { 0xB2 } else { 0xBA };
+        for (offset, expected) in [
+            (first_compare, 0x2850u16),
+            (first_compare + 4, 0x2850),
+            (first_compare + 8, 0x2819),
+            (first_compare + 0x16, 0x287E),
+            (first_compare + 0x1A, 0x288D),
+        ] {
+            assert_eq!(
+                u16::from_le_bytes(
+                    rom[producer + offset..producer + offset + 2]
+                        .try_into()
+                        .unwrap()
+                ),
+                expected,
+                "{} successful-recipe selector +{offset:#x}",
+                case.name
+            );
+        }
     }
 }
 
@@ -5875,6 +10359,7 @@ fn native_scripted_control_toggles_only_the_shared_mode_byte() {
 
 #[test]
 fn native_power_berry_counter_chain_matches_all_targets() {
+    let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
     for (case, vtable, action, counter, stamina, maximum) in [
         (&CASES[0], 0xE6658, 0x26830, 0xEAFC, 0xE9E4, 0xE51C),
         (&CASES[1], 0xEEB98, 0x269B0, 0xEB9C, 0xEA84, 0xE5A4),
@@ -5922,6 +10407,19 @@ fn native_power_berry_counter_chain_matches_all_targets() {
                 0x47
             ]
         );
+        // Complete stamina adjustment helper. The only target-dependent bytes
+        // are the already decoded BL to GetMaximumStamina at +0x1A.
+        for offset in 0..84 {
+            if (0x1A..0x1E).contains(&offset) {
+                continue;
+            }
+            assert_eq!(
+                rom[stamina + offset],
+                reference[0xE9E4 + offset],
+                "{} stamina adjustment+{offset:X}",
+                case.name
+            );
+        }
     }
 }
 
@@ -5988,6 +10486,60 @@ fn native_tv_shopping_order_and_countdown_match_all_targets() {
                 0x7A, 0, 0x28, 1, 0xD0, 1, 0x38, 8, 0x72, 1, 0xBC, 0, 0x47
             ],
             "{} counter",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_tv_shopping_selection_state_matches_all_targets() {
+    let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    for (case, (table, first_slot, handlers, state_base)) in CASES.iter().zip([
+        (0x3F904, 0xDD, [0x42A34, 0x42A58, 0x42A7C, 0x42AA4], 0x1151C),
+        (0x3FAF0, 0xE0, [0x42C78, 0x42C94, 0x42CB8, 0x42CD0], 0x115FC),
+        (0x3F578, 0xDD, [0x426A8, 0x426CC, 0x426F0, 0x42718], 0x114FC),
+        (0x3F84C, 0xE0, [0x429D4, 0x429F0, 0x42A14, 0x42A2C], 0x115B0),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[table + slot * 4..table + slot * 4 + 4]
+                        .try_into()
+                        .unwrap(),
+                ),
+                0x0800_0000 + handler as u32,
+                "{} TV-shopping state slot {slot:#x}",
+                case.name
+            );
+        }
+        for (index, (handler, target)) in handlers
+            .into_iter()
+            .zip([
+                state_base,
+                state_base + 4,
+                state_base + 8,
+                state_base + 0x24,
+            ])
+            .enumerate()
+        {
+            let offset = if index == 3 { 0x22 } else { 0x0C };
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                target,
+                "{} TV-shopping state leaf {index}",
+                case.name
+            );
+        }
+
+        // Getter, pending getter, ready predicate, raw selection setter,
+        // confirmation, and cleanup form an identical state-machine block in
+        // every target. This is stronger than matching public slot order.
+        assert_eq!(
+            &rom[state_base..state_base + 0x4C],
+            &reference[0x1151C..0x1151C + 0x4C],
+            "{} TV-shopping state implementation",
             case.name
         );
     }
@@ -6161,7 +10713,7 @@ fn native_horse_creation_stores_ten_bit_age_on_all_targets() {
             &rom[create + 12..create + 24],
             &[0x0F, 0x1C, 0x0F, 0x92, 0x40, 0x68, 0x10, 0x90, 0, 0x2F, 0x65, 0xD1]
         );
-        // Removal also exits on a nonzero guard. The incoming reserved r2
+        // Removal also exits on a nonzero guard. The incoming unused r2
         // is overwritten with virtual method +0x3C before it can be used.
         assert_eq!(
             &rom[remove..remove + 20],
@@ -6339,6 +10891,94 @@ fn native_mfomt_recipe_completion_latch_matches_variable_690() {
 }
 
 #[test]
+fn native_known_recipe_count_reads_each_learned_record_on_all_targets() {
+    const COUNT_BODY: &[u8] = &[
+        0x00, 0xB5, 0x01, 0x1C, 0x00, 0x23, 0x09, 0x4A, 0x88, 0x18, 0x00, 0x78, 0x83, 0x42, 0x0A,
+        0xDA, 0x0A, 0x1C, 0x01, 0x1C, 0xD0, 0x7C, 0xC0, 0x06, 0x00, 0x28, 0x00, 0xDA, 0x01, 0x33,
+        0x14, 0x32, 0x01, 0x39, 0x00, 0x29, 0xF6, 0xD1, 0x18, 0x1C, 0x02, 0xBC, 0x08, 0x47,
+    ];
+    for (case, dispatch, slot, handler, leaf, count_offset) in [
+        (&CASES[0], 0x3F904, 0x133, 0x45496, 0x9AA28, 0x0A06u32),
+        (&CASES[1], 0x3FAF0, 0x137, 0x45768, 0x9F964, 0x0A07),
+        (&CASES[2], 0x3F578, 0x133, 0x4510A, 0x9A460, 0x0A06),
+        (&CASES[3], 0x3F84C, 0x137, 0x454C4, 0x9F3A4, 0x0A07),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} known-recipe-count physical slot",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x0C), leaf);
+        assert_eq!(
+            &rom[leaf..leaf + COUNT_BODY.len()],
+            COUNT_BODY,
+            "{}",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[leaf + COUNT_BODY.len()..leaf + COUNT_BODY.len() + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            count_offset,
+            "{} recipe-record count offset",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_money_getter_reads_the_family_specific_saved_u32_directly() {
+    for (case, (dispatch, slot, handler, save_offset, literal_offset)) in CASES.iter().zip([
+        (0x3F904, 0xEC, 0x42DB2, 0x1AA8u32, 0x1E),
+        (0x3FAF0, 0xEF, 0x42FDE, 0x1AB8u32, 0x12),
+        (0x3F578, 0xEC, 0x42A26, 0x1AA8u32, 0x1E),
+        (0x3F84C, 0xEF, 0x42D3A, 0x1AB8u32, 0x12),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} GetMoney physical slot",
+            case.name
+        );
+        assert_eq!(
+            &rom[handler..handler + 8],
+            &[0xD4, 0x24, 0xA4, 0x00, 0x28, 0x19, 0x00, 0x68],
+            "{} GetMoney loads the save-state owner",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[handler + literal_offset..handler + literal_offset + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            save_offset,
+            "{} GetMoney saved balance offset",
+            case.name
+        );
+        assert_eq!(
+            &rom[handler + 0x0C..handler + 0x0E],
+            &[0x04, 0x68],
+            "{} GetMoney performs a direct 32-bit load",
+            case.name
+        );
+    }
+}
+
+#[test]
 fn native_money_addition_preserves_family_specific_tail() {
     let fomt = fs::read(local_rom_path(CASES[0].rom)).unwrap();
     let mfomt = fs::read(local_rom_path(CASES[1].rom)).unwrap();
@@ -6365,12 +11005,51 @@ fn native_money_addition_preserves_family_specific_tail() {
             case.name
         );
     }
-    // MFoMT-only tail: balance == cap sets flag bit 2. Its consumers require
-    // separate research; this test does not assign a gameplay name to the bit.
+    // MFoMT-only tail: balance == cap sets account byte +4 bit 2. The paired
+    // VarGet consumer is independently pinned by the following regression.
     assert_eq!(
         &mfomt[0x9FC08..0x9FC16],
         &[0x10, 0x68, 0xB0, 0x42, 0x03, 0xD1, 0x10, 0x79, 0x04, 0x21, 0x08, 0x43, 0x10, 0x71]
     );
+}
+
+#[test]
+fn native_mfomt_billion_g_achievement_reads_the_add_money_flag() {
+    for (case, getter_table, getter, extractor) in [
+        (&CASES[1], 0x46050, 0x47210, 0x4A38C),
+        (&CASES[3], 0x45DAC, 0x46F6C, 0x4A0E8),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[getter_table + 691 * 4..getter_table + 691 * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + getter as u32,
+            "{} variable 691 getter",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[getter + 0x14..getter + 0x18].try_into().unwrap()),
+            0x1AB8,
+            "{} account object offset",
+            case.name
+        );
+        assert_eq!(
+            &rom[getter + 0x0C..getter + 0x0E],
+            &[0x00, 0x79],
+            "{} reads account byte +4",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, getter + 0x0E), extractor);
+        assert_eq!(
+            &rom[extractor..extractor + 4],
+            &[0x40, 0x07, 0xC0, 0x0F],
+            "{} extracts bit 2",
+            case.name
+        );
+    }
 }
 
 #[test]
@@ -6536,6 +11215,1809 @@ fn native_text_number_width_contract_differs_by_region_without_runtime_clamp() {
                 &[0x20, 0x21, 0x6A, 0x46, 0x10, 0x19, 0x01, 0x70, 0x01, 0x34]
             );
         }
+    }
+}
+
+#[test]
+fn native_text_variable_setters_keep_slots_argument_order_and_byte_capacities() {
+    for (case, (dispatch, first_slot, handlers, wrappers, setter, max_bytes, mfomt_us_stride)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x38,
+                [0x40FEC, 0x41032, 0x4108A],
+                [0x12AA4, 0x12ADC, 0x12ACC],
+                0x3B6B8,
+                22u8,
+                false,
+            ),
+            (
+                0x3FAF0,
+                0x39,
+                [0x41218, 0x4125E, 0x412B6],
+                [0x12C30, 0x12C68, 0x12C58],
+                0x3B9B0,
+                28,
+                true,
+            ),
+            (
+                0x3F578,
+                0x38,
+                [0x40C60, 0x40CA6, 0x40CFE],
+                [0x12974, 0x129AC, 0x1299C],
+                0x3B44C,
+                20,
+                false,
+            ),
+            (
+                0x3F84C,
+                0x39,
+                [0x40F74, 0x40FBA, 0x41012],
+                [0x12AD4, 0x12B0C, 0x12AFC],
+                0x3B828,
+                20,
+                false,
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let handler_calls = [0x3E, 0x50, 0x5A];
+        let setter_calls = [0x1A, 0x1A, 0x08];
+        for index in 0..3 {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handlers[index] as u32,
+                "{} text-variable callable slot {slot:#x}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handlers[index] + handler_calls[index]),
+                wrappers[index],
+                "{} text-variable wrapper {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, wrappers[index] + setter_calls[index]),
+                setter,
+                "{} shared text-variable setter {index}",
+                case.name
+            );
+        }
+
+        // The setter clamps encoded byte length before writing a terminator.
+        // It does not compare the variable index with four before calculating
+        // the destination, so TEXT_VARIABLE_1..4 is a caller-side contract.
+        assert_eq!(
+            &rom[setter + 0x12..setter + 0x18],
+            &[max_bytes, 0x2C, 0x00, 0xD9, max_bytes, 0x24]
+        );
+        if mfomt_us_stride {
+            assert_eq!(
+                &rom[setter + 0x2A..setter + 0x32],
+                &[0x70, 0x01, 0xC0, 0x19, 0x08, 0x30, 0x69, 0x46]
+            );
+        } else {
+            assert_eq!(
+                &rom[setter + 0x2A..setter + 0x36],
+                &[0x70, 0x00, 0x80, 0x19, 0xC0, 0x00, 0xC0, 0x19, 0x08, 0x30, 0x69, 0x46]
+            );
+        }
+    }
+}
+
+#[test]
+fn native_held_item_query_and_action_slots_match_all_targets() {
+    for (
+        case,
+        (
+            dispatch,
+            first_slot,
+            handlers,
+            empty_query,
+            kind_query,
+            wrapped_query,
+            use_leaf,
+            clear_leaf,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x3F,
+            [
+                0x4129A, 0x41332, 0x41384, 0x413D6, 0x4143C, 0x414A4, 0x41500, 0x41514,
+            ],
+            0x0F190,
+            0x0F204,
+            0x0F388,
+            0x141EC,
+            0x14214,
+        ),
+        (
+            0x3FAF0,
+            0x40,
+            [
+                0x414D6, 0x41576, 0x415C8, 0x4161A, 0x41680, 0x416E8, 0x41744, 0x41758,
+            ],
+            0x0F26C,
+            0x0F2E0,
+            0x0F464,
+            0x14378,
+            0x143A0,
+        ),
+        (
+            0x3F578,
+            0x3F,
+            [
+                0x40F0E, 0x40FA6, 0x40FF8, 0x4104A, 0x410B0, 0x41118, 0x41174, 0x41188,
+            ],
+            0x0F170,
+            0x0F1E4,
+            0x0F368,
+            0x140C0,
+            0x140E8,
+        ),
+        (
+            0x3F84C,
+            0x40,
+            [
+                0x41232, 0x412D2, 0x41324, 0x41376, 0x413DC, 0x41444, 0x414A0, 0x414B4,
+            ],
+            0x0F220,
+            0x0F294,
+            0x0F418,
+            0x14220,
+            0x14248,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} held-item callable slot {slot:#x}",
+                case.name
+            );
+        }
+
+        assert_eq!(
+            thumb_call_target(&rom, handlers[0] + 0x0C),
+            empty_query,
+            "{} empty query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x0E),
+            empty_query,
+            "{} kind empty guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x1A),
+            kind_query,
+            "{} kind query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x0E),
+            empty_query,
+            "{} wrapped empty guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x1A),
+            wrapped_query,
+            "{} wrapped query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[6] + 0x0E),
+            use_leaf,
+            "{} use held item",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[7] + 0x10),
+            clear_leaf,
+            "{} clear held item",
+            case.name
+        );
+
+        // Food, article and chicken getters guard kinds 0, 1 and 3 before
+        // extracting the category-specific ID. Every invalid getter path,
+        // including GetPlayerHeldItemKind on an empty hand, pushes -1.
+        for (handler, kind) in [(handlers[3], 0u8), (handlers[4], 1), (handlers[5], 3)] {
+            assert_eq!(
+                &rom[handler + 0x1E..handler + 0x20],
+                &[kind, 0x28],
+                "{} held kind guard {kind}",
+                case.name
+            );
+        }
+        assert_eq!(
+            &rom[handlers[1] + 0x4A..handlers[1] + 0x4E],
+            &[0x01, 0x21, 0x49, 0x42],
+            "{} empty kind sentinel",
+            case.name
+        );
+        assert_eq!(
+            &rom[handlers[3] + 0x5E..handlers[3] + 0x62],
+            &[0x01, 0x21, 0x49, 0x42],
+            "{} invalid food sentinel",
+            case.name
+        );
+        assert_eq!(
+            &rom[handlers[4] + 0x60..handlers[4] + 0x64],
+            &[0x01, 0x21, 0x49, 0x42],
+            "{} invalid article sentinel",
+            case.name
+        );
+        assert_eq!(
+            &rom[handlers[5] + 0x54..handlers[5] + 0x58],
+            &[0x01, 0x21, 0x49, 0x42],
+            "{} invalid chicken sentinel",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_held_food_and_article_setters_share_constructors_and_preserve_wrapped_flag() {
+    for (
+        case,
+        (
+            dispatch,
+            first_slot,
+            handlers,
+            food_value,
+            article_value,
+            food_constructor,
+            article_constructor,
+            apply_held,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x47,
+            [0x4152C, 0x41580, 0x415C0, 0x41612],
+            0x0DCA8,
+            0x0DF50,
+            0x0F004,
+            0x0F040,
+            0x14164,
+        ),
+        (
+            0x3FAF0,
+            0x48,
+            [0x41770, 0x417C4, 0x41804, 0x41856],
+            0x0DD1C,
+            0x0DFC4,
+            0x0F0E0,
+            0x0F11C,
+            0x142F0,
+        ),
+        (
+            0x3F578,
+            0x47,
+            [0x411A0, 0x411F4, 0x41234, 0x41286],
+            0x0DC88,
+            0x0DF30,
+            0x0EFE4,
+            0x0F020,
+            0x14038,
+        ),
+        (
+            0x3F84C,
+            0x48,
+            [0x414CC, 0x41520, 0x41560, 0x415B2],
+            0x0DCD0,
+            0x0DF78,
+            0x0F094,
+            0x0F0D0,
+            0x14198,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} held setter slot {slot:#x}",
+                case.name
+            );
+        }
+
+        for (
+            index,
+            (value_call, constructor_call, apply_call, value_leaf, constructor_leaf, wrapped),
+        ) in [
+            (0x28, 0x44, 0x4E, food_value, food_constructor, 0u8),
+            (0x28, 0x30, 0x3A, article_value, article_constructor, 0),
+            (0x26, 0x42, 0x4C, food_value, food_constructor, 1),
+            (0x28, 0x30, 0x3A, article_value, article_constructor, 1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let handler = handlers[index];
+            assert_eq!(
+                thumb_call_target(&rom, handler + value_call),
+                value_leaf,
+                "{} held setter value constructor {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handler + constructor_call),
+                constructor_leaf,
+                "{} held setter object constructor {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handler + apply_call),
+                apply_held,
+                "{} held setter apply leaf {index}",
+                case.name
+            );
+            assert_eq!(
+                &rom[handler + apply_call - 2..handler + apply_call],
+                &[wrapped, 0x22],
+                "{} held setter wrapped flag {index}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_held_item_actions_and_tool_stack_slots_match_all_targets() {
+    for (
+        case,
+        (
+            dispatch,
+            first_slot,
+            handlers,
+            item_empty,
+            item_kind,
+            item_article,
+            article_discardable,
+            try_ship,
+            throw_item,
+            tool_empty,
+            tool_get,
+            tool_id,
+            tool_amount,
+            tool_value,
+            tool_stack,
+            empty_stack,
+            apply_tool,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x4B,
+            [
+                0x412B8, 0x41652, 0x41690, 0x416A2, 0x416F4, 0x4173C, 0x41860,
+            ],
+            0x0F190,
+            0x0F204,
+            0x0F258,
+            0x0DFB0,
+            0x1412C,
+            0x141C4,
+            0x0DC34,
+            0x0DC10,
+            0x0DB30,
+            0x0DC48,
+            0x0DB2C,
+            0x0DBE0,
+            0x0DBC8,
+            0xD3994,
+        ),
+        (
+            0x3FAF0,
+            0x4C,
+            [
+                0x414FC, 0x41896, 0x418D4, 0x418E6, 0x41938, 0x41980, 0x41AA4,
+            ],
+            0x0F26C,
+            0x0F2E0,
+            0x0F334,
+            0x0E024,
+            0x142B8,
+            0x14350,
+            0x0DCA8,
+            0x0DC84,
+            0x0DBA4,
+            0x0DCBC,
+            0x0DBA0,
+            0x0DC54,
+            0x0DC3C,
+            0xDB5BC,
+        ),
+        (
+            0x3F578,
+            0x4B,
+            [
+                0x40F2C, 0x412C6, 0x41304, 0x41316, 0x41368, 0x413B0, 0x414D4,
+            ],
+            0x0F170,
+            0x0F1E4,
+            0x0F238,
+            0x0DF90,
+            0x14000,
+            0x14098,
+            0x0DC14,
+            0x0DBF0,
+            0x0DB10,
+            0x0DC28,
+            0x0DB0C,
+            0x0DBC0,
+            0x0DBA8,
+            0xD314C,
+        ),
+        (
+            0x3F84C,
+            0x4C,
+            [
+                0x41258, 0x415F2, 0x41630, 0x41642, 0x41694, 0x416DC, 0x41800,
+            ],
+            0x0F220,
+            0x0F294,
+            0x0F2E8,
+            0x0DFD8,
+            0x14160,
+            0x141F8,
+            0x0DC5C,
+            0x0DC38,
+            0x0DB58,
+            0x0DC70,
+            0x0DB54,
+            0x0DC08,
+            0x0DBF0,
+            0xDB0D0,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} held action/tool slot {slot:#x}",
+                case.name
+            );
+        }
+
+        let discard = handlers[0];
+        assert_eq!(
+            thumb_call_target(&rom, discard + 0x0E),
+            item_empty,
+            "{} discard empty guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, discard + 0x1A),
+            item_kind,
+            "{} discard kind query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, discard + 0x26),
+            item_article,
+            "{} discard article query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, discard + 0x30),
+            article_discardable,
+            "{} article discardable leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x0E),
+            try_ship,
+            "{} shipment attempt leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x0C),
+            throw_item,
+            "{} throw held item leaf",
+            case.name
+        );
+
+        assert_eq!(
+            thumb_call_target(&rom, handlers[3] + 0x12),
+            tool_empty,
+            "{} held tool empty guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[3] + 0x1E),
+            tool_get,
+            "{} held tool getter",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[3] + 0x28),
+            tool_id,
+            "{} held tool ID",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[4] + 0x12),
+            tool_empty,
+            "{} held tool count empty guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[4] + 0x1E),
+            tool_amount,
+            "{} held tool amount",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[5] + 0x40),
+            tool_value,
+            "{} tool value constructor",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[5] + 0x4A),
+            tool_stack,
+            "{} tool stack constructor",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[6] + 0x0E),
+            empty_stack,
+            "{} empty tool stack constructor",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[6] + 0x18),
+            apply_tool,
+            "{} shared held tool apply path",
+            case.name
+        );
+
+        // The ToolStack constructor uses an unsigned minimum with 99. Zero is
+        // replaced by one; negative VM integers therefore also clamp to 99.
+        assert_eq!(
+            &rom[tool_stack + 0x0C..tool_stack + 0x12],
+            &[0x00, 0x2A, 0x08, 0xD0, 0x63, 0x20],
+            "{} tool stack zero/max branches",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_rucksack_search_slot_and_add_callables_match_all_targets() {
+    for (
+        case,
+        (
+            dispatch,
+            first_slot,
+            handlers,
+            find_food,
+            find_article,
+            item_at,
+            empty_item,
+            free_tool,
+            free_item,
+            add_article,
+            add_food,
+            add_tool,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x52,
+            [
+                0x41884, 0x418BC, 0x418F4, 0x41930, 0x41948, 0x4196C, 0x419B4, 0x419FC,
+            ],
+            0x0F6B4,
+            0x0F714,
+            0x0FCDC,
+            0x0EFEC,
+            0x0F8A8,
+            0x0F634,
+            0x0FDC4,
+            0x0FD50,
+            0x0FEC8,
+        ),
+        (
+            0x3FAF0,
+            0x53,
+            [
+                0x41AC8, 0x41AFC, 0x41B30, 0x41B6C, 0x41B90, 0x41BB4, 0x41BFC, 0x41C44,
+            ],
+            0x0F790,
+            0x0F7F0,
+            0x0FDB8,
+            0x0F0C8,
+            0x0F984,
+            0x0F710,
+            0x0FEA0,
+            0x0FE2C,
+            0x0FFA4,
+        ),
+        (
+            0x3F578,
+            0x52,
+            [
+                0x414F8, 0x41530, 0x41568, 0x415A4, 0x415BC, 0x415E0, 0x41628, 0x41670,
+            ],
+            0x0F694,
+            0x0F6F4,
+            0x0FCBC,
+            0x0EFCC,
+            0x0F888,
+            0x0F614,
+            0x0FDA4,
+            0x0FD30,
+            0x0FEA8,
+        ),
+        (
+            0x3F84C,
+            0x53,
+            [
+                0x41824, 0x41858, 0x4188C, 0x418C8, 0x418EC, 0x41910, 0x41958, 0x419A0,
+            ],
+            0x0F744,
+            0x0F7A4,
+            0x0FD6C,
+            0x0F07C,
+            0x0F938,
+            0x0F6C4,
+            0x0FE54,
+            0x0FDE0,
+            0x0FF58,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} rucksack callable slot {slot:#x}",
+                case.name
+            );
+        }
+
+        assert_eq!(
+            thumb_call_target(&rom, handlers[0] + 0x28),
+            find_food,
+            "{} find food",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x28),
+            find_article,
+            "{} find article",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x22),
+            item_at,
+            "{} rucksack item slot access",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x2A),
+            empty_item,
+            "{} empty rucksack item constructor",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[3] + 0x0C),
+            free_tool,
+            "{} first free tool slot",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[4] + 0x0C),
+            free_item,
+            "{} first free item slot",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[5] + 0x3A),
+            add_article,
+            "{} add article",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[6] + 0x3A),
+            add_food,
+            "{} add food",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[7] + 0x3A),
+            add_tool,
+            "{} add tool",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_player_inventory_queries_distinguish_held_rucksack_and_storage_sources() {
+    for (
+        case,
+        (dispatch, first_slot, handlers, holding_tool, owns_tool, owns_food, owns_article),
+    ) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x5C,
+            [0x43FDE, 0x440CE, 0x440F8, 0x44122],
+            0x14D7C,
+            0x4E354,
+            0x4E2C0,
+            0x4E22C,
+        ),
+        (
+            0x3FAF0,
+            0x5D,
+            [0x44246, 0x44340, 0x4436A, 0x44394],
+            0x14F08,
+            0x50910,
+            0x5087C,
+            0x507E8,
+        ),
+        (
+            0x3F578,
+            0x5C,
+            [0x43C52, 0x43D42, 0x43D6C, 0x43D96],
+            0x14C50,
+            0x4E17C,
+            0x4E0E8,
+            0x4E054,
+        ),
+        (
+            0x3F84C,
+            0x5D,
+            [0x43FA2, 0x4409C, 0x440C6, 0x440F0],
+            0x14DB0,
+            0x5066C,
+            0x505D8,
+            0x50544,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} player inventory query slot {slot:#x}",
+                case.name
+            );
+        }
+        assert_eq!(
+            thumb_call_target(&rom, handlers[0] + 0x08),
+            holding_tool,
+            "{} holding-tool query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x1E),
+            owns_tool,
+            "{} owns-tool aggregate",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x1E),
+            owns_food,
+            "{} owns-food aggregate",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[3] + 0x1E),
+            owns_article,
+            "{} owns-article aggregate",
+            case.name
+        );
+
+        // Each aggregate has three ordered ownership sources: held value,
+        // rucksack, then the category-specific long-term storage container.
+        for (aggregate, source_offsets) in [
+            (owns_tool, [0x16usize, 0x4A, 0x62]),
+            (owns_food, [0x16, 0x52, 0x72]),
+            (owns_article, [0x16, 0x54, 0x74]),
+        ] {
+            for offset in source_offsets {
+                let _ = thumb_call_target(&rom, aggregate + offset);
+            }
+        }
+    }
+}
+
+#[test]
+fn native_show_player_holding_tool_enters_the_acquisition_action_on_all_targets() {
+    for (case, (dispatch, slot, handler, native)) in CASES.iter().zip([
+        (0x3F904, 0x5A, 0x45456, 0x16F34),
+        (0x3FAF0, 0x5B, 0x45726, 0x16FB4),
+        (0x3F578, 0x5A, 0x450CA, 0x16CC8),
+        (0x3F84C, 0x5B, 0x45482, 0x16E28),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} show-held-tool slot",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handler + 0x26),
+            native,
+            "{} show-held-tool native",
+            case.name
+        );
+        // The native function stores event/player action state 0x19.
+        assert_eq!(
+            &rom[native + 0x20..native + 0x26],
+            &[0x9C, 0x34, 0x19, 0x20, 0x20, 0x60],
+            "{} acquisition action state",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_remove_owned_articles_and_berry_acquisition_slots_match_all_targets() {
+    for (
+        case,
+        (
+            dispatch,
+            remove_slot,
+            remove_handler,
+            item_at_offset,
+            item_at,
+            item_empty,
+            item_kind,
+            clear_held,
+            power_handler,
+            power_native,
+            mystic_handler,
+            mystic_native,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904, 0x60, 0x451EE, 0x7A, 0x0FCDC, 0x0F06C, 0x0F09C, 0x0F390, 0x44A94, 0x158CC,
+            0x44AAC, 0x158F8,
+        ),
+        (
+            0x3FAF0, 0x61, 0x454C8, 0x78, 0x0FDB8, 0x0F148, 0x0F178, 0x0F46C, 0x44D04, 0x1594C,
+            0x44D1C, 0x15978,
+        ),
+        (
+            0x3F578, 0x60, 0x44E62, 0x7A, 0x0FCBC, 0x0F04C, 0x0F07C, 0x0F370, 0x44708, 0x15660,
+            0x44720, 0x1568C,
+        ),
+        (
+            0x3F84C, 0x61, 0x45224, 0x78, 0x0FD6C, 0x0F0FC, 0x0F12C, 0x0F420, 0x44A60, 0x157C0,
+            0x44A78, 0x157EC,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler) in [
+            (remove_slot, remove_handler),
+            (remove_slot + 1, power_handler),
+            (remove_slot + 2, mystic_handler),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} article-removal/berry slot {slot:#x}",
+                case.name
+            );
+        }
+        assert_eq!(
+            thumb_call_target(&rom, remove_handler + 0x58),
+            clear_held,
+            "{} clear matching held article",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, remove_handler + item_at_offset),
+            item_at,
+            "{} inspect rucksack article",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, remove_handler + item_at_offset + 0x06),
+            item_empty,
+            "{} rucksack item empty query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, remove_handler + item_at_offset + 0x12),
+            item_kind,
+            "{} rucksack item kind query",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, power_handler + 0x10),
+            power_native,
+            "{} power berry acquisition",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, mystic_handler + 0x10),
+            mystic_native,
+            "{} mystic berry acquisition",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_riding_bathing_and_preserved_location_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x63,
+            [0x44AC4, 0x44FA0, 0x44FB4, 0x44FC8, 0x44FDC, 0x44FF0],
+        ),
+        (
+            0x3FAF0,
+            0x64,
+            [0x44D34, 0x4521C, 0x45232, 0x4524A, 0x45262, 0x4527A],
+        ),
+        (
+            0x3F578,
+            0x63,
+            [0x44738, 0x44C14, 0x44C28, 0x44C3C, 0x44C50, 0x44C64],
+        ),
+        (
+            0x3F84C,
+            0x64,
+            [0x44A90, 0x44F78, 0x44F8E, 0x44FA6, 0x44FBE, 0x44FD6],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} riding/bathing/preserved-location slot {slot:#x}",
+                case.name
+            );
+        }
+    }
+
+    // FoMT-US exposes the preserved-location record directly. Clearing it
+    // resets the enabled byte and stores the FoMT MAP_NONE value 0x0234.
+    let rom = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    assert_eq!(thumb_call_target(&rom, 0x44FC8 + 0x0E), 0x16D48);
+    assert_eq!(thumb_call_target(&rom, 0x44FDC + 0x0E), 0x16D80);
+    assert_eq!(thumb_call_target(&rom, 0x44FF0 + 0x0E), 0x16D9C);
+    assert_eq!(
+        &rom[0x16D8A..0x16D94],
+        &[0x00, 0x21, 0x01, 0x70, 0x8D, 0x21, 0x89, 0x00, 0x41, 0x60]
+    );
+}
+
+#[test]
+fn native_random_meal_scripted_animation_and_presented_item_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, presented_leaves, presented_call_offsets)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x69,
+                [0x45010, 0x45028, 0x4503C, 0x44AE8, 0x44B0A, 0x44B2C],
+                [0x15950, 0x15970, 0x15990],
+                [0x0E, 0x0E, 0x0E],
+            ),
+            (
+                0x3FAF0,
+                0x6A,
+                [0x4529A, 0x452B2, 0x452CA, 0x44D4E, 0x44D70, 0x44D8C],
+                [0x159D0, 0x159F0, 0x15A10],
+                [0x0E, 0x12, 0x0E],
+            ),
+            (
+                0x3F578,
+                0x69,
+                [0x44C84, 0x44C9C, 0x44CB0, 0x4475C, 0x4477E, 0x447A0],
+                [0x156E4, 0x15704, 0x15724],
+                [0x0E, 0x0E, 0x0E],
+            ),
+            (
+                0x3F84C,
+                0x6A,
+                [0x44FF6, 0x4500E, 0x45026, 0x44AAA, 0x44ACC, 0x44AE8],
+                [0x15844, 0x15864, 0x15884],
+                [0x0E, 0x12, 0x0E],
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} meal/animation/presented-item slot {slot:#x}",
+                case.name
+            );
+        }
+
+        // All four native implementations resolve the same three player-actor
+        // virtuals, in order: captured kind (+0x84), captured ID (+0x88), and
+        // wrapped flag (+0x8C). This guards against a per-version slot shift.
+        for ((handler, leaf), call_offset) in handlers[3..]
+            .iter()
+            .copied()
+            .zip(presented_leaves)
+            .zip(presented_call_offsets)
+        {
+            assert_eq!(
+                thumb_call_target(&rom, handler + call_offset),
+                leaf,
+                "{} presented-item native leaf",
+                case.name
+            );
+        }
+        for (leaf, virtual_offset) in presented_leaves.into_iter().zip([0x84, 0x88, 0x8C]) {
+            assert_eq!(
+                &rom[leaf + 0x12..leaf + 0x18],
+                &[0x41, 0x69, virtual_offset, 0x31, 0x09, 0x68],
+                "{} presented-item virtual offset",
+                case.name
+            );
+        }
+    }
+
+    let rom = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    assert_eq!(
+        thumb_call_target(&rom, 0x45010 + 0x10),
+        0x16DB0,
+        "FoMT-US random meal native"
+    );
+    assert_eq!(
+        thumb_call_target(&rom, 0x45028 + 0x0E),
+        0x16E7C,
+        "FoMT-US prepare scripted animation"
+    );
+    assert_eq!(
+        thumb_call_target(&rom, 0x4503C + 0x10),
+        0x16E9C,
+        "FoMT-US restore scripted animation"
+    );
+
+    // Resolve the player actor vtable itself, rather than assuming that the
+    // three virtual offsets happen to mean the same thing in every ROM. The
+    // pointed-to leaf getters directly read +0xA8 (kind), +0xAC (ID), and
+    // +0xB0 (wrapped) respectively.
+    for (case, (vtable, getters)) in CASES.iter().zip([
+        (0xE6658, [0x32044, 0x3203C, 0x32034]),
+        (0xEEB98, [0x32400, 0x323F8, 0x323F0]),
+        (0xE5A98, [0x31DD8, 0x31DD0, 0x31DC8]),
+        (0xEE6A8, [0x32274, 0x3226C, 0x32264]),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for ((virtual_offset, getter), expected_body) in
+            [0x84, 0x88, 0x8C].into_iter().zip(getters).zip([
+                [0xA8, 0x30, 0x00, 0x68, 0x70, 0x47],
+                [0xAC, 0x30, 0x00, 0x68, 0x70, 0x47],
+                [0xB0, 0x30, 0x00, 0x78, 0x70, 0x47],
+            ])
+        {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[vtable + virtual_offset..vtable + virtual_offset + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0001 + getter as u32,
+                "{} presented-item player vtable entry",
+                case.name
+            );
+            assert_eq!(
+                &rom[getter..getter + expected_body.len()],
+                &expected_body,
+                "{} presented-item cached-field getter",
+                case.name
+            );
+        }
+    }
+
+    // Random-meal fallback branches construct food IDs 0x3F and 0x40,
+    // FOOD_RICE_BALL and FOOD_BREAD in the complete food domain.
+    assert_eq!(
+        &rom[0x16E34..0x16E44],
+        &[
+            0x68, 0x46, 0x3F, 0x21, 0xF6, 0xF7, 0x36, 0xFF, 0x08, 0xE0, 0x68, 0x46, 0x40, 0x21,
+            0xF6, 0xF7
+        ]
+    );
+}
+
+#[test]
+fn native_receive_capacity_basket_and_rucksack_upgrade_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, can_tool, can_food, can_article)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x6F,
+                [
+                    0x44050, 0x4407A, 0x440A4, 0x44206, 0x44234, 0x4425C, 0x44274, 0x451BE,
+                ],
+                0x4E0F8,
+                0x4E17C,
+                0x4E1D4,
+            ),
+            (
+                0x3FAF0,
+                0x70,
+                [
+                    0x442C2, 0x442EC, 0x44316, 0x4447A, 0x444A8, 0x444C0, 0x444D8, 0x45444,
+                ],
+                0x506B4,
+                0x50738,
+                0x50790,
+            ),
+            (
+                0x3F578,
+                0x6F,
+                [
+                    0x43CC4, 0x43CEE, 0x43D18, 0x43E7A, 0x43EA8, 0x43ED0, 0x43EE8, 0x44E32,
+                ],
+                0x4DF20,
+                0x4DFA4,
+                0x4DFFC,
+            ),
+            (
+                0x3F84C,
+                0x70,
+                [
+                    0x4401E, 0x44048, 0x44072, 0x441D6, 0x44204, 0x4421C, 0x44234, 0x451A0,
+                ],
+                0x50410,
+                0x50494,
+                0x504EC,
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} receive/basket/upgrade slot {slot:#x}",
+                case.name
+            );
+        }
+        assert_eq!(
+            thumb_call_target(&rom, handlers[0] + 0x1E),
+            can_tool,
+            "{} can receive tool",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[1] + 0x1E),
+            can_food,
+            "{} can receive food",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handlers[2] + 0x1E),
+            can_article,
+            "{} can receive article",
+            case.name
+        );
+    }
+
+    // FoMT-US tool capacity checks the held ToolStack, then rucksack, then
+    // tool chest. A matching held stack is available only below 99.
+    let rom = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    assert_eq!(
+        thumb_call_target(&rom, 0x4E0F8 + 0x14),
+        0x0DC34,
+        "held tool empty query"
+    );
+    assert_eq!(
+        thumb_call_target(&rom, 0x4E0F8 + 0x50),
+        0x0F990,
+        "rucksack tool capacity"
+    );
+    assert_eq!(
+        thumb_call_target(&rom, 0x4E0F8 + 0x62),
+        0x0B410,
+        "tool chest capacity"
+    );
+    assert_eq!(
+        &rom[0x4E132..0x4E136],
+        &[0x63, 0x21, 0x48, 0x40],
+        "held tool stack compares against 99"
+    );
+}
+
+#[test]
+fn native_npc_relationship_and_love_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x7B,
+            [
+                0x41B5C, 0x41BCC, 0x41C10, 0x41C64, 0x41CB8, 0x41CFC, 0x41D38, 0x41D80, 0x41DC8,
+                0x41E10, 0x41E4C, 0x41E94, 0x41ED8, 0x41F2C,
+            ],
+            [
+                0x9FE74, 0x9E33C, 0x9E370, 0x9E398, 0x9E340, 0x9E39C, 0x9E350, 0x9E358, 0x9E360,
+                0x9E3CC, 0x9E348, 0x9E498, 0x9E4C4, 0x9E4F4,
+            ],
+        ),
+        (
+            0x3FAF0,
+            0x7E,
+            [
+                0x41DA4, 0x41E18, 0x41E5C, 0x41EB0, 0x41F04, 0x41F48, 0x41F84, 0x41FCC, 0x42014,
+                0x4205C, 0x42098, 0x420E0, 0x42124, 0x42178,
+            ],
+            [
+                0xA4FD4, 0xA34D0, 0xA3504, 0xA352C, 0xA34D4, 0xA3530, 0xA34E4, 0xA34EC, 0xA34F4,
+                0xA3560, 0xA34DC, 0xA362C, 0xA3658, 0xA3688,
+            ],
+        ),
+        (
+            0x3F578,
+            0x7B,
+            [
+                0x417D0, 0x41840, 0x41884, 0x418D8, 0x4192C, 0x41970, 0x419AC, 0x419F4, 0x41A3C,
+                0x41A84, 0x41AC0, 0x41B08, 0x41B4C, 0x41BA0,
+            ],
+            [
+                0x9F8AC, 0x9DD74, 0x9DDA8, 0x9DDD0, 0x9DD78, 0x9DDD4, 0x9DD88, 0x9DD90, 0x9DD98,
+                0x9DE04, 0x9DD80, 0x9DED0, 0x9DEFC, 0x9DF2C,
+            ],
+        ),
+        (
+            0x3F84C,
+            0x7E,
+            [
+                0x41B00, 0x41B74, 0x41BB8, 0x41C0C, 0x41C60, 0x41CA4, 0x41CE0, 0x41D28, 0x41D70,
+                0x41DB8, 0x41DF4, 0x41E3C, 0x41E80, 0x41ED4,
+            ],
+            [
+                0xA4A14, 0xA2F10, 0xA2F44, 0xA2F6C, 0xA2F14, 0xA2F70, 0xA2F24, 0xA2F2C, 0xA2F34,
+                0xA2FA0, 0xA2F1C, 0xA306C, 0xA3098, 0xA30C8,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} NPC relationship/love slot {slot:#x}",
+                case.name
+            );
+        }
+
+        let leaf_offsets = [
+            0x3C, 0x36, 0x48, 0x48, 0x36, 0x2E, 0x36, 0x36, 0x36, 0x2E, 0x36, 0x36, 0x48, 0x48,
+        ];
+        for ((handler, leaf), offset) in handlers.into_iter().zip(leaves).zip(leaf_offsets) {
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} NPC relationship/love native leaf",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_shop_and_gift_wrapping_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x8B,
+            [
+                0x41FF4, 0x4200C, 0x4206A, 0x42082, 0x4209A, 0x420B2, 0x420CA, 0x420E2, 0x420FA,
+                0x42112, 0x4212A, 0x4203A, 0x42052,
+            ],
+            [
+                0x12BBC, 0x12C50, 0x12CF4, 0x12D88, 0x12E1C, 0x12EC0, 0x12F54, 0x12FE8, 0x13080,
+                0x13114, 0x131A8, 0x1323C, 0x132D0,
+            ],
+        ),
+        (
+            0x3FAF0,
+            0x8E,
+            [
+                0x42240, 0x42258, 0x422B6, 0x422CE, 0x422E6, 0x422FE, 0x42316, 0x4232E, 0x42346,
+                0x4235E, 0x42376, 0x42286, 0x4229E,
+            ],
+            [
+                0x12D48, 0x12DDC, 0x12E80, 0x12F14, 0x12FA8, 0x1304C, 0x130E0, 0x13174, 0x1320C,
+                0x132A0, 0x13334, 0x133C8, 0x1345C,
+            ],
+        ),
+        (
+            0x3F578,
+            0x8B,
+            [
+                0x41C68, 0x41C80, 0x41CDE, 0x41CF6, 0x41D0E, 0x41D26, 0x41D3E, 0x41D56, 0x41D6E,
+                0x41D86, 0x41D9E, 0x41CAE, 0x41CC6,
+            ],
+            [
+                0x12A8C, 0x12B20, 0x12BC4, 0x12C58, 0x12CEC, 0x12D90, 0x12E24, 0x12EB8, 0x12F50,
+                0x12FE4, 0x13078, 0x13110, 0x131A4,
+            ],
+        ),
+        (
+            0x3F84C,
+            0x8E,
+            [
+                0x41F9C, 0x41FB4, 0x42012, 0x4202A, 0x42042, 0x4205A, 0x42072, 0x4208A, 0x420A2,
+                0x420BA, 0x420D2, 0x41FE2, 0x41FFA,
+            ],
+            [
+                0x12BEC, 0x12C80, 0x12D24, 0x12DB8, 0x12E4C, 0x12EF0, 0x12F84, 0x13018, 0x130B0,
+                0x13144, 0x131D8, 0x13270, 0x13304,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} shop/gift-wrapping slot {slot:#x}",
+                case.name
+            );
+        }
+
+        for (index, (handler, leaf)) in handlers.into_iter().zip(leaves).enumerate() {
+            let offset = if index == 1 { 0x26 } else { 0x10 };
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} shop/gift-wrapping native constructor {index}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_reference_and_farmhouse_ui_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x98,
+            [
+                0x42142, 0x42170, 0x42188, 0x421A0, 0x421B8, 0x421D0, 0x421E8, 0x42200, 0x424F0,
+                0x42508,
+            ],
+            [
+                0x13364, 0x13408, 0x134A4, 0x13544, 0x135D8, 0x1366C, 0x13700, 0x13794, 0x13828,
+                0x138C0,
+            ],
+        ),
+        (
+            0x3FAF0,
+            0x9B,
+            [
+                0x4238E, 0x423BC, 0x423D4, 0x423EC, 0x42404, 0x4241C, 0x42434, 0x4244C, 0x42736,
+                0x4274E,
+            ],
+            [
+                0x134F0, 0x13594, 0x13630, 0x136D0, 0x13764, 0x137F8, 0x1388C, 0x13920, 0x139B4,
+                0x13A4C,
+            ],
+        ),
+        (
+            0x3F578,
+            0x98,
+            [
+                0x41DB6, 0x41DE4, 0x41DFC, 0x41E14, 0x41E2C, 0x41E44, 0x41E5C, 0x41E74, 0x42164,
+                0x4217C,
+            ],
+            [
+                0x13238, 0x132DC, 0x13378, 0x13418, 0x134AC, 0x13540, 0x135D4, 0x13668, 0x136FC,
+                0x13794,
+            ],
+        ),
+        (
+            0x3F84C,
+            0x9B,
+            [
+                0x420EA, 0x42118, 0x42130, 0x42148, 0x42160, 0x42178, 0x42190, 0x421A8, 0x42492,
+                0x424AA,
+            ],
+            [
+                0x13398, 0x1343C, 0x134D8, 0x13578, 0x1360C, 0x136A0, 0x13734, 0x137C8, 0x1385C,
+                0x138F4,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} reference/farmhouse UI slot {slot:#x}",
+                case.name
+            );
+        }
+
+        for (index, (handler, leaf)) in handlers.into_iter().zip(leaves).enumerate() {
+            let offset = if index == 0 { 0x26 } else { 0x10 };
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} reference/farmhouse UI native constructor {index}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_link_name_entry_and_opening_ui_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, constructors, flashback_selector)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0xA2,
+                [0x42520, 0x43532, 0x42538, 0x42550],
+                [0x1395C, 0x13F88, 0x13BDC, 0x13C70],
+                0x29u8,
+            ),
+            (
+                0x3FAF0,
+                0xA5,
+                [0x42766, 0x43782, 0x4277E, 0x42796],
+                [0x13AE8, 0x14114, 0x13D68, 0x13DFC],
+                0x29,
+            ),
+            (
+                0x3F578,
+                0xA2,
+                [0x42194, 0x431A6, 0x421AC, 0x421C4],
+                [0x13830, 0x13E5C, 0x13AB0, 0x13B44],
+                0x28,
+            ),
+            (
+                0x3F84C,
+                0xA5,
+                [0x424C2, 0x434DE, 0x424DA, 0x424F2],
+                [0x13990, 0x13FBC, 0x13C10, 0x13CA4],
+                0x28,
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} link/name/opening UI slot {slot:#x}",
+                case.name
+            );
+        }
+
+        for (index, (handler, constructor)) in handlers.into_iter().zip(constructors).enumerate() {
+            let offset = if index == 1 { 0x3E } else { 0x10 };
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                constructor,
+                "{} link/name/opening UI constructor {index}",
+                case.name
+            );
+        }
+
+        let flashback_handler = handlers[2];
+        let flashback_constructor = constructors[2];
+        // The callable is exactly one 24-byte, parameterless blocking stage;
+        // the immediately following block is a distinct dispatch-table slot.
+        assert_eq!(
+            handlers[3],
+            flashback_handler + 0x18,
+            "{} slot boundary",
+            case.name
+        );
+        assert_eq!(
+            &rom[flashback_handler..flashback_handler + 0x0C],
+            &[0xD5, 0x24, 0xA4, 0x00, 0x28, 0x19, 0x00, 0x68, 0x00, 0x28, 0x01, 0xD1],
+            "{} parameterless flashback-state check",
+            case.name
+        );
+        assert_eq!(
+            &rom[flashback_constructor..flashback_constructor + 0x0C],
+            &[
+                0xF0,
+                0xB5,
+                0x87,
+                0xB0,
+                0x46,
+                0x68,
+                flashback_selector,
+                0x20,
+                0x00,
+                0x90,
+                0x14,
+                0x20,
+            ],
+            "{} regional flashback-state selector",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_modal_menu_and_transition_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0xA6,
+            [
+                0x42568, 0x4259C, 0x425CA, 0x425E2, 0x42218, 0x42230, 0x42248, 0x42260, 0x42278,
+                0x42290,
+            ],
+            [
+                0x13D04, 0x13DC8, 0x13E6C, 0x13EF8, 0x14034, 0x1404C, 0x14064, 0x1407C, 0x14094,
+                0x140AC,
+            ],
+        ),
+        (
+            0x3FAF0,
+            0xA9,
+            [
+                0x427AE, 0x427E2, 0x42810, 0x42828, 0x42464, 0x4247C, 0x42494, 0x424AC, 0x424C4,
+                0x424DC,
+            ],
+            [
+                0x13E90, 0x13F54, 0x13FF8, 0x14084, 0x141C0, 0x141D8, 0x141F0, 0x14208, 0x14220,
+                0x14238,
+            ],
+        ),
+        (
+            0x3F578,
+            0xA6,
+            [
+                0x421DC, 0x42210, 0x4223E, 0x42256, 0x41E8C, 0x41EA4, 0x41EBC, 0x41ED4, 0x41EEC,
+                0x41F04,
+            ],
+            [
+                0x13BD8, 0x13C9C, 0x13D40, 0x13DCC, 0x13F08, 0x13F20, 0x13F38, 0x13F50, 0x13F68,
+                0x13F80,
+            ],
+        ),
+        (
+            0x3F84C,
+            0xA9,
+            [
+                0x4250A, 0x4253E, 0x4256C, 0x42584, 0x421C0, 0x421D8, 0x421F0, 0x42208, 0x42220,
+                0x42238,
+            ],
+            [
+                0x13D38, 0x13DFC, 0x13EA0, 0x13F2C, 0x14068, 0x14080, 0x14098, 0x140B0, 0x140C8,
+                0x140E0,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} modal-menu/transition slot {slot:#x}",
+                case.name
+            );
+        }
+
+        let offsets = [0x2C, 0x26, 0x10, 0x26, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10];
+        for ((handler, leaf), offset) in handlers.into_iter().zip(leaves).zip(offsets) {
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} modal-menu/transition native leaf",
+                case.name
+            );
+        }
+
+        for (leaf, callback_offset) in leaves
+            .into_iter()
+            .skip(4)
+            .zip([0x84, 0x88, 0x8C, 0x90, 0x94, 0x98])
+        {
+            assert_eq!(
+                &rom[leaf + 0x0A..leaf + 0x0C],
+                &[callback_offset, 0x31],
+                "{} modal transition virtual callback {callback_offset:#x}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_record_player_fireplace_and_vase_slots_match_all_targets() {
+    for (case, (dispatch, first_slot, handlers, leaves, offsets)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0xB0,
+            [
+                0x42436, 0x4245E, 0x424CE, 0x43648, 0x43676, 0x43718, 0x43746,
+            ],
+            [
+                0x0BB74, 0x1424C, 0x14234, 0x14694, 0x0BFC4, 0x146B0, 0x0BFA4,
+            ],
+            [0x12, 0x28, 0x0E, 0x26, 0x52, 0x26, 0x0E],
+        ),
+        (
+            0x3FAF0,
+            0xB3,
+            [
+                0x42682, 0x426AA, 0x4271A, 0x438A4, 0x438D2, 0x4397C, 0x439AA,
+            ],
+            [
+                0x0BBE4, 0x143D8, 0x143C0, 0x14820, 0x0C038, 0x1483C, 0x0C018,
+            ],
+            [0x12, 0x28, 0x12, 0x26, 0x58, 0x26, 0x0E],
+        ),
+        (
+            0x3F578,
+            0xB0,
+            [
+                0x420AA, 0x420D2, 0x42142, 0x432BC, 0x432EA, 0x4338C, 0x433BA,
+            ],
+            [
+                0x0BB54, 0x14120, 0x14108, 0x14568, 0x0BFA4, 0x14584, 0x0BF84,
+            ],
+            [0x12, 0x28, 0x0E, 0x26, 0x52, 0x26, 0x0E],
+        ),
+        (
+            0x3F84C,
+            0xB3,
+            [
+                0x423DE, 0x42406, 0x42476, 0x43600, 0x4362E, 0x436D8, 0x43706,
+            ],
+            [
+                0x0BB98, 0x14280, 0x14268, 0x146C8, 0x0BFEC, 0x146E4, 0x0BFCC,
+            ],
+            [0x12, 0x28, 0x12, 0x26, 0x58, 0x26, 0x0E],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = first_slot + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} record-player/fireplace/vase slot {slot:#x}",
+                case.name
+            );
+        }
+        for ((handler, leaf), offset) in handlers.into_iter().zip(leaves).zip(offsets) {
+            assert_eq!(
+                thumb_call_target(&rom, handler + offset),
+                leaf,
+                "{} record-player/fireplace/vase native leaf",
+                case.name
+            );
+        }
+
+        // RecordPlayer::HasAlbum is an exact one-bit read in every target.
+        // Pinning the complete leaf prevents this slot from drifting into the
+        // separate Van-shop unlocked/available album state.
+        assert_eq!(
+            &rom[leaves[0]..leaves[0] + 8],
+            &[0x00, 0x68, 0xC0, 0x07, 0xC0, 0x0F, 0x70, 0x47],
+            "{} inserted record-player album bit",
+            case.name
+        );
+
+        let fireplace_query = handlers[4];
+        for (offset, map_id) in [(0x20, 0x1D), (0x28, 0x12), (0x2E, 0x27)] {
+            assert_eq!(
+                u16::from_le_bytes(
+                    rom[fireplace_query + offset..fireplace_query + offset + 2]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x2C00 | map_id,
+                "{} fireplace query map selector {map_id:#x}",
+                case.name
+            );
+        }
+        assert_eq!(
+            u16::from_le_bytes(
+                rom[fireplace_query + 0x40..fireplace_query + 0x42]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x2100,
+            "{} unsupported fireplace map returns false",
+            case.name
+        );
     }
 }
 
@@ -6749,6 +13231,96 @@ fn native_random_range_uses_signed_inclusive_width_on_all_targets() {
 }
 
 #[test]
+fn native_call_script_uses_target_table_without_runtime_id_bounds_check() {
+    for (case, (dispatch, slot, handler, leaf, resolver, parser, runner, table)) in
+        CASES.iter().zip([
+            (
+                0x3F904,
+                0x37,
+                0x40FBC,
+                0x12B04,
+                0x3F878,
+                0x3EEEC,
+                0xD7F3C,
+                0x080F89D4u32,
+            ),
+            (
+                0x3FAF0, 0x38, 0x411E8, 0x12C90, 0x3FA64, 0x3F0D8, 0xE0374, 0x081014BC,
+            ),
+            (
+                0x3F578, 0x37, 0x40C30, 0x129D4, 0x3F4EC, 0x3EB60, 0xD76F4, 0x080F8230,
+            ),
+            (
+                0x3F84C, 0x38, 0x40F44, 0x12B34, 0x3F7C0, 0x3EE34, 0xDFE88, 0x0810145C,
+            ),
+        ])
+    {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} CallScript physical slot",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, handler + 0x28),
+            leaf,
+            "{} CallScript leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, leaf + 0x0A),
+            resolver,
+            "{} script-table resolver",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, leaf + 0x10),
+            runner,
+            "{} called-script runner",
+            case.name
+        );
+
+        // lsl id,2; add table; ldr script pointer. There is deliberately no
+        // comparison with the target's script count before this lookup.
+        assert_eq!(
+            &rom[resolver + 0x08..resolver + 0x10],
+            &[0x89, 0x00, 0x09, 0x18, 0x09, 0x68, 0x20, 0x1C],
+            "{} unchecked script-table lookup",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[resolver + 0x24..resolver + 0x28].try_into().unwrap()),
+            table,
+            "{} target script table",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, resolver + 0x10),
+            parser,
+            "{} RIFF/script parser",
+            case.name
+        );
+
+        // The runner dispatches through the event controller and then writes
+        // state 2 at +0x9C. CallScript is therefore a VM/event transition,
+        // not a native C ABI call with arguments or a return value.
+        assert_eq!(
+            &rom[runner + 0x04..runner + 0x12],
+            &[0xA8, 0x30, 0x00, 0x68, 0x01, 0x68, 0x92, 0x22, 0x52, 0x00, 0x89, 0x18, 0x09, 0x68]
+        );
+        assert_eq!(
+            &rom[runner + 0x16..runner + 0x1C],
+            &[0x9C, 0x34, 0x02, 0x20, 0x20, 0x60]
+        );
+    }
+}
+
+#[test]
 fn native_audio_start_guard_matches_all_targets() {
     // m4aMPlayStart: ident guard, optional priority gate, current-track/start
     // and pause checks, followed by the beginning of an accepted start.
@@ -6776,6 +13348,159 @@ fn native_audio_start_guard_matches_all_targets() {
             u32::from_le_bytes(rom[literal..literal + 4].try_into().unwrap()),
             0x68736D53,
             "{} audio player identity tag",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_audio_callables_keep_physical_slots_and_player_domains_on_all_targets() {
+    for (case, (dispatch, handlers, leaves, leaf_call_offsets)) in CASES.iter().zip([
+        (
+            0x3F904,
+            [0x4041C, 0x40480, 0x40498, 0x404DE, 0x45484],
+            [0x123CC, 0x12454, 0x12464, 0x124C4, 0x16784],
+            [0x5C, 0x10, 0x3E, 0x10, 0x0C],
+        ),
+        (
+            0x3FAF0,
+            [0x40630, 0x40694, 0x406AC, 0x406F2, 0x45754],
+            [0x124BC, 0x12544, 0x12554, 0x125B4, 0x16804],
+            [0x5C, 0x10, 0x3E, 0x10, 0x0E],
+        ),
+        (
+            0x3F578,
+            [0x40090, 0x400F4, 0x4010C, 0x40152, 0x450F8],
+            [0x1229C, 0x12324, 0x12334, 0x12394, 0x16518],
+            [0x5C, 0x10, 0x3E, 0x10, 0x0C],
+        ),
+        (
+            0x3F84C,
+            [0x4038C, 0x403F0, 0x40408, 0x4044E, 0x454B0],
+            [0x12360, 0x123E8, 0x123F8, 0x12458, 0x16678],
+            [0x5C, 0x10, 0x3E, 0x10, 0x0E],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = 0x19 + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} audio callable slot {slot:#x}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handler + leaf_call_offsets[index]),
+                leaves[index],
+                "{} audio callable slot {slot:#x} leaf",
+                case.name
+            );
+        }
+
+        // The dedicated BGM operations load the event controller's +0xBC
+        // player. PlaySong instead walks the independent pointer range at
+        // +0xD0/+0xD4; StopAllSongs deliberately bypasses both and calls the
+        // global five-player-table wrapper.
+        assert_eq!(
+            &rom[leaves[0] + 4..leaves[0] + 14],
+            &[0x44, 0x68, 0x12, 0x04, 0x12, 0x0C, 0x20, 0x1C, 0xBC, 0x30]
+        );
+        assert_eq!(
+            &rom[leaves[1] + 2..leaves[1] + 6],
+            &[0x40, 0x68, 0xBC, 0x30]
+        );
+        assert_eq!(
+            &rom[leaves[2] + 6..leaves[2] + 16],
+            &[0x40, 0x68, 0xD0, 0x30, 0x04, 0x68, 0x45, 0x68, 0xAC, 0x42]
+        );
+        assert_eq!(
+            &rom[leaves[4] + 2..leaves[4] + 10],
+            &[0x40, 0x68, 0x04, 0x1C, 0xBC, 0x34, 0x20, 0x1C]
+        );
+    }
+}
+
+#[test]
+fn native_pause_menu_selector_uses_the_same_seven_pages_in_all_four_roms() {
+    const ENGLISH: [&[u8]; 7] = [
+        b"Diary",
+        b"Rucksack",
+        b"World Map",
+        b"Farm Map",
+        b"Earnings",
+        b"Memo",
+        b"Tutorial",
+    ];
+    const JAPANESE: [&[u8]; 7] = [
+        b"\x93\xFA\x8B\x4C",
+        b"\x91\x95\x94\xF5\x81\x45\x8E\x9D\x82\xBF\x95\xA8",
+        b"\x91\x53\x91\xCC\x83\x7D\x83\x62\x83\x76",
+        b"\x96\x71\x8F\xEA\x83\x7D\x83\x62\x83\x76",
+        b"\x89\xC6\x8C\x76\x95\xEB",
+        b"\x82\xA2\x82\xEB\x82\xA2\x82\xEB",
+        b"\x97\x56\x82\xD1\x95\xFB",
+    ];
+
+    for (case, ids_offset) in CASES.iter().zip([0xF19CC, 0xFA1F4, 0xF1228, 0xFA194]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let labels = if case.target.ends_with("_US") {
+            &ENGLISH
+        } else {
+            &JAPANESE
+        };
+        for id in 0..7usize {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[ids_offset + id * 4..ids_offset + id * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                id as u32,
+                "{} pause-menu page ID {}",
+                case.name,
+                id
+            );
+        }
+
+        let mut label_offset = ids_offset + 0x1C;
+        let pointer_offset = ids_offset + 0x68;
+        for (id, expected) in labels.iter().enumerate() {
+            let pointer = u32::from_le_bytes(
+                rom[pointer_offset + id * 4..pointer_offset + id * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            assert_eq!(
+                pointer,
+                0x0800_0000 + label_offset as u32,
+                "{} pause-menu label pointer {}",
+                case.name,
+                id
+            );
+            assert_eq!(
+                &rom[label_offset..label_offset + expected.len()],
+                *expected,
+                "{} pause-menu label {}",
+                case.name,
+                id
+            );
+            assert_eq!(
+                rom[label_offset + expected.len()],
+                0,
+                "{} pause-menu label terminator {}",
+                case.name,
+                id
+            );
+            label_offset = (label_offset + expected.len() + 1 + 3) & !3;
+        }
+        assert_eq!(
+            label_offset, pointer_offset,
+            "{} pause-menu label pool extent",
             case.name
         );
     }
@@ -7166,6 +13891,113 @@ fn native_does_animal_exist_is_a_resolver_presence_check_on_all_targets() {
 }
 
 #[test]
+fn native_animal_daily_condition_and_age_accessors_use_exact_record_fields() {
+    const LEAF_BYTES: [&[u8]; 7] = [
+        &[0x40, 0x7E, 0xC0, 0x06, 0xC0, 0x0F, 0x70, 0x47],
+        &[
+            0x00, 0xB5, 0x02, 0x1C, 0x51, 0x7E, 0xC8, 0x06, 0x00, 0x28, 0x02, 0xDB, 0x10, 0x20,
+            0x08, 0x43, 0x50, 0x76, 0x01, 0xBC, 0x00, 0x47,
+        ],
+        &[0x00, 0x8B, 0x80, 0x05, 0x80, 0x0D, 0x70, 0x47],
+        &[0x00, 0x7F, 0x40, 0x06, 0xC0, 0x0F, 0x70, 0x47],
+        &[0x00, 0x7F, 0xC0, 0x09, 0x70, 0x47],
+        &[0x24, 0x30, 0x00, 0x78, 0xC0, 0x07, 0xC0, 0x0F, 0x70, 0x47],
+        &[
+            0x00, 0xB5, 0x01, 0x1C, 0x24, 0x30, 0x00, 0x78, 0xC0, 0x07, 0x00, 0x28, 0x03, 0xD0,
+            0x88, 0x8C, 0x40, 0x05, 0xC0, 0x0E, 0x00, 0xE0, 0x00, 0x20, 0x02, 0xBC,
+        ],
+    ];
+
+    for (case, (dispatch, first_slot, resolver, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x104,
+            0x4E3D8,
+            [
+                0x4448C, 0x444D6, 0x4451A, 0x445BA, 0x44604, 0x4464E, 0x44698,
+            ],
+            [
+                0x9B238, 0x9B290, 0x9B220, 0x9B504, 0x9B50C, 0x9B8B0, 0x9B8D4,
+            ],
+        ),
+        (
+            0x3FAF0,
+            0x107,
+            0x50994,
+            [
+                0x44704, 0x4474E, 0x44792, 0x44830, 0x4487A, 0x448C4, 0x4490E,
+            ],
+            [
+                0xA01A4, 0xA01FC, 0xA018C, 0xA0470, 0xA0478, 0xA081C, 0xA0840,
+            ],
+        ),
+        (
+            0x3F578,
+            0x104,
+            0x4E200,
+            [
+                0x44100, 0x4414A, 0x4418E, 0x4422E, 0x44278, 0x442C2, 0x4430C,
+            ],
+            [
+                0x9AC70, 0x9ACC8, 0x9AC58, 0x9AF3C, 0x9AF44, 0x9B2E8, 0x9B30C,
+            ],
+        ),
+        (
+            0x3F84C,
+            0x107,
+            0x506F0,
+            [
+                0x44460, 0x444AA, 0x444EE, 0x4458C, 0x445D6, 0x44620, 0x4466A,
+            ],
+            [
+                0x9FBE4, 0x9FC3C, 0x9FBCC, 0x9FEB0, 0x9FEB8, 0xA025C, 0xA0280,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        // AddAnimalAffection occupies the gap after the talked-to setter. The
+        // remaining entries are age, unhappy, sick, pregnant, and healthy
+        // pregnancy days in their physical callable-table order.
+        for (index, (slot_offset, handler)) in [0usize, 1, 7, 3, 4, 5, 6]
+            .into_iter()
+            .zip(handlers)
+            .enumerate()
+        {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + slot_offset) * 4
+                        ..dispatch + (first_slot + slot_offset) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x08000000 + handler as u32,
+                "{} animal state callable {index}",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handler + 0x30),
+                resolver,
+                "{} guarded animal resolver {index}",
+                case.name
+            );
+            let leaf_call = if index == 1 { 0x3C } else { 0x3E };
+            assert_eq!(
+                thumb_call_target(&rom, handler + leaf_call),
+                leaves[index],
+                "{} animal state leaf {index}",
+                case.name
+            );
+            assert_eq!(
+                &rom[leaves[index]..leaves[index] + LEAF_BYTES[index].len()],
+                LEAF_BYTES[index],
+                "{} exact animal state field extractor {index}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
 fn native_animal_growth_stage_dispatches_all_five_families_on_all_targets() {
     for (case, (dispatch, slot, handler, table_literal, branches)) in CASES.iter().zip([
         (
@@ -7358,6 +14190,82 @@ fn native_count_animals_by_life_state_scans_only_livestock_capacity() {
                 "{} shared livestock life-state getter",
                 case.name
             );
+        }
+    }
+}
+
+#[test]
+fn native_livestock_death_summary_and_cleanup_slots_match_state_specific_flows() {
+    fn call_target(rom: &[u8], pc: usize) -> usize {
+        let hi = u16::from_le_bytes(rom[pc..pc + 2].try_into().unwrap());
+        let lo = u16::from_le_bytes(rom[pc + 2..pc + 4].try_into().unwrap());
+        assert_eq!(hi & 0xF800, 0xF000);
+        assert_eq!(lo & 0xF800, 0xF800);
+        let raw = (((hi & 0x7FF) as i32) << 12) | (((lo & 0x7FF) as i32) << 1);
+        (pc as i32 + 4 + ((raw << 9) >> 9)) as usize
+    }
+
+    for (case, (dispatch, first_slot, handlers, leaves)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x110,
+            [0x44A34, 0x44A4C, 0x44A64, 0x44A7C],
+            [0x14D9C, 0x15210, 0x1531C, 0x15790],
+        ),
+        (
+            0x3FAF0,
+            0x113,
+            [0x44CA4, 0x44CBC, 0x44CD4, 0x44CEC],
+            [0x14F28, 0x15330, 0x1543C, 0x15810],
+        ),
+        (
+            0x3F578,
+            0x110,
+            [0x446A8, 0x446C0, 0x446D8, 0x446F0],
+            [0x14C70, 0x15044, 0x15150, 0x15524],
+        ),
+        (
+            0x3F84C,
+            0x113,
+            [0x44A00, 0x44A18, 0x44A30, 0x44A48],
+            [0x14DD0, 0x151A4, 0x152B0, 0x15684],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, (handler, leaf)) in handlers.into_iter().zip(leaves).enumerate() {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + index) * 4
+                        ..dispatch + (first_slot + index) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x08000000 + handler as u32,
+                "{} livestock-death callable slot {:X}",
+                case.name,
+                first_slot + index
+            );
+            assert_eq!(
+                call_target(&rom, handler + 0x10),
+                leaf,
+                "{} livestock-death native leaf {index}",
+                case.name
+            );
+        }
+
+        // Cleanup functions 1 and 3 scan both the coop and barn records. At
+        // the same two instruction offsets they select life-state 2 (death
+        // from neglect) or life-state 1 (natural death), respectively.
+        for (leaf_index, state) in [(1, 2u16), (3, 1u16)] {
+            let leaf = leaves[leaf_index];
+            for offset in [0x3C, 0xD8] {
+                assert_eq!(
+                    u16::from_le_bytes(rom[leaf + offset..leaf + offset + 2].try_into().unwrap()),
+                    0x2800 | state,
+                    "{} cleanup leaf {leaf_index} state comparison at +{offset:X}",
+                    case.name
+                );
+            }
         }
     }
 }
@@ -7559,6 +14467,849 @@ fn native_current_catch_callables_share_one_record_and_exact_fields() {
             &[0x04, 0x7D]
         );
         assert_eq!(&rom[handlers[3] + 0x12..handlers[3] + 0x14], &[0x44, 0x7B]);
+    }
+}
+
+#[test]
+fn vanilla_fishing_reward_interprets_current_catch_size_as_centimeters() {
+    for (case, script_id, size_call) in [
+        (&CASES[0], 976usize, 0x11C),
+        (&CASES[1], 1044, 0x11F),
+        (&CASES[2], 976, 0x11C),
+        (&CASES[3], 1044, 0x11F),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entries = get_script_table(&rom).unwrap();
+        let entry = entries
+            .into_iter()
+            .find(|entry| entry.id() == script_id)
+            .unwrap_or_else(|| panic!("{} fishing reward script {script_id}", case.name));
+        let ScriptTableEntry::Script { data, backing, .. } = entry else {
+            panic!("{} fishing reward slot is null", case.name);
+        };
+        let script = decode_script_with_backing(data, backing).unwrap();
+        assert!(
+            script
+                .instructions
+                .contains(&Ins::Call(mary::ir::CallId(size_call))),
+            "{} fishing reward reads current catch size",
+            case.name
+        );
+        assert_eq!(
+            script
+                .instructions
+                .iter()
+                .filter(|instruction| **instruction == Ins::PushInt(100))
+                .count(),
+            2,
+            "{} fishing reward splits centimeters by 100",
+            case.name
+        );
+        assert!(
+            script.instructions.contains(&Ins::Div),
+            "{} meter quotient",
+            case.name
+        );
+        assert!(
+            script.instructions.contains(&Ins::Mod),
+            "{} centimeter remainder",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_mfomt_speakerless_talk_open_replaces_the_text_window_in_both_regions() {
+    for (case, (dispatch, normal_handler, speakerless_handler, normal_leaf, speakerless_leaf)) in [
+        (&CASES[1], (0x3FAF0, 0x40722, 0x4073A, 0x125C0, 0x126DC)),
+        (&CASES[3], (0x3F84C, 0x4047E, 0x40496, 0x12464, 0x12580)),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler, leaf, label) in [
+            (0x1F, normal_handler, normal_leaf, "normal"),
+            (0x20, speakerless_handler, speakerless_leaf, "speakerless"),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x08000000 + handler as u32,
+                "{} {label} talk-open slot",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, handler + 0x10),
+                leaf,
+                "{} {label} talk-open leaf",
+                case.name
+            );
+        }
+
+        // Both leaves destroy and null the two adjacent UI components at
+        // offsets +0xB4 and +0xB8. The speakerless variant then always creates
+        // one new text-window component at +0xAC.
+        assert_eq!(
+            &rom[speakerless_leaf + 0x08..speakerless_leaf + 0x18],
+            &[
+                0xB4, 0x34, 0x00, 0x26, 0x21, 0x68, 0x8E, 0x42, 0x07, 0xD0, 0x00, 0x29, 0x05, 0xD0,
+                0x48, 0x68
+            ],
+            "{} first attached component",
+            case.name
+        );
+        assert_eq!(
+            &rom[speakerless_leaf + 0x26..speakerless_leaf + 0x36],
+            &[
+                0xB8, 0x34, 0x00, 0x26, 0x21, 0x68, 0x8E, 0x42, 0x07, 0xD0, 0x00, 0x29, 0x05, 0xD0,
+                0x48, 0x68
+            ],
+            "{} second attached component",
+            case.name
+        );
+
+        let speakerless_creator = thumb_call_target(&rom, speakerless_leaf + 0x6A);
+        assert_eq!(
+            thumb_call_target(&rom, normal_leaf + 0x7E),
+            speakerless_creator,
+            "{} normal conditional creator branch one",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, normal_leaf + 0xD0),
+            speakerless_creator,
+            "{} normal conditional creator branch two",
+            case.name
+        );
+        assert_eq!(
+            &rom[normal_leaf + 0x50..normal_leaf + 0x56],
+            &[0x00, 0x78, 0x00, 0x28, 0x29, 0xD1],
+            "{} normal open reuses an existing text window",
+            case.name
+        );
+        assert_ne!(
+            &rom[speakerless_leaf + 0x50..speakerless_leaf + 0x56],
+            &[0x00, 0x78, 0x00, 0x28, 0x29, 0xD1],
+            "{} speakerless open must not reuse the text window",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_talk_window_open_close_and_reset_have_distinct_lifecycles() {
+    for (case, (dispatch, reset_leaf, open_leaf, close_slot, close_leaf)) in CASES.iter().zip([
+        (0x3F904, 0x125EC, 0x124D0, 0x20, 0x12658),
+        (0x3FAF0, 0x12778, 0x125C0, 0x21, 0x127E4),
+        (0x3F578, 0x124BC, 0x123A0, 0x20, 0x12528),
+        (0x3F84C, 0x1261C, 0x12464, 0x21, 0x12688),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, leaf, label) in [
+            (0x1E, reset_leaf, "reset"),
+            (0x1F, open_leaf, "open"),
+            (close_slot, close_leaf, "close"),
+        ] {
+            let handler = (u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            ) & !1) as usize
+                - 0x08000000;
+            assert_eq!(
+                thumb_call_target(&rom, handler + 0x10),
+                leaf,
+                "{} {label} talk-window leaf",
+                case.name
+            );
+        }
+
+        // Reset destroys and nulls the portrait/nameplate attachments at B4/B8,
+        // then the text-window object at AC, and clears active-state bit 0x0100.
+        assert_eq!(
+            &rom[reset_leaf + 0x06..reset_leaf + 0x0A],
+            &[0xB4, 0x35, 0x00, 0x26]
+        );
+        assert_eq!(
+            &rom[reset_leaf + 0x24..reset_leaf + 0x28],
+            &[0xB8, 0x35, 0x00, 0x26]
+        );
+        assert_eq!(
+            &rom[reset_leaf + 0x42..reset_leaf + 0x46],
+            &[0xAC, 0x35, 0x00, 0x26]
+        );
+        assert_eq!(
+            &rom[reset_leaf + 0x68..reset_leaf + 0x6C],
+            &[0xFF, 0xFE, 0, 0]
+        );
+
+        // Normal open performs the same B4/B8 cleanup, but the AC pointer is
+        // tested and reused when non-null rather than unconditionally replaced.
+        assert_eq!(
+            &rom[open_leaf + 0x08..open_leaf + 0x0C],
+            &[0xB4, 0x34, 0x00, 0x25]
+        );
+        assert_eq!(
+            &rom[open_leaf + 0x26..open_leaf + 0x2A],
+            &[0xB8, 0x34, 0x00, 0x25]
+        );
+        assert_eq!(
+            &rom[open_leaf + 0x42..open_leaf + 0x4E],
+            &[0x38, 0x1C, 0xAC, 0x30, 0x05, 0x68, 0x06, 0x1C, 0x00, 0x2D, 0x55, 0xD1],
+            "{} normal open AC reuse branch",
+            case.name
+        );
+
+        // Close checks AC and schedules four close/cleanup operations, then
+        // writes state 0x0F. It contains no AC-pointer nulling store.
+        assert_eq!(
+            &rom[close_leaf..close_leaf + 0x0E],
+            &[0x10, 0xB5, 0x44, 0x68, 0x20, 0x1C, 0xAC, 0x30, 0x00, 0x68, 0x00, 0x28, 0x0E, 0xD0],
+            "{} close AC presence check",
+            case.name
+        );
+        assert_eq!(
+            &rom[close_leaf + 0x24..close_leaf + 0x2A],
+            &[0x21, 0x1C, 0x9C, 0x31, 0x0F, 0x20],
+            "{} close state request",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_talk_message_variants_share_a_leaf_but_use_distinct_text_rates() {
+    for (case, (dispatch, first_slot, handlers, common_leaf)) in CASES.iter().zip([
+        (0x3F904, 0x21, [0x405DC, 0x4053E, 0x4058C], 0x1268C),
+        (0x3FAF0, 0x22, [0x40808, 0x4076A, 0x407B8], 0x12818),
+        (0x3F578, 0x21, [0x40250, 0x401B2, 0x40200], 0x1255C),
+        (0x3F84C, 0x22, [0x40564, 0x404C6, 0x40514], 0x126BC),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + index) * 4
+                        ..dispatch + (first_slot + index) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ) & !1,
+                0x08000000 + handler as u32,
+                "{} message variant slot {}",
+                case.name,
+                first_slot + index
+            );
+            let call_offset = if index == 0 { 0x44 } else { 0x42 };
+            assert_eq!(
+                thumb_call_target(&rom, handler + call_offset),
+                common_leaf,
+                "{} message variant shared leaf",
+                case.name
+            );
+        }
+
+        // Normal advances text at 0x0100, slow at 0x0040, and the visible
+        // continuation variant uses zero for immediate segment completion.
+        assert_eq!(
+            &rom[handlers[0] + 0x3E..handlers[0] + 0x44],
+            &[0x80, 0x22, 0x52, 0x00, 0x20, 0x1C]
+        );
+        assert_eq!(
+            &rom[handlers[1] + 0x3E..handlers[1] + 0x42],
+            &[0x10, 0x1C, 0x40, 0x22]
+        );
+        assert_eq!(
+            &rom[handlers[2] + 0x3E..handlers[2] + 0x42],
+            &[0x10, 0x1C, 0x00, 0x22]
+        );
+
+        // The common leaf stores dialogue state 0x10 after forwarding the
+        // selected text pointer and rate to the same text-window object.
+        assert_eq!(
+            &rom[common_leaf + 0x20..common_leaf + 0x28],
+            &[0x21, 0x1C, 0x9C, 0x31, 0x10, 0x20, 0x08, 0x60]
+        );
+    }
+}
+
+#[test]
+fn native_talk_choice_families_keep_target_slots_and_distinct_layout_leaves() {
+    let handler_lengths = [0xBC, 0xEC, 0x118, 0x90, 0xBC, 0xEC, 0x11C, 0x148];
+    for (case, (dispatch, first_slot, handlers, prompt_leaf, choice_leaf)) in CASES.iter().zip([
+        (
+            0x3F904,
+            0x24,
+            [
+                0x406C0, 0x4077C, 0x40868, 0x40980, 0x40A10, 0x40ACC, 0x40BB8, 0x40CD4,
+            ],
+            0x12860,
+            0x128D0,
+        ),
+        (
+            0x3FAF0,
+            0x25,
+            [
+                0x408EC, 0x409A8, 0x40A94, 0x40BAC, 0x40C3C, 0x40CF8, 0x40DE4, 0x40F00,
+            ],
+            0x129EC,
+            0x12A5C,
+        ),
+        (
+            0x3F578,
+            0x24,
+            [
+                0x40334, 0x403F0, 0x404DC, 0x405F4, 0x40684, 0x40740, 0x4082C, 0x40948,
+            ],
+            0x12730,
+            0x127A0,
+        ),
+        (
+            0x3F84C,
+            0x25,
+            [
+                0x40648, 0x40704, 0x407F0, 0x40908, 0x40998, 0x40A54, 0x40B40, 0x40C5C,
+            ],
+            0x12890,
+            0x12900,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, (handler, length)) in handlers.into_iter().zip(handler_lengths).enumerate() {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + (first_slot + index) * 4
+                        ..dispatch + (first_slot + index) * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ) & !1,
+                0x08000000 + handler as u32,
+                "{} choice-family slot {}",
+                case.name,
+                first_slot + index
+            );
+            let expected_leaf = if index < 3 { prompt_leaf } else { choice_leaf };
+            let matching_calls = (handler..handler + length)
+                .step_by(2)
+                .filter(|&pc| {
+                    let high = u16::from_le_bytes(rom[pc..pc + 2].try_into().unwrap());
+                    let low = u16::from_le_bytes(rom[pc + 2..pc + 4].try_into().unwrap());
+                    high & 0xF800 == 0xF000
+                        && low & 0xF800 == 0xF800
+                        && thumb_call_target(&rom, pc) == expected_leaf
+                })
+                .count();
+            assert_eq!(
+                matching_calls,
+                1,
+                "{} choice-family slot {} layout leaf",
+                case.name,
+                first_slot + index
+            );
+        }
+
+        // Prompt+choice layouts and choice-only layouts both request the same
+        // asynchronous dialogue state, but use different native constructors.
+        assert_eq!(
+            &rom[prompt_leaf + 0x60..prompt_leaf + 0x68],
+            &[0x21, 0x1C, 0x9C, 0x31, 0x14, 0x20, 0x08, 0x60]
+        );
+        assert_eq!(
+            &rom[choice_leaf + 0x9C..choice_leaf + 0xA4],
+            &[0x21, 0x1C, 0x9C, 0x31, 0x14, 0x20, 0x08, 0x60]
+        );
+    }
+}
+
+#[test]
+fn native_talk_choice_selection_pipeline_is_one_based_on_all_targets() {
+    for (case, (selection_mapper, input_update_call, result_accessor)) in CASES.iter().zip([
+        (0x50868usize, 0x4F970usize, 0x50DF0usize),
+        (0x52E20, 0x51F28, 0x533A8),
+        (0x505F4, 0x4F6FC, 0x50B7C),
+        (0x52AE0, 0x51BE8, 0x53068),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+
+        // The live menu-input update calls the target's selection mapper and
+        // immediately stores its return value into the active-selection word.
+        assert_eq!(
+            thumb_call_target(&rom, input_update_call),
+            selection_mapper,
+            "{} choice input mapper",
+            case.name
+        );
+        assert_eq!(
+            &rom[input_update_call + 4..input_update_call + 8],
+            &[0x20, 0x60, 0xA8, 0x42],
+            "{} mapped choice is retained as the active result",
+            case.name
+        );
+
+        // Every mapper has the same six terminal returns. Their control-flow
+        // order is 4, 5, 6, 2, 3, then the default/first entry 1; importantly,
+        // there is no successful zero-valued visible entry.
+        assert_eq!(
+            &rom[selection_mapper + 0x254..selection_mapper + 0x270],
+            &[
+                0x04, 0x20, 0x08, 0xE0, 0x05, 0x20, 0x06, 0xE0, 0x06, 0x20, 0x04, 0xE0, 0x02, 0x20,
+                0x02, 0xE0, 0x03, 0x20, 0x00, 0xE0, 0x01, 0x20, 0x02, 0xBC, 0x08, 0x47, 0x00, 0x00,
+            ],
+            "{} complete one-based choice-result terminals",
+            case.name
+        );
+
+        // The UI result adapter rejects only teardown mode 6; otherwise it
+        // returns the retained word at object offset 0x158 unchanged.
+        assert_eq!(
+            &rom[result_accessor..result_accessor + 0x18],
+            &[
+                0x00, 0xB5, 0x01, 0x68, 0x88, 0x68, 0x06, 0x28, 0x04, 0xD0, 0xAC, 0x22, 0x52, 0x00,
+                0x88, 0x18, 0x00, 0x68, 0x00, 0xE0, 0x00, 0x20, 0x02, 0xBC,
+            ],
+            "{} choice-result accessor",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_talk_nameplate_slots_resolve_character_or_bounded_text_and_clear() {
+    for (
+        case,
+        (
+            dispatch,
+            character_slot,
+            text_slot,
+            clear_slot,
+            character_handler,
+            text_handler,
+            clear_handler,
+            character_leaf,
+            text_leaf,
+            clear_leaf,
+            text_adapter,
+            clear_adapter,
+            bounded_renderer,
+            gate_offset,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904, 0x2C, 0x2D, 0x2E, 0x4062C, 0x4065A, 0x406A8, 0x126E4, 0x12720, 0x1274C,
+            0x50E68, 0x50E74, 0x50B50, 0x2210,
+        ),
+        (
+            0x3FAF0, 0x2D, 0x2E, 0x2F, 0x40858, 0x40886, 0x408D4, 0x12870, 0x128AC, 0x128D8,
+            0x53420, 0x5342C, 0x53108, 0x224C,
+        ),
+        (
+            0x3F578, 0x2C, 0x2D, 0x2E, 0x402A0, 0x402CE, 0x4031C, 0x125B4, 0x125F0, 0x1261C,
+            0x50BF4, 0x50C00, 0x508DC, 0x2210,
+        ),
+        (
+            0x3F84C, 0x2D, 0x2E, 0x2F, 0x405B4, 0x405E2, 0x40630, 0x12714, 0x12750, 0x1277C,
+            0x530E0, 0x530EC, 0x52DC8, 0x224C,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let pointer = |slot: usize| {
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        for (slot, handler, label) in [
+            (character_slot, character_handler, "character"),
+            (text_slot, text_handler, "text"),
+            (clear_slot, clear_handler, "clear"),
+        ] {
+            assert_eq!(
+                pointer(slot),
+                0x08000000 + handler as u32,
+                "{} nameplate {label} slot",
+                case.name
+            );
+        }
+
+        assert_eq!(
+            thumb_call_target(&rom, character_handler + 0x26),
+            character_leaf,
+            "{} character-name leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, text_handler + 0x40),
+            text_leaf,
+            "{} direct-text leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, clear_handler + 0x10),
+            clear_leaf,
+            "{} clear-nameplate leaf",
+            case.name
+        );
+
+        // The character leaf resolves its numeric character argument first,
+        // then forwards the resulting text through the same adapter used by
+        // the direct-text leaf.
+        assert_eq!(
+            thumb_call_target(&rom, character_leaf + 0x2A),
+            text_adapter,
+            "{} resolved character text adapter",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, text_leaf + 0x20),
+            text_adapter,
+            "{} direct nameplate text adapter",
+            case.name
+        );
+
+        // Character and direct-text setters both require bit 3 of the same
+        // family-specific UI state byte. Explicit clear is deliberately not
+        // gated, just as the adjacent portrait-clear operation is not gated.
+        assert_eq!(
+            &rom[text_leaf..text_leaf + 0x20],
+            &[
+                0x00, 0xB5, 0x42, 0x68, 0x10, 0x1C, 0xAC, 0x30, 0x03, 0x68, 0x00, 0x2B, 0x0A, 0xD0,
+                0x20, 0x38, 0x00, 0x68, 0x05, 0x4A, 0x80, 0x18, 0x00, 0x78, 0x00, 0x07, 0x00, 0x28,
+                0x02, 0xDA, 0x18, 0x1C,
+            ],
+            "{} nameplate object and bit-3 gate",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[text_leaf + 0x28..text_leaf + 0x2C].try_into().unwrap()),
+            gate_offset,
+            "{} nameplate gate field",
+            case.name
+        );
+        assert_eq!(
+            &rom[clear_leaf..clear_leaf + 0x0C],
+            &[0x00, 0xB5, 0x40, 0x68, 0xAC, 0x30, 0x00, 0x68, 0x00, 0x28, 0x01, 0xD0],
+            "{} ungated nameplate clear",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, clear_leaf + 0x0C),
+            clear_adapter,
+            "{} nameplate clear adapter",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, text_adapter + 0x04),
+            bounded_renderer,
+            "{} bounded nameplate renderer",
+            case.name
+        );
+
+        // strlen(text) must be in 1..=12. The renderer subtracts one and
+        // compares against 11; null, empty, and longer strings call the same
+        // lower-level clear operation reached through ClearTalkNameplate's
+        // adapter.
+        assert_eq!(
+            &rom[bounded_renderer + 0x20..bounded_renderer + 0x26],
+            &[0x70, 0x1E, 0x0B, 0x28, 0x03, 0xD9],
+            "{} one-through-twelve-byte limit",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, bounded_renderer + 0x28),
+            thumb_call_target(&rom, clear_adapter + 0x04),
+            "{} invalid-length lower-level clear path",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_talk_portrait_slots_forward_id_under_ui_gate_and_clear_independently() {
+    for (
+        case,
+        (
+            dispatch,
+            set_slot,
+            set_handler,
+            clear_handler,
+            set_leaf,
+            clear_leaf,
+            set_adapter,
+            clear_adapter,
+            gate_offset,
+        ),
+    ) in CASES.iter().zip([
+        (
+            0x3F904, 0x2F, 0x40E1C, 0x40E4A, 0x12760, 0x1278C, 0x50E50, 0x50E5C, 0x2210,
+        ),
+        (
+            0x3FAF0, 0x30, 0x41048, 0x41076, 0x128EC, 0x12918, 0x53408, 0x53414, 0x224C,
+        ),
+        (
+            0x3F578, 0x2F, 0x40A90, 0x40ABE, 0x12630, 0x1265C, 0x50BDC, 0x50BE8, 0x2210,
+        ),
+        (
+            0x3F84C, 0x30, 0x40DA4, 0x40DD2, 0x12790, 0x127BC, 0x530C8, 0x530D4, 0x224C,
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let pointer = |slot: usize| {
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        assert_eq!(
+            pointer(set_slot),
+            0x08000000 + set_handler as u32,
+            "{} set-portrait slot",
+            case.name
+        );
+        assert_eq!(
+            pointer(set_slot + 1),
+            0x08000000 + clear_handler as u32,
+            "{} clear-portrait slot",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, set_handler + 0x26),
+            set_leaf,
+            "{} set-portrait leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, clear_handler + 0x10),
+            clear_leaf,
+            "{} clear-portrait leaf",
+            case.name
+        );
+
+        // Set obtains the +AC talk object, tests bit 2 of a target-family state
+        // byte, then forwards the script portrait ID unchanged. This proves a
+        // real UI gate without assigning an unverified public meaning to it.
+        assert_eq!(
+            &rom[set_leaf..set_leaf + 0x20],
+            &[
+                0x00, 0xB5, 0x42, 0x68, 0x10, 0x1C, 0xAC, 0x30, 0x03, 0x68, 0x00, 0x2B, 0x0A, 0xD0,
+                0x20, 0x38, 0x00, 0x68, 0x05, 0x4A, 0x80, 0x18, 0x00, 0x78, 0x40, 0x07, 0x00, 0x28,
+                0x02, 0xDA, 0x18, 0x1C,
+            ],
+            "{} portrait object and bit-2 gate",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[set_leaf + 0x28..set_leaf + 0x2C].try_into().unwrap()),
+            gate_offset,
+            "{} portrait gate field",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, set_leaf + 0x20),
+            set_adapter,
+            "{} portrait set adapter",
+            case.name
+        );
+
+        // Clear uses the same +AC object but has no corresponding gate test or
+        // script argument; it reaches a distinct lower-level adapter.
+        assert_eq!(
+            &rom[clear_leaf..clear_leaf + 0x0C],
+            &[0x00, 0xB5, 0x40, 0x68, 0xAC, 0x30, 0x00, 0x68, 0x00, 0x28, 0x01, 0xD0],
+            "{} portrait clear object guard",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, clear_leaf + 0x0C),
+            clear_adapter,
+            "{} portrait clear adapter",
+            case.name
+        );
+        assert_ne!(
+            set_adapter, clear_adapter,
+            "{} set and clear portrait adapters",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_display_option_rows_map_buttons_clock_face_and_name_to_bits_zero_through_three() {
+    let layouts = [
+        ("fomt-us", "rom/fomt.gba", 0x4904, 0x2210, 0xE86D4, 0xE87A4),
+        (
+            "mfomt-us",
+            "rom/mfomt.gba",
+            0x4918,
+            0x224C,
+            0xF0C14,
+            0xF0CE4,
+        ),
+        (
+            "fomt-jp",
+            "rom/fomtjp.gba",
+            0x491C,
+            0x2210,
+            0xE7AF4,
+            0xE7BD8,
+        ),
+        (
+            "mfomt-jp",
+            "rom/mfomtjp.gba",
+            0x4930,
+            0x224C,
+            0xF0714,
+            0xF07F8,
+        ),
+    ];
+    let mut normalized_writer = None;
+    for (name, path, writer, field, labels, help) in layouts {
+        let rom = fs::read(local_rom_path(path)).unwrap();
+        let mut body = rom[writer..writer + 0x88].to_vec();
+        for literal in [0x1C, 0x38, 0x54, 0x78] {
+            assert_eq!(
+                u32::from_le_bytes(body[literal..literal + 4].try_into().unwrap()),
+                field,
+                "{name} option-byte field literal"
+            );
+            body[literal..literal + 4].fill(0);
+        }
+        if let Some(expected) = &normalized_writer {
+            assert_eq!(&body, expected, "{name} four-row bit writer");
+        } else {
+            normalized_writer = Some(body);
+        }
+
+        if name.ends_with("us") {
+            assert_eq!(&rom[labels..labels + 7], b"Buttons", "{name} row 0 label");
+            assert_eq!(
+                &rom[labels + 0x10..labels + 0x15],
+                b"Clock",
+                "{name} row 1 label"
+            );
+            assert_eq!(
+                &rom[labels + 0x20..labels + 0x24],
+                b"Face",
+                "{name} row 2 label"
+            );
+            assert_eq!(
+                &rom[labels + 0x28..labels + 0x2C],
+                b"Name",
+                "{name} row 3 label"
+            );
+            assert_eq!(&rom[help..help + 8], b"Controls", "{name} control help");
+            assert!(
+                rom[help..help + 0xD0]
+                    .windows(22)
+                    .any(|text| text == b"Show or hide the Clock"),
+                "{name} clock help"
+            );
+        } else {
+            assert_eq!(
+                &rom[labels..labels + 0x40],
+                &[
+                    0x88, 0xDA, 0x93, 0xAE, 0x90, 0xDD, 0x92, 0xE8, 0, 0, 0, 0, 0x8E, 0x9E, 0x8C,
+                    0x76, 0x82, 0xCC, 0x95, 0x5C, 0x8E, 0xA6, 0, 0, 0x82, 0xA0, 0x82, 0xE8, 0, 0,
+                    0, 0, 0x82, 0xC8, 0x82, 0xB5, 0, 0, 0, 0, 0x8A, 0xE7, 0x82, 0xCC, 0x95, 0x5C,
+                    0x8E, 0xA6, 0, 0, 0, 0, 0x96, 0xBC, 0x91, 0x4F, 0x82, 0xCC, 0x95, 0x5C, 0x8E,
+                    0xA6, 0, 0,
+                ],
+                "{name} movement/clock/face/name labels"
+            );
+            assert_eq!(
+                &rom[help..help + 4],
+                &[0x91, 0x80, 0x8D, 0xEC],
+                "{name} control help"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_talk_heart_indicator_slots_read_love_and_hide_independently() {
+    for (
+        case,
+        (dispatch, show_slot, hide_slot, show_handler, hide_handler, show_leaf, hide_leaf),
+    ) in CASES.iter().zip([
+        (0x3F904, 0x31, 0x32, 0x40E62, 0x40E90, 0x127A0, 0x1284C),
+        (0x3FAF0, 0x32, 0x33, 0x4108E, 0x410BC, 0x1292C, 0x129D8),
+        (0x3F578, 0x31, 0x32, 0x40AD6, 0x40B04, 0x12670, 0x1271C),
+        (0x3F84C, 0x32, 0x33, 0x40DEA, 0x40E18, 0x127D0, 0x1287C),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let pointer = |slot: usize| {
+            u32::from_le_bytes(
+                rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                    .try_into()
+                    .unwrap(),
+            )
+        };
+        assert_eq!(
+            pointer(show_slot),
+            0x08000000 + show_handler as u32,
+            "{} show-heart slot",
+            case.name
+        );
+        assert_eq!(
+            pointer(hide_slot),
+            0x08000000 + hide_handler as u32,
+            "{} hide-heart slot",
+            case.name
+        );
+
+        // The show opcode consumes one script argument before calling the
+        // target-specific leaf. The hide opcode consumes none and calls its
+        // own no-argument leaf, so it is not a speaker-selection operation.
+        assert_eq!(
+            &rom[show_handler..show_handler + 0x12],
+            &[
+                0xDA, 0x24, 0x64, 0x00, 0x2B, 0x19, 0x1A, 0x68, 0x90, 0x00, 0x40, 0x19, 0x01, 0x6A,
+                0x00, 0x2A, 0x01, 0xD0,
+            ],
+            "{} show-heart argument pop",
+            case.name
+        );
+        assert_eq!(
+            &rom[hide_handler..hide_handler + 0x0C],
+            &[0xD5, 0x21, 0x89, 0x00, 0x68, 0x18, 0x00, 0x68, 0x00, 0x28, 0x01, 0xD1],
+            "{} hide-heart no-argument dispatch",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, show_handler + 0x26),
+            show_leaf,
+            "{} show-heart leaf",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, hide_handler + 0x10),
+            hide_leaf,
+            "{} hide-heart leaf",
+            case.name
+        );
+
+        // The show leaf maps love points into seven display levels. These are
+        // the six inclusive upper bounds immediately below 10k..60k.
+        for (offset, upper_bound) in [
+            (0x48, 59_999u32),
+            (0x58, 49_999),
+            (0x68, 39_999),
+            (0x78, 29_999),
+            (0x88, 19_999),
+            (0xA8, 9_999),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[show_leaf + offset..show_leaf + offset + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                upper_bound,
+                "{} love-level bound at +{offset:#X}",
+                case.name
+            );
+        }
     }
 }
 
@@ -8899,6 +16650,1127 @@ fn native_tool_experience_addition_has_unsigned_upper_clamp_on_all_targets() {
         (0, 100, 100),
     ] {
         assert_eq!(add(old, delta), expected);
+    }
+}
+
+#[test]
+fn native_offset_entity_position_adds_signed_deltas_on_all_four_targets() {
+    for (case, dispatch, handler, leaf, resolver, updater) in [
+        (&CASES[0], 0x3F904, 0x3FF6C, 0x1223C, 0xD3914, 0x33B84),
+        (&CASES[1], 0x3FAF0, 0x40182, 0x1232C, 0xDB53C, 0x33F50),
+        (&CASES[2], 0x3F578, 0x3FBE0, 0x1210C, 0xD30CC, 0x33918),
+        (&CASES[3], 0x3F84C, 0x3FEDE, 0x121D0, 0xDB050, 0x33DC4),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + 0x15 * 4..dispatch + 0x15 * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} callable slot 0x15",
+            case.name
+        );
+
+        // The interpreter pops delta_y into r3, delta_x into r2, and entity_id
+        // into r1 before forwarding all three to the native leaf.
+        assert_eq!(
+            [
+                u16::from_le_bytes(rom[handler + 0x12..handler + 0x14].try_into().unwrap()),
+                u16::from_le_bytes(rom[handler + 0x24..handler + 0x26].try_into().unwrap()),
+                u16::from_le_bytes(rom[handler + 0x36..handler + 0x38].try_into().unwrap()),
+            ],
+            [0x6803, 0x6802, 0x6801],
+            "{} argument pop order",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x50), leaf);
+
+        // The leaf preserves r2/r3 as signed deltas, resolves entity_id from
+        // r1, loads signed halfword X/Y at +0x0A/+0x0E, adds the deltas, then
+        // calls the position updater with the existing facing byte at +0x30.
+        assert_eq!(&rom[leaf..leaf + 6], &[0x70, 0xB5, 0x15, 0x1C, 0x1E, 0x1C]);
+        assert_eq!(thumb_call_target(&rom, leaf + 0x10), resolver);
+        assert_eq!(
+            &rom[leaf + 0x1A..leaf + 0x2C],
+            &[
+                0x0A, 0x20, 0x22, 0x5E, 0x0E, 0x20, 0x23, 0x5E, 0x52, 0x19, 0x9B, 0x19, 0x20, 0x1C,
+                0x30, 0x30, 0x01, 0x78,
+            ],
+            "{} signed coordinate loads and additions",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, leaf + 0x2E), updater);
+    }
+}
+
+#[test]
+fn native_entity_coordinate_getters_return_signed_q16_integer_parts() {
+    for (case, dispatch, x_handler, y_handler, x_leaf, y_leaf, resolver) in [
+        (
+            &CASES[0], 0x3F904, 0x3FEB2, 0x3FEEC, 0x120A4, 0x120C4, 0xD3914,
+        ),
+        (
+            &CASES[1], 0x3FAF0, 0x400CC, 0x40104, 0x1218C, 0x121AC, 0xDB53C,
+        ),
+        (
+            &CASES[2], 0x3F578, 0x3FB26, 0x3FB60, 0x11F74, 0x11F94, 0xD30CC,
+        ),
+        (
+            &CASES[3], 0x3F84C, 0x3FE28, 0x3FE60, 0x12030, 0x12050, 0xDB050,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler, leaf) in [(3usize, x_handler, x_leaf), (4, y_handler, y_leaf)] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} coordinate slot {slot}",
+                case.name
+            );
+            assert_eq!(thumb_call_target(&rom, handler + 0x30), leaf);
+            assert_eq!(thumb_call_target(&rom, leaf + 0x0C), resolver);
+            assert_eq!(
+                &rom[leaf + 0x10..leaf + 0x18],
+                &[
+                    0x00,
+                    0x21,
+                    0x00,
+                    0x28,
+                    0x00,
+                    0xD0,
+                    if slot == 3 { 0x81 } else { 0xC1 },
+                    0x68
+                ],
+                "{} coordinate field and absent-entity zero fallback",
+                case.name
+            );
+            // ASR r0,r1,#16 returns the signed integer part of Q16.16.
+            assert_eq!(&rom[leaf + 0x18..leaf + 0x1A], &[0x08, 0x14]);
+        }
+    }
+}
+
+#[test]
+fn native_mfomt_fishing_record_getters_use_count_and_whole_centimeters() {
+    const LEAVES: &[u8] = &[
+        0xC9, 0x00, 0x40, 0x18, 0x00, 0x68, 0x70, 0x47, 0xC9, 0x00, 0x04, 0x30, 0x40, 0x18, 0x00,
+        0x68, 0x70, 0x47,
+    ];
+    for (case, dispatch, handlers, leaves, screen, divide, remainder) in [
+        (
+            &CASES[1],
+            0x3FAF0,
+            [0x458A8, 0x458DC],
+            [0xA1FA0, 0xA1FA8],
+            0x76FD8,
+            0xD8B76,
+            0xD8B02,
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            [0x45604, 0x45638],
+            [0xA19E0, 0xA19E8],
+            0x76BBC,
+            0xD868A,
+            0xD8616,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler, leaf) in [
+            (0x14Eusize, handlers[0], leaves[0]),
+            (0x14Fusize, handlers[1], leaves[1]),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} fishing-record slot {slot:#x}",
+                case.name
+            );
+            assert_eq!(thumb_call_target(&rom, handler + 0x28), leaf);
+        }
+        assert_eq!(&rom[leaves[0]..leaves[0] + LEAVES.len()], LEAVES);
+
+        // The record-book screen consumes the size getter, divides by 100 for
+        // meters, and takes remainder 100 for the centimeter component.
+        assert_eq!(thumb_call_target(&rom, screen), leaves[1]);
+        assert_eq!(&rom[screen + 0x0C..screen + 0x0E], &[0x64, 0x21]);
+        assert_eq!(thumb_call_target(&rom, screen + 0x0E), divide);
+        assert_eq!(&rom[screen + 0x46..screen + 0x48], &[0x64, 0x21]);
+        assert_eq!(thumb_call_target(&rom, screen + 0x48), remainder);
+    }
+}
+
+#[test]
+fn native_mfomt_maker_installation_queries_follow_blacksmith_order_completion() {
+    const COOP_BIT_3: &[u8] = &[0x40, 0x78, 0x00, 0x07, 0xC0, 0x0F, 0x70, 0x47];
+    const BARN_BIT_3: &[u8] = &[0x40, 0x78, 0x00, 0x07, 0xC0, 0x0F, 0x70, 0x47];
+    const BARN_BIT_4: &[u8] = &[0x40, 0x78, 0xC0, 0x06, 0xC0, 0x0F, 0x70, 0x47];
+
+    for (case, dispatch, handlers, leaves, completion, setters) in [
+        (
+            &CASES[1],
+            0x3FAF0,
+            [0x45830, 0x45852, 0x45874],
+            [0xC638, 0xCF74, 0xCF7C],
+            0x1140E,
+            [0xC8FC, 0xD414, 0xD42C],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            [0x4558C, 0x455AE, 0x455D0],
+            [0xC5EC, 0xCF28, 0xCF30],
+            0x113C2,
+            [0xC8B0, 0xD3C8, 0xD3E0],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, (handler, leaf)) in handlers.into_iter().zip(leaves).enumerate() {
+            let slot = 0x14B + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} maker-installation slot {slot:#x}",
+                case.name
+            );
+            assert_eq!(thumb_call_target(&rom, handler + 0x0E), leaf);
+            assert_eq!(
+                &rom[leaf..leaf + 8],
+                [COOP_BIT_3, BARN_BIT_3, BARN_BIT_4][index],
+                "{} maker-installation leaf {index}",
+                case.name
+            );
+        }
+
+        // The wrappers resolve the Coop at +0x420 or Barn at +0x600 before
+        // calling the field getter. They do not resolve an indexed incubator
+        // or pregnancy-stall record.
+        assert_eq!(
+            &rom[handlers[0] + 8..handlers[0] + 12],
+            &[0x84, 0x24, 0xE4, 0x00]
+        );
+        assert_eq!(
+            &rom[handlers[1] + 8..handlers[1] + 12],
+            &[0xC0, 0x22, 0xD2, 0x00]
+        );
+        assert_eq!(
+            &rom[handlers[2] + 8..handlers[2] + 12],
+            &[0xC0, 0x26, 0xF6, 0x00]
+        );
+
+        // The completed blacksmith-order object selects the Mayonnaise,
+        // Cheese and Yarn Maker orders (35, 36 and 37), rejects an already
+        // installed maker, and then sets the matching persistent facility bit.
+        assert_eq!(
+            u16::from_le_bytes(
+                rom[completion + 0x16..completion + 0x18]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x2824
+        );
+        assert_eq!(
+            u16::from_le_bytes(
+                rom[completion + 0x1E..completion + 0x20]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x2823
+        );
+        assert_eq!(
+            u16::from_le_bytes(
+                rom[completion + 0x2A..completion + 0x2C]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x2825
+        );
+        for (call_offset, setter) in [0x44, 0x5E, 0x78].into_iter().zip(setters) {
+            assert_eq!(
+                thumb_call_target(&rom, completion + call_offset),
+                setter,
+                "{} maker installation setter at +{call_offset:X}",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_entity_facing_accessors_and_opposite_mapping_match_all_targets() {
+    for (
+        case,
+        dispatch,
+        set_handler,
+        get_handler,
+        opposite_handler,
+        set_leaf,
+        get_leaf,
+        resolver,
+        facing_setter,
+        opposite_value_offsets,
+    ) in [
+        (
+            &CASES[0],
+            0x3F904,
+            0x3FF26,
+            0x4000A,
+            0x411C4,
+            0x120E4,
+            0x12114,
+            0xD3914,
+            0x32198,
+            [0x46, 0x5A, 0x6E, 0x82, 0x96],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0x4013C,
+            0x40220,
+            0x413EE,
+            0x121CC,
+            0x121FC,
+            0xDB53C,
+            0x32554,
+            [0x46, 0x5E, 0x76, 0x8E, 0xA6],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0x3FB9A,
+            0x3FC7E,
+            0x40E38,
+            0x11FB4,
+            0x11FE4,
+            0xD30CC,
+            0x31F2C,
+            [0x46, 0x5A, 0x6E, 0x82, 0x96],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0x3FE98,
+            0x3FF7C,
+            0x4114A,
+            0x12070,
+            0x120A0,
+            0xDB050,
+            0x323C8,
+            [0x46, 0x5E, 0x76, 0x8E, 0xA6],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler) in [
+            (5usize, set_handler),
+            (6, get_handler),
+            (0x13, opposite_handler),
+        ] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} facing slot {slot:#x}",
+                case.name
+            );
+        }
+
+        assert_eq!(thumb_call_target(&rom, set_handler + 0x3E), set_leaf);
+        assert_eq!(thumb_call_target(&rom, get_handler + 0x30), get_leaf);
+        assert_eq!(thumb_call_target(&rom, set_leaf + 0x0E), resolver);
+        assert_eq!(thumb_call_target(&rom, set_leaf + 0x24), facing_setter);
+        assert_eq!(thumb_call_target(&rom, get_leaf + 0x0C), resolver);
+
+        // Setter rejects only absent/unchanged entities, then forwards the
+        // unmasked byte. Getter reads byte +0x20 or returns zero when absent.
+        assert_eq!(
+            &rom[set_leaf + 0x12..set_leaf + 0x24],
+            &[
+                0x01, 0x1C, 0x00, 0x29, 0x07, 0xD0, 0x20, 0x30, 0x00, 0x78, 0xA0, 0x42, 0x03, 0xD0,
+                0x08, 0x1C, 0x21, 0x1C
+            ]
+        );
+        assert_eq!(
+            &rom[get_leaf + 0x10..get_leaf + 0x1C],
+            &[0x00, 0x28, 0x02, 0xD0, 0x20, 0x30, 0x00, 0x78, 0x00, 0xE0, 0x00, 0x20]
+        );
+
+        // Inputs 0,1,2,3 map to 1,0,3,2. The handler's default arm also
+        // writes 1, so out-of-domain values are not preserved or rejected.
+        for (offset, value) in opposite_value_offsets.into_iter().zip([1u8, 0, 3, 2, 1]) {
+            assert_eq!(
+                &rom[opposite_handler + offset..opposite_handler + offset + 2],
+                &[value, 0x21]
+            );
+        }
+    }
+}
+
+#[test]
+fn native_entity_sprite_priority_stores_byte_and_renders_low_two_bits() {
+    const RENDER_PRIORITY_PACKING: &[u8] = &[
+        0x40, 0x46, 0x21, 0x30, 0x00, 0x78, 0x03, 0x21, 0x08, 0x40, 0x84, 0x00, 0x04, 0x43, 0x01,
+        0x01, 0x0C, 0x43, 0x80, 0x01, 0x04, 0x43,
+    ];
+    for (case, dispatch, handler, leaf, resolver, renderer) in [
+        (&CASES[0], 0x3F904, 0x3FFC4, 0x12154, 0xD3914, 0x327D4),
+        (&CASES[1], 0x3FAF0, 0x401DA, 0x12240, 0xDB53C, 0x32B90),
+        (&CASES[2], 0x3F578, 0x3FC38, 0x12024, 0xD30CC, 0x32568),
+        (&CASES[3], 0x3F84C, 0x3FF36, 0x120E4, 0xDB050, 0x32A04),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[dispatch + 7 * 4..dispatch + 7 * 4 + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + handler as u32,
+            "{} priority slot",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x3E), leaf);
+        assert_eq!(thumb_call_target(&rom, leaf + 0x0E), resolver);
+        // If lookup succeeds, the native leaf stores the unmodified low byte
+        // at AActorEntity +0x21; no range check or immediate refresh occurs.
+        assert_eq!(
+            &rom[leaf + 0x12..leaf + 0x1A],
+            &[0x00, 0x28, 0x01, 0xD0, 0x21, 0x30, 0x04, 0x70]
+        );
+        // The render path masks that byte with 3 and replicates the two-bit
+        // OBJ priority into the packed attributes of all four actor sprites.
+        assert_eq!(
+            &rom[renderer..renderer + RENDER_PRIORITY_PACKING.len()],
+            RENDER_PRIORITY_PACKING
+        );
+    }
+}
+
+#[test]
+fn native_entity_movement_normal_raw_and_wait_contracts_match_all_targets() {
+    for (case, dispatch, handlers, leaves, resolver, setup_x, setup_y) in [
+        (
+            &CASES[0],
+            0x3F904,
+            [0x40044, 0x4009E, 0x400F6, 0x40150, 0x401A8],
+            [0x12174, 0x1219C, 0x121C4],
+            0xD3914,
+            0x32308,
+            0x3233C,
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            [0x40258, 0x402B2, 0x4030A, 0x40364, 0x403BC],
+            [0x12260, 0x12288, 0x122B0],
+            0xDB53C,
+            0x326C4,
+            0x326F8,
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            [0x3FCB8, 0x3FD12, 0x3FD6A, 0x3FDC4, 0x3FE1C],
+            [0x12044, 0x1206C, 0x12094],
+            0xD30CC,
+            0x3209C,
+            0x320D0,
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            [0x3FFB4, 0x4000E, 0x40066, 0x400C0, 0x40118],
+            [0x12104, 0x1212C, 0x12154],
+            0xDB050,
+            0x32538,
+            0x3256C,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = 8 + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} movement slot {slot:#x}",
+                case.name
+            );
+        }
+
+        // Normal X/Y handlers shift the speed operand left by 16 before the
+        // shared leaf; Raw handlers pass the original integer unchanged.
+        assert_eq!(&rom[handlers[0] + 0x50..handlers[0] + 0x52], &[0x1B, 0x04]);
+        assert_eq!(thumb_call_target(&rom, handlers[0] + 0x52), leaves[0]);
+        assert_eq!(thumb_call_target(&rom, handlers[1] + 0x50), leaves[0]);
+        assert_eq!(&rom[handlers[2] + 0x50..handlers[2] + 0x52], &[0x1B, 0x04]);
+        assert_eq!(thumb_call_target(&rom, handlers[2] + 0x52), leaves[1]);
+        assert_eq!(thumb_call_target(&rom, handlers[3] + 0x50), leaves[1]);
+
+        for leaf in leaves {
+            let call_offset = if leaf == leaves[2] { 0x0E } else { 0x10 };
+            assert_eq!(thumb_call_target(&rom, leaf + call_offset), resolver);
+        }
+        assert_eq!(thumb_call_target(&rom, leaves[0] + 0x1C), setup_x);
+        assert_eq!(thumb_call_target(&rom, leaves[1] + 0x1C), setup_y);
+        assert_eq!(thumb_call_target(&rom, handlers[4] + 0x26), leaves[2]);
+
+        // Wait stores the resolved entity pointer at event state +0xE4. Only
+        // a live entity causes interpreter state 0x16 to be written at +0x9C.
+        assert_eq!(
+            &rom[leaves[2] + 0x12..leaves[2] + 0x24],
+            &[
+                0x21, 0x1C, 0xE4, 0x31, 0x08, 0x60, 0x00, 0x28, 0x02, 0xD0, 0x48, 0x39, 0x16, 0x20,
+                0x08, 0x60, 0x10, 0xBC
+            ]
+        );
+    }
+}
+
+#[test]
+fn native_entity_aux_profile_and_effect_slots_match_all_targets() {
+    for (case, dispatch, handlers, leaves, resolver, native) in [
+        (
+            &CASES[0],
+            0x3F904,
+            [0x402FE, 0x40278, 0x402D0],
+            [0x122BC, 0x12274, 0x122A0],
+            0xD3914,
+            [0x323E0, 0x32384, 0x323C8],
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            [0x40512, 0x4048C, 0x404E4],
+            [0x123AC, 0x12364, 0x12390],
+            0xDB53C,
+            [0x3279C, 0x32740, 0x32784],
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            [0x3FF72, 0x3FEEC, 0x3FF44],
+            [0x1218C, 0x12144, 0x12170],
+            0xD30CC,
+            [0x32174, 0x32118, 0x3215C],
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            [0x4026E, 0x401E8, 0x40240],
+            [0x12250, 0x12208, 0x12234],
+            0xDB050,
+            [0x32610, 0x325B4, 0x325F8],
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, handler) in handlers.into_iter().enumerate() {
+            let slot = 0x10 + index;
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} entity effect slot {slot:#x}",
+                case.name
+            );
+        }
+        assert_eq!(thumb_call_target(&rom, handlers[0] + 0x3E), leaves[0]);
+        assert_eq!(thumb_call_target(&rom, handlers[1] + 0x50), leaves[1]);
+        assert_eq!(thumb_call_target(&rom, handlers[2] + 0x26), leaves[2]);
+        for (leaf, native_leaf, call_offset) in [
+            (leaves[0], native[0], 0x18),
+            (leaves[1], native[1], 0x20),
+            (leaves[2], native[2], 0x14),
+        ] {
+            let resolver_offset = if leaf == leaves[2] {
+                0x0C
+            } else {
+                if leaf == leaves[1] {
+                    0x10
+                } else {
+                    0x0E
+                }
+            };
+            assert_eq!(thumb_call_target(&rom, leaf + resolver_offset), resolver);
+            assert_eq!(thumb_call_target(&rom, leaf + call_offset), native_leaf);
+        }
+
+        // Start converts every nonzero third operand to one before the native
+        // routine converts false/true into active modes 1/2.
+        assert_eq!(
+            &rom[leaves[1] + 0x18..leaves[1] + 0x1E],
+            &[0x62, 0x42, 0x22, 0x43, 0xD2, 0x0F]
+        );
+        assert_eq!(
+            &rom[native[1]..native[1] + 6],
+            &[0x30, 0xB5, 0x12, 0x06, 0x15, 0x0E]
+        );
+        assert_eq!(
+            &rom[native[1] + 0x26..native[1] + 0x32],
+            &[0x01, 0x23, 0x00, 0x2D, 0x00, 0xD0, 0x02, 0x23, 0x22, 0x1C, 0x8A, 0x32]
+        );
+
+        // Stop immediately clears active-mode bits 0-1 at controller +0x8A.
+        assert_eq!(
+            &rom[native[2]..native[2] + 0x14],
+            &[
+                0x00, 0xB5, 0x02, 0x69, 0x00, 0x2A, 0x05, 0xD0, 0x8A, 0x32, 0x11, 0x78, 0x04, 0x20,
+                0x40, 0x42, 0x08, 0x40, 0x10, 0x70
+            ]
+        );
+        // Auxiliary profile stores its unvalidated low byte at controller +0x88.
+        assert_eq!(
+            &rom[native[0]..native[0] + 0x0E],
+            &[0x00, 0xB5, 0x00, 0x69, 0x00, 0x28, 0x01, 0xD0, 0x88, 0x30, 0x01, 0x70, 0x01, 0xBC]
+        );
+    }
+}
+
+#[test]
+fn native_entity_location_and_change_map_use_packed_local_coordinates() {
+    let reference = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    for (
+        case,
+        dispatch,
+        get_handler,
+        get_leaf,
+        change_handler,
+        change_leaf,
+        resolver,
+        transition,
+    ) in [
+        (
+            &CASES[0], 0x3F904, 0x41260, 0x12134, 0x40344, 0x122E0, 0xD3914, 0xD7F08,
+        ),
+        (
+            &CASES[1], 0x3FAF0, 0x4149E, 0x1221C, 0x40558, 0x123D0, 0xDB53C, 0xE0340,
+        ),
+        (
+            &CASES[2], 0x3F578, 0x40ED4, 0x12004, 0x3FFB8, 0x121B0, 0xD30CC, 0xD76C0,
+        ),
+        (
+            &CASES[3], 0x3F84C, 0x411FA, 0x120C0, 0x402B4, 0x12274, 0xDB050, 0xDFE54,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (slot, handler) in [(0x14usize, get_handler), (0x16, change_handler)] {
+            assert_eq!(
+                u32::from_le_bytes(
+                    rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                        .try_into()
+                        .unwrap()
+                ),
+                0x0800_0000 + handler as u32,
+                "{} map callable slot {slot:#x}",
+                case.name
+            );
+        }
+        assert_eq!(thumb_call_target(&rom, get_handler + 0x30), get_leaf);
+        assert_eq!(thumb_call_target(&rom, get_leaf + 0x0C), resolver);
+        let missing_map = if case.target.contains("MFOMT") {
+            0x23A
+        } else {
+            0x234
+        };
+        if case.target.contains("MFOMT") {
+            assert_eq!(
+                &rom[get_leaf + 0x12..get_leaf + 0x18],
+                &[0x00, 0x28, 0x00, 0xD0, 0x81, 0x88]
+            );
+            assert_eq!(
+                u32::from_le_bytes(rom[get_leaf + 0x20..get_leaf + 0x24].try_into().unwrap()),
+                missing_map
+            );
+        } else {
+            assert_eq!(
+                &rom[get_leaf + 0x10..get_leaf + 0x14],
+                &[0x8D, 0x21, 0x89, 0x00]
+            );
+            assert_eq!(
+                &rom[get_leaf + 0x14..get_leaf + 0x1A],
+                &[0x00, 0x28, 0x00, 0xD0, 0x81, 0x88]
+            );
+        }
+
+        assert_eq!(thumb_call_target(&rom, change_handler + 0x4C), change_leaf);
+        // Before the target-specific transition call, all targets use the
+        // same packing operations: map10, signed-x16 and signed-y16.
+        assert_eq!(
+            &rom[change_leaf..change_leaf + 0x8A],
+            &reference[0x122E0..0x1236A]
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[change_leaf + 0xA4..change_leaf + 0xA8]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x3FF
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[change_leaf + 0xA8..change_leaf + 0xAC]
+                    .try_into()
+                    .unwrap()
+            ),
+            0xFFFFFC00
+        );
+        assert_eq!(thumb_call_target(&rom, change_leaf + 0x90), transition);
+    }
+}
+
+#[test]
+fn native_mfomt_map_registry_query_scans_counted_records_in_both_regions() {
+    let mut handlers = Vec::new();
+    let mut leaves = Vec::new();
+
+    for (case, dispatch, expected_handler, leaf) in [
+        (&CASES[1], 0x3FAF0usize, 0x45924usize, 0x9F890usize),
+        (&CASES[3], 0x3F84C, 0x45680, 0x9F2D0),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entry = dispatch + 0x150 * 4;
+        assert_eq!(
+            u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+            0x0800_0000 + expected_handler as u32,
+            "{} map-registry callable slot",
+            case.name
+        );
+
+        // The handler pops one halfword map ID, scans a counted collection,
+        // copies each 20-byte record through the leaf, compares field +0,
+        // and pushes one on a match or zero after exhausting the collection.
+        assert_eq!(
+            &rom[expected_handler + 0x0C..expected_handler + 0x16],
+            &[0x98, 0x00, 0x04, 0x38, 0x10, 0x18, 0x00, 0x88, 0x14, 0x90]
+        );
+        assert_eq!(
+            &rom[expected_handler + 0x84..expected_handler + 0x9C],
+            &[
+                0x90, 0x42, 0x0F, 0xD1, 0x3A, 0x68, 0x63, 0x2A, 0x14, 0xD8, 0x90, 0x00, 0x40, 0x44,
+                0x01, 0x21, 0x01, 0x60, 0x50, 0x1C, 0x38, 0x60, 0x0D, 0xE0
+            ]
+        );
+        assert_eq!(
+            &rom[expected_handler + 0xCC..expected_handler + 0xE0],
+            &[
+                0x3B, 0x68, 0x63, 0x2B, 0x00, 0xD9, 0x47, 0xE1, 0x98, 0x00, 0x40, 0x44, 0x00, 0x21,
+                0x01, 0x60, 0x58, 0x1C, 0x40, 0xE1
+            ]
+        );
+        assert_eq!(
+            [
+                u32::from_le_bytes(
+                    rom[expected_handler + 0x9C..expected_handler + 0xA0]
+                        .try_into()
+                        .unwrap(),
+                ),
+                u32::from_le_bytes(
+                    rom[expected_handler + 0xA0..expected_handler + 0xA4]
+                        .try_into()
+                        .unwrap(),
+                ),
+                u32::from_le_bytes(
+                    rom[expected_handler + 0xA4..expected_handler + 0xA8]
+                        .try_into()
+                        .unwrap(),
+                ),
+            ],
+            [0x2C57, 0xFFFFF000, 0x2250],
+            "{} registry count/record-mask/record-base literals",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, expected_handler + 0x7A), leaf);
+
+        handlers.push(rom[expected_handler..expected_handler + 0xE4].to_vec());
+        leaves.push(rom[leaf..leaf + 74].to_vec());
+    }
+
+    // The only regional handler difference is the relocated BL encoding.
+    let jp_call = handlers[1][0x7C..0x7E].to_vec();
+    handlers[0][0x7C..0x7E].copy_from_slice(&jp_call);
+    assert_eq!(handlers[0], handlers[1]);
+    assert_eq!(leaves[0], leaves[1]);
+    assert_eq!(
+        &leaves[0][..10],
+        &[0x10, 0xB5, 0x93, 0x00, 0x9B, 0x18, 0x9B, 0x00, 0xC0, 0x18],
+        "record address is base + index * 20"
+    );
+    assert_eq!(&leaves[0][10..14], &[0x02, 0x88, 0x0A, 0x80]);
+}
+
+#[test]
+fn native_link_milestone_callables_keep_separate_local_and_received_bitsets() {
+    let mut bodies = Vec::new();
+    for (case, dispatch, first_slot, starts, local_offset, received_offset) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0x77usize,
+            [0x41A44usize, 0x41A8C, 0x41AD4, 0x41B18],
+            0x21DCu32,
+            0x21D4u32,
+        ),
+        (
+            &CASES[2],
+            0x3F578,
+            0x77,
+            [0x416B8, 0x41700, 0x41748, 0x4178C],
+            0x21DC,
+            0x21D4,
+        ),
+        (
+            &CASES[1],
+            0x3FAF0,
+            0x7A,
+            [0x41C8C, 0x41CD4, 0x41D1C, 0x41D60],
+            0x2215,
+            0x220C,
+        ),
+        (
+            &CASES[3],
+            0x3F84C,
+            0x7A,
+            [0x419E8, 0x41A30, 0x41A78, 0x41ABC],
+            0x2215,
+            0x220C,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for (index, &start) in starts.iter().enumerate() {
+            let entry = dispatch + (first_slot + index) * 4;
+            assert_eq!(
+                u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+                0x0800_0000 + start as u32,
+                "{} link-milestone slot {:#x}",
+                case.name,
+                first_slot + index
+            );
+        }
+
+        assert_eq!(
+            u32::from_le_bytes(rom[starts[0] + 0x44..starts[0] + 0x48].try_into().unwrap()),
+            local_offset,
+            "{} local getter bitset",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(rom[starts[1] + 0x44..starts[1] + 0x48].try_into().unwrap()),
+            received_offset,
+            "{} received getter bitset",
+            case.name
+        );
+        for start in [starts[2], starts[3]] {
+            assert_eq!(
+                u32::from_le_bytes(rom[start + 0x40..start + 0x44].try_into().unwrap()),
+                local_offset,
+                "{} local writer bitset",
+                case.name
+            );
+        }
+
+        // Both getters compute byte=id/8 and bit=id%8, then normalize to 0/1.
+        for start in [starts[0], starts[1]] {
+            assert_eq!(
+                &rom[start + 0x24..start + 0x40],
+                &[
+                    0x1A, 0x1C, 0x00, 0x2B, 0x00, 0xDA, 0xDA, 0x1D, 0xD2, 0x10, 0xD1, 0x00, 0x59,
+                    0x1A, 0x04, 0x4B, 0xC0, 0x18, 0x80, 0x18, 0x02, 0x78, 0x0A, 0x41, 0x01, 0x20,
+                    0x02, 0x40,
+                ],
+                "{} link getter bit arithmetic",
+                case.name
+            );
+        }
+        // The writers target only the local bitset: OR sets, BIC clears.
+        assert_eq!(
+            &rom[starts[2] + 0x32..starts[2] + 0x3C],
+            &[0x01, 0x20, 0x88, 0x40, 0x11, 0x78, 0x08, 0x43, 0x10, 0x70]
+        );
+        assert_eq!(
+            &rom[starts[3] + 0x32..starts[3] + 0x3C],
+            &[0x01, 0x21, 0x81, 0x40, 0x10, 0x78, 0x88, 0x43, 0x10, 0x70]
+        );
+
+        bodies.push([
+            rom[starts[0]..starts[0] + 72].to_vec(),
+            rom[starts[1]..starts[1] + 72].to_vec(),
+            rom[starts[2]..starts[2] + 68].to_vec(),
+            rom[starts[3]..starts[3] + 68].to_vec(),
+        ]);
+    }
+
+    assert_eq!(bodies[0], bodies[1], "FoMT regional implementations");
+    assert_eq!(bodies[2], bodies[3], "MFoMT regional implementations");
+}
+
+#[test]
+fn native_farming_tutorial_callable_forwards_one_kind_and_waits_on_all_targets() {
+    for (case, dispatch, slot, handler, lifecycle, tutorial_task) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0xA9usize,
+            0x425E2usize,
+            0x4168Ausize,
+            0x13EF8usize,
+        ),
+        (&CASES[2], 0x3F578, 0xA9, 0x42256, 0x412FE, 0x13DCC),
+        (&CASES[1], 0x3FAF0, 0xAC, 0x42828, 0x418CE, 0x14084),
+        (&CASES[3], 0x3F84C, 0xAC, 0x42584, 0x4162A, 0x13F2C),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entry = dispatch + slot * 4;
+        assert_eq!(
+            u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+            0x0800_0000 + handler as u32,
+            "{} farming-tutorial slot",
+            case.name
+        );
+        // Exactly one VM word is loaded and the stack depth is decremented.
+        assert_eq!(
+            &rom[handler..handler + 0x16],
+            &[
+                0xDA, 0x26, 0x76, 0x00, 0xAB, 0x19, 0x1A, 0x68, 0x90, 0x00, 0x40, 0x19, 0x01, 0x6A,
+                0x00, 0x2A, 0x01, 0xD0, 0x50, 0x1E, 0x18, 0x60,
+            ],
+            "{} one tutorial-kind operand",
+            case.name
+        );
+        // If no modal task is active, create/run the tutorial task, then pass
+        // through the same lifecycle helper again to wait for its completion.
+        assert_eq!(thumb_call_target(&rom, handler + 0x22), lifecycle);
+        assert_eq!(thumb_call_target(&rom, handler + 0x26), tutorial_task);
+        assert_eq!(thumb_call_target(&rom, handler + 0x2A), lifecycle);
+    }
+}
+
+#[test]
+fn native_staff_credits_installs_region_state_and_yields_on_all_targets() {
+    for (
+        case,
+        dispatch,
+        slot,
+        handler,
+        lifecycle,
+        transition_task,
+        selector,
+        task_update,
+        transition_object_ctor,
+        credits_viewer_ctor,
+        credits_lines,
+    ) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0xA8usize,
+            0x425CAusize,
+            0x4168Ausize,
+            0x13E6Cusize,
+            0x2Eu8,
+            0xDBC0Cusize,
+            0x77C40usize,
+            0x773E8usize,
+            0x0FC4B4usize,
+        ),
+        (
+            &CASES[2], 0x3F578, 0xA8, 0x4223E, 0x412FE, 0x13D40, 0x2D, 0xDB3C0, 0x777C8, 0x77020,
+            0x0FBC88,
+        ),
+        (
+            &CASES[1], 0x3FAF0, 0xAB, 0x42810, 0x418CE, 0x13FF8, 0x2E, 0xE4130, 0x7CA04, 0x7C248,
+            0x105150,
+        ),
+        (
+            &CASES[3], 0x3F84C, 0xAB, 0x4256C, 0x4162A, 0x13EA0, 0x2D, 0xE3C40, 0x7C5C4, 0x7BE0C,
+            0x10506C,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entry = dispatch + slot * 4;
+        assert_eq!(
+            u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+            0x0800_0000 + handler as u32,
+            "{} staff-credits slot",
+            case.name
+        );
+
+        // This handler consumes no VM operand. It checks the active state
+        // object, yields if necessary, installs the regional state, and yields.
+        assert_eq!(
+            &rom[handler..handler + 0x0C],
+            &[0xD5, 0x24, 0xA4, 0x00, 0x28, 0x19, 0x00, 0x68, 0x00, 0x28, 0x01, 0xD1],
+            "{} parameterless state-object check",
+            case.name
+        );
+        assert_eq!(thumb_call_target(&rom, handler + 0x0C), lifecycle);
+        assert_eq!(thumb_call_target(&rom, handler + 0x10), transition_task);
+        assert_eq!(thumb_call_target(&rom, handler + 0x14), lifecycle);
+
+        // The native task constructor embeds the regional selector and writes
+        // 24 to the game-state transition field after replacing the object.
+        // The internal selector is 0x2E in US and 0x2D in JP because the
+        // region-specific native state enum is shifted; it is not a Mary ID.
+        assert_eq!(
+            &rom[transition_task..transition_task + 0x0C],
+            &[0xF0, 0xB5, 0x87, 0xB0, 0x46, 0x68, selector, 0x20, 0x00, 0x90, 0x14, 0x20],
+            "{} regional state constructor prefix",
+            case.name
+        );
+        assert_eq!(
+            &rom[transition_task + 0x62..transition_task + 0x68],
+            &[0x31, 0x1C, 0x9C, 0x31, 0x18, 0x20],
+            "{} transition value 24",
+            case.name
+        );
+
+        // The installed task is not a passive marker. Its vtable update method
+        // transfers ownership of the wrapped state object into a dedicated
+        // credits viewer. The wrapper allocates 0xE6 << 3 = 0x730 bytes and
+        // the viewer constructor binds the target's staff-credit line table.
+        let task_vtable = u32::from_le_bytes(
+            rom[transition_task + 0x88..transition_task + 0x8C]
+                .try_into()
+                .unwrap(),
+        );
+        let task_vtable = (task_vtable - 0x0800_0000) as usize;
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[task_vtable + 0x0C..task_vtable + 0x10]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0001 + task_update as u32,
+            "{} transition-task update vtable",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, task_update + 0x16),
+            transition_object_ctor,
+            "{} dedicated transition-object constructor",
+            case.name
+        );
+        assert_eq!(
+            &rom[transition_object_ctor + 0x0A..transition_object_ctor + 0x0E],
+            &[0xE6, 0x20, 0xC0, 0x00],
+            "{} transition-object allocation size 0x730",
+            case.name
+        );
+        assert_eq!(
+            thumb_call_target(&rom, transition_object_ctor + 0x12),
+            credits_viewer_ctor,
+            "{} credits-viewer constructor",
+            case.name
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                rom[credits_viewer_ctor + 0xA4..credits_viewer_ctor + 0xA8]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x0800_0000 + credits_lines as u32,
+            "{} staff-credits line table",
+            case.name
+        );
+        let first_credit_line =
+            u32::from_le_bytes(rom[credits_lines..credits_lines + 4].try_into().unwrap());
+        assert!(
+            (0x0800_0000..0x0A00_0000).contains(&first_credit_line),
+            "{} first staff-credit line pointer",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_can_discard_held_article_checks_presence_kind_and_article_policy() {
+    for (case, dispatch, slot, handler, held_none, held_kind, article_id, can_discard) in [
+        (
+            &CASES[0],
+            0x3F904usize,
+            0x4Busize,
+            0x412B8usize,
+            0x0F190usize,
+            0x0F204usize,
+            0x0F258usize,
+            0x0DFB0usize,
+        ),
+        (
+            &CASES[2], 0x3F578, 0x4B, 0x40F2C, 0x0F170, 0x0F1E4, 0x0F238, 0x0DF90,
+        ),
+        (
+            &CASES[1], 0x3FAF0, 0x4C, 0x414FC, 0x0F26C, 0x0F2E0, 0x0F334, 0x0E024,
+        ),
+        (
+            &CASES[3], 0x3F84C, 0x4C, 0x41258, 0x0F220, 0x0F294, 0x0F2E8, 0x0DFD8,
+        ),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let entry = dispatch + slot * 4;
+        assert_eq!(
+            u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()),
+            0x0800_0000 + handler as u32,
+            "{} held-article discard slot",
+            case.name
+        );
+
+        // The wrapper has no VM operand. It queries the held-item object in
+        // this order: empty, kind, article ID, then Article::CanBeDiscarded.
+        assert_eq!(thumb_call_target(&rom, handler + 0x0E), held_none);
+        assert_eq!(thumb_call_target(&rom, handler + 0x1A), held_kind);
+        assert_eq!(thumb_call_target(&rom, handler + 0x26), article_id);
+        assert_eq!(thumb_call_target(&rom, handler + 0x30), can_discard);
+        assert_eq!(
+            &rom[handler + 0x12..handler + 0x1A],
+            &[0x00, 0x06, 0x00, 0x28, 0x21, 0xD1, 0x20, 0x1C],
+            "{} empty-held-item gate",
+            case.name
+        );
+        assert_eq!(
+            &rom[handler + 0x1E..handler + 0x24],
+            &[0x06, 0x1C, 0x01, 0x2E, 0x1B, 0xD1],
+            "{} article-kind gate",
+            case.name
+        );
+        assert_eq!(
+            &rom[handler + 0x34..handler + 0x3A],
+            &[0x00, 0x06, 0x00, 0x28, 0x10, 0xD0],
+            "{} discard-policy boolean gate",
+            case.name
+        );
+        // Success pushes the already-proven kind value 1; every rejected path
+        // joins the common false path that pushes 0.
+        assert_eq!(
+            &rom[handler + 0x4E..handler + 0x54],
+            &[0x98, 0x00, 0x10, 0x18, 0x06, 0x60]
+        );
+        assert_eq!(
+            &rom[handler + 0x5C..handler + 0x60],
+            &[0x29, 0x1C, 0x24, 0x31]
+        );
     }
 }
 

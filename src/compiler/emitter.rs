@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     ast::{AssignOperation, ConstVal, Expr, NameAccess, NameRef, Stmt, SwitchCase},
     const_scope::ConstScope,
-    ir::{CaseEnum, Ins, IntValue, JumpId, Script, StrValue, VarId},
+    ir::{is_encodable_int, CaseEnum, Ins, IntValue, JumpId, Script, StrValue, VarId},
 };
 
 use super::{
@@ -113,6 +113,14 @@ impl Emit {
     }
 
     fn ins(&mut self, ins: Ins) {
+        let value = match ins {
+            Ins::PushInt(value) | Ins::Case(_, CaseEnum::Val(value)) => Some(value),
+            _ => None,
+        };
+        if let Some(value) = value.filter(|value| !is_encodable_int(*value)) {
+            self.errors.push(CompileError::IntegerOutOfRange(value));
+            return;
+        }
         self.instructions.push(ins);
     }
 
@@ -501,7 +509,7 @@ impl Emit {
 
                 self.expr(scope, expr);
                 self.ins(Ins::Beq(next_lab));
-                self.stmts(scope, stmts);
+                self.block_stmts(scope, stmts);
                 self.ins(Ins::Label(next_lab));
             }
 
@@ -511,10 +519,10 @@ impl Emit {
 
                 self.expr(scope, expr);
                 self.ins(Ins::Beq(else_lab));
-                self.stmts(scope, true_stmts);
+                self.block_stmts(scope, true_stmts);
                 self.ins(Ins::Jmp(next_lab));
                 self.ins(Ins::Label(else_lab));
-                self.stmts(scope, false_stmts);
+                self.block_stmts(scope, false_stmts);
                 self.ins(Ins::Label(next_lab));
             }
 
@@ -543,7 +551,7 @@ impl Emit {
                 self.ins(Ins::Jmp(loop_lab));
 
                 self.ins(Ins::Label(body_lab));
-                self.stmts(&for_scope, body);
+                self.block_stmts(&for_scope, body);
                 self.ins(Ins::Jmp(tail_lab));
 
                 self.ins(Ins::Label(next_lab));
@@ -553,7 +561,7 @@ impl Emit {
                 let loop_lab = self.new_label();
 
                 self.ins(Ins::Label(loop_lab));
-                self.stmts(scope, body);
+                self.block_stmts(scope, body);
                 self.expr(scope, expr);
                 self.ins(Ins::Bne(loop_lab))
             }
@@ -589,7 +597,7 @@ impl Emit {
                                 }
                             }
 
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
 
                             /* don't emit jump if last stmt was exit */
                             if !ends_in_exit {
@@ -609,7 +617,7 @@ impl Emit {
                                     None => self.errors.push(FailedConstantEvaluation),
                                 }
                             }
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
                         }
 
                         SwitchCase::Default(stmts) => {
@@ -622,7 +630,7 @@ impl Emit {
 
                             found_default = true;
                             self.ins(Ins::Case(switch_id, CaseEnum::Default));
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
 
                             /* don't emit jump if last stmt was exit */
                             if !ends_in_exit {
@@ -636,7 +644,7 @@ impl Emit {
                             }
                             found_default = true;
                             self.ins(Ins::Case(switch_id, CaseEnum::Default));
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
                         }
 
                         SwitchCase::ImplicitDefault(stmts) => {
@@ -646,14 +654,14 @@ impl Emit {
                             found_default = true;
                             let ends_in_exit =
                                 matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
                             if !ends_in_exit {
                                 self.ins(Ins::Jmp(next_lab));
                             }
                         }
 
                         SwitchCase::DeadJump(stmts) => {
-                            self.stmts(scope, stmts);
+                            self.block_stmts(scope, stmts);
                             self.ins(Ins::Jmp(next_lab));
                         }
                     }
@@ -685,8 +693,12 @@ impl Emit {
         }
     }
 
-    fn stmts(&mut self, parent_scope: &dyn NameAccess, stmts: Vec<Stmt>) {
-        let mut scope = BlockScope::new(0, parent_scope);
+    fn block_stmts(&mut self, parent_scope: &BlockScope<'_>, stmts: Vec<Stmt>) {
+        self.stmts(parent_scope, parent_scope.next_id(), stmts);
+    }
+
+    fn stmts(&mut self, parent_scope: &dyn NameAccess, var_frame: usize, stmts: Vec<Stmt>) {
+        let mut scope = BlockScope::new(var_frame, parent_scope);
 
         for stmt in stmts {
             self.stmt(&mut scope, stmt);
@@ -717,6 +729,6 @@ pub fn compile_script(stmts: Vec<Stmt>, const_scope: &ConstScope) -> Result<Scri
     allocate_switch_ids(&mut stmts);
 
     let mut emit = Emit::new();
-    emit.stmts(const_scope, stmts);
+    emit.stmts(const_scope, 0, stmts);
     emit.end()
 }

@@ -25,11 +25,50 @@ pub enum DecodeError {
     #[error("Missing CODE chunk")]
     MissingCodeChunk,
 
+    #[error("RIFF size or chunk boundaries are inconsistent")]
+    BadRiffSize,
+
+    #[error("duplicate RIFF chunk '{0}'")]
+    DuplicateChunk(String),
+
     #[error("Misaligned jump table offset: {0:02X}")]
     MisalignedJumpTable(usize),
 
     #[error("CODE chunk size mismatch")]
     BadCodeChunk,
+
+    #[error("CODE instruction at offset 0x{offset:X} has unknown opcode 0x{opcode:02X}")]
+    BadOpcode { offset: usize, opcode: u8 },
+
+    #[error("CODE instruction at offset 0x{offset:X} has a truncated operand")]
+    TruncatedOperand { offset: usize },
+
+    #[error("CODE chunk has no terminating END opcode")]
+    MissingCodeEnd,
+
+    #[error("CODE bytes after the terminating END are not NOP padding")]
+    BadCodePadding,
+
+    #[error("jump target 0x{target:X} is not a CODE instruction boundary")]
+    BadJumpTarget { target: usize },
+
+    #[error("switch case target 0x{target:X} is not a CODE instruction boundary")]
+    BadCaseTarget { target: usize },
+
+    #[error("CODE uses switch table {id}, but JUMP contains {table_count} tables")]
+    BadSwitchId { id: usize, table_count: usize },
+
+    #[error("CODE requires {expected} switch tables, but JUMP contains {actual}")]
+    BadSwitchTableCount { expected: usize, actual: usize },
+
+    #[error("CODE repeats switch table ID {0}")]
+    DuplicateSwitchId(usize),
+
+    #[error("JUMP table {0} has more than one default case")]
+    DuplicateDefault(usize),
+
+    #[error("JUMP table {switch_id} repeats case value {value}")]
+    DuplicateCaseValue { switch_id: usize, value: IntValue },
 
     #[error("Corrupt STR chunk")]
     BadStrChunk,
@@ -119,6 +158,48 @@ fn operand_size(opcode: u8) -> usize {
     }
 }
 
+fn is_opcode(opcode: u8) -> bool {
+    matches!(
+        opcode,
+        OPCODE_NOP
+            | OPCODE_EQU
+            | OPCODE_ADDEQU
+            | OPCODE_SUBEQU
+            | OPCODE_MULEQU
+            | OPCODE_DIVEQU
+            | OPCODE_MODEQU
+            | OPCODE_ADD
+            | OPCODE_SUB
+            | OPCODE_MUL
+            | OPCODE_DIV
+            | OPCODE_MOD
+            | OPCODE_AND
+            | OPCODE_OR
+            | OPCODE_INC
+            | OPCODE_DEC
+            | OPCODE_NEG
+            | OPCODE_NOT
+            | OPCODE_CMP
+            | OPCODE_PUSHV
+            | OPCODE_POPV
+            | OPCODE_DUP
+            | OPCODE_DISC
+            | OPCODE_PUSH32
+            | OPCODE_JMP
+            | OPCODE_BLT
+            | OPCODE_BLE
+            | OPCODE_BEQ
+            | OPCODE_BNE
+            | OPCODE_BGE
+            | OPCODE_BGT
+            | OPCODE_END
+            | OPCODE_CALL
+            | OPCODE_PUSH16
+            | OPCODE_PUSH8
+            | OPCODE_SWITCH
+    )
+}
+
 fn get_code_jumps(code_data: &[u8]) -> Result<JumpIdMap, DecodeError> {
     let mut offset = 0;
 
@@ -128,8 +209,27 @@ fn get_code_jumps(code_data: &[u8]) -> Result<JumpIdMap, DecodeError> {
     let mut extended_jump_map: Vec<(JumpInfo, isize)> = Vec::new();
 
     while offset < code_data.len() {
+        let instruction_offset = offset;
         let opcode = code_data[offset];
+        if !is_opcode(opcode) {
+            return Err(DecodeError::BadOpcode {
+                offset: instruction_offset,
+                opcode,
+            });
+        }
         offset += 1;
+
+        let operand_end =
+            offset
+                .checked_add(operand_size(opcode))
+                .ok_or(DecodeError::TruncatedOperand {
+                    offset: instruction_offset,
+                })?;
+        if operand_end > code_data.len() {
+            return Err(DecodeError::TruncatedOperand {
+                offset: instruction_offset,
+            });
+        }
 
         if let OPCODE_JMP | OPCODE_BEQ | OPCODE_BNE | OPCODE_BLE | OPCODE_BLT | OPCODE_BGE
         | OPCODE_BGT = opcode
@@ -143,7 +243,7 @@ fn get_code_jumps(code_data: &[u8]) -> Result<JumpIdMap, DecodeError> {
             jump_id_counter += 1;
         }
 
-        offset += operand_size(opcode);
+        offset = operand_end;
     }
 
     extended_jump_map.sort_by(|a, b| {
@@ -263,15 +363,38 @@ fn decode_code_chunk(code_data: &[u8]) -> Result<&[u8], DecodeError> {
     }
 
     let code_with_nops = &code_data[4..];
+    let mut offset = 0usize;
+    let mut final_end = None;
+    while offset < code_with_nops.len() {
+        let opcode = code_with_nops[offset];
+        if !is_opcode(opcode) {
+            return Err(DecodeError::BadOpcode { offset, opcode });
+        }
+        if opcode == OPCODE_END {
+            final_end = Some(offset);
+            offset += 1;
+            continue;
+        }
 
-    let mut real_end = code_with_nops.len() - 1;
-
-    while code_with_nops[real_end] != OPCODE_END {
-        real_end -= 1;
+        let next = offset
+            .checked_add(1 + operand_size(opcode))
+            .ok_or(DecodeError::TruncatedOperand { offset })?;
+        if next > code_with_nops.len() {
+            return Err(DecodeError::TruncatedOperand { offset });
+        }
+        offset = next;
     }
 
-    /* we discard the last end to that when decompiling/reencoding we don't emit an extra exit */
-    Ok(&code_with_nops[..real_end])
+    let final_end = final_end.ok_or(DecodeError::MissingCodeEnd)?;
+    if code_with_nops[final_end + 1..]
+        .iter()
+        .any(|padding| *padding != OPCODE_NOP)
+    {
+        return Err(DecodeError::BadCodePadding);
+    }
+
+    /* Discard only the final format terminator; earlier END opcodes are real exits. */
+    Ok(&code_with_nops[..final_end])
 }
 
 fn disassemble(
@@ -288,8 +411,29 @@ fn disassemble(
 
     let mut jump_source_map = BTreeMap::<usize, JumpId>::new();
 
+    let mut instruction_boundaries = std::collections::BTreeSet::new();
+    let mut scan = 0usize;
+    while scan < code_data.len() {
+        instruction_boundaries.insert(scan);
+        scan += 1 + operand_size(code_data[scan]);
+    }
+    instruction_boundaries.insert(code_data.len());
+
     for jump_info in &jump_targets.0 {
+        if !instruction_boundaries.contains(&jump_info.target_offset) {
+            return Err(DecodeError::BadJumpTarget {
+                target: jump_info.target_offset,
+            });
+        }
         jump_source_map.insert(jump_info.source_offset, jump_info.jump_id);
+    }
+
+    if let Some((target, _, _)) = case_map
+        .0
+        .iter()
+        .find(|(target, _, _)| !instruction_boundaries.contains(target))
+    {
+        return Err(DecodeError::BadCaseTarget { target: *target });
     }
 
     while offset < code_data.len() {
@@ -393,10 +537,7 @@ fn disassemble(
             OPCODE_CALL => result.push(Ins::Call(CallId(operand))),
             OPCODE_SWITCH => result.push(Ins::Switch(SwitchId(operand))),
 
-            _ => {
-                /* TODO: graceful error */
-                panic!("Bad opcode")
-            }
+            _ => unreachable!("opcodes are validated during the initial CODE scan"),
         }
     }
 
@@ -554,7 +695,7 @@ mod chunk_tests {
 
         assert!(matches!(
             read_riff_chunks(&mut &encoded[..], 22),
-            Err(DecodeError::IoError(ref err)) if err.kind() == io::ErrorKind::UnexpectedEof
+            Err(DecodeError::BadRiffSize)
         ));
     }
 
@@ -581,6 +722,100 @@ mod chunk_tests {
             (CaseEnum::Val(10), 100)
         ));
     }
+
+    #[test]
+    fn malformed_code_returns_diagnostics_instead_of_panicking() {
+        assert!(matches!(
+            get_code_jumps(&[0xFF]),
+            Err(DecodeError::BadOpcode {
+                offset: 0,
+                opcode: 0xFF
+            })
+        ));
+        assert!(matches!(
+            get_code_jumps(&[OPCODE_CALL, 1, 2]),
+            Err(DecodeError::TruncatedOperand { offset: 0 })
+        ));
+
+        let no_end = [1, 0, 0, 0, OPCODE_NOP];
+        assert!(matches!(
+            decode_code_chunk(&no_end),
+            Err(DecodeError::MissingCodeEnd)
+        ));
+
+        let operand_is_not_end = [2, 0, 0, 0, OPCODE_PUSH8, OPCODE_END];
+        assert!(matches!(
+            decode_code_chunk(&operand_is_not_end),
+            Err(DecodeError::MissingCodeEnd)
+        ));
+
+        let bad_padding = [3, 0, 0, 0, OPCODE_END, OPCODE_PUSH8, OPCODE_NOP];
+        assert!(matches!(
+            decode_code_chunk(&bad_padding),
+            Err(DecodeError::BadCodePadding)
+        ));
+    }
+
+    #[test]
+    fn control_flow_targets_must_land_on_instruction_boundaries() {
+        let code = [OPCODE_JMP, 2, 0, 0, 0];
+        let jumps = get_code_jumps(&code).unwrap();
+        assert!(matches!(
+            disassemble(&code, &jumps, &CaseMap(vec![])),
+            Err(DecodeError::BadJumpTarget { target: 2 })
+        ));
+
+        let code = [OPCODE_NOP];
+        let cases = CaseMap(vec![(2, SwitchId(0), CaseEnum::Default)]);
+        assert!(matches!(
+            disassemble(&code, &JumpIdMap(vec![]), &cases),
+            Err(DecodeError::BadCaseTarget { target: 2 })
+        ));
+    }
+
+    #[test]
+    fn riff_chunk_boundaries_and_names_are_not_silently_normalized() {
+        assert!(matches!(
+            read_riff_chunks(&mut &[][..], 16),
+            Err(DecodeError::BadRiffSize)
+        ));
+
+        let duplicate = [
+            b'C', b'O', b'D', b'E', 0, 0, 0, 0, b'C', b'O', b'D', b'E', 0, 0, 0, 0,
+        ];
+        assert!(matches!(
+            read_riff_chunks(&mut &duplicate[..], 28),
+            Err(DecodeError::DuplicateChunk(ref name)) if name == "CODE"
+        ));
+    }
+
+    #[test]
+    fn code_switch_requires_its_physical_jump_table() {
+        let mut riff = b"RIFF".to_vec();
+        riff.extend(32u32.to_le_bytes());
+        riff.extend(b"SCR ");
+        riff.extend(b"CODE");
+        riff.extend(12u32.to_le_bytes());
+        riff.extend(8u32.to_le_bytes());
+        riff.extend([
+            OPCODE_SWITCH,
+            0,
+            0,
+            0,
+            0,
+            OPCODE_END,
+            OPCODE_NOP,
+            OPCODE_NOP,
+        ]);
+
+        assert!(matches!(
+            decode_script(&mut &riff[..]),
+            Err(DecodeError::BadSwitchId {
+                id: 0,
+                table_count: 0
+            })
+        ));
+    }
 }
 
 #[derive(Debug)]
@@ -593,17 +828,34 @@ fn read_riff_chunks<R: io::Read>(
     read: &mut R,
     riff_size: usize,
 ) -> Result<HashMap<String, RiffChunk>, DecodeError> {
+    if riff_size < 12 {
+        return Err(DecodeError::BadRiffSize);
+    }
     let mut chunks = HashMap::new();
     let mut offset = 12usize;
 
     while offset < riff_size {
+        if riff_size - offset < 8 {
+            return Err(DecodeError::BadRiffSize);
+        }
         let chunk_name = read.read_4byte()?;
         let chunk_size = read.read_u32()? as usize;
+
+        let chunk_end = offset
+            .checked_add(8)
+            .and_then(|body| body.checked_add(chunk_size))
+            .ok_or(DecodeError::BadRiffSize)?;
+        if chunk_end > riff_size {
+            return Err(DecodeError::BadRiffSize);
+        }
 
         let mut chunk_data = vec![0u8; chunk_size];
         read.read_exact(&mut chunk_data)?;
 
         let chunk_name = std::str::from_utf8(&chunk_name)?.to_string();
+        if chunks.contains_key(&chunk_name) {
+            return Err(DecodeError::DuplicateChunk(chunk_name));
+        }
         chunks.insert(
             chunk_name,
             RiffChunk {
@@ -612,7 +864,7 @@ fn read_riff_chunks<R: io::Read>(
             },
         );
 
-        offset = offset + chunk_size + 8
+        offset = chunk_end;
     }
 
     Ok(chunks)
@@ -671,6 +923,48 @@ fn decode_script_impl<R: io::Read>(
     /* Step 4: Disassemble, while adding case and label meta-instructions */
 
     let instructions = disassemble(code_data, &jump_map, &case_map)?;
+
+    let mut switch_ids = instructions
+        .iter()
+        .filter_map(|ins| match ins {
+            Ins::Switch(id) => Some(id.0),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    switch_ids.sort_unstable();
+    if let Some(id) = switch_ids
+        .windows(2)
+        .find_map(|pair| (pair[0] == pair[1]).then_some(pair[0]))
+    {
+        return Err(DecodeError::DuplicateSwitchId(id));
+    }
+    switch_ids.dedup();
+    let table_count = jumps.case_tables.len();
+    if let Some(id) = switch_ids.iter().copied().find(|id| *id >= table_count) {
+        return Err(DecodeError::BadSwitchId { id, table_count });
+    }
+    let expected_tables = switch_ids.last().map_or(0, |id| id + 1);
+    if expected_tables != table_count {
+        return Err(DecodeError::BadSwitchTableCount {
+            expected: expected_tables,
+            actual: table_count,
+        });
+    }
+
+    for (switch_id, table) in jumps.case_tables.iter().enumerate() {
+        let mut values = std::collections::BTreeSet::new();
+        for (case, _) in &table.0 {
+            if !values.insert(*case) {
+                return match case {
+                    CaseEnum::Default => Err(DecodeError::DuplicateDefault(switch_id)),
+                    CaseEnum::Val(value) => Err(DecodeError::DuplicateCaseValue {
+                        switch_id,
+                        value: *value,
+                    }),
+                };
+            }
+        }
+    }
 
     /* Step 5: Get string table */
 

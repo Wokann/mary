@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use mary::{
     ast::Stmt,
-    bytecode::{self, DecodeError},
+    bytecode::{self, DecodeError, EncodeError},
     charmap::{Charmap, CharmapError},
     compiler::ScriptError,
     decompiler::DecompileError,
@@ -49,6 +49,9 @@ enum Error {
 
     #[error("Decode error: {0}")]
     DecodeFailed(#[from] DecodeError),
+
+    #[error("Encode error: {0}")]
+    EncodeFailed(#[from] EncodeError),
 
     #[error("Decompile error: {0}")]
     DecompileFailed(#[from] DecompileError),
@@ -181,11 +184,11 @@ fn print_compiled_scripts_in_c<W: io::Write>(
     w: &mut W,
     scripts: Vec<(IntValue, String, Script)>,
     pretty_bytecode: bool,
-) -> io::Result<()> {
-    use mary::bytecode::encode_script;
+) -> Result<(), Error> {
+    use mary::bytecode::try_encode_script;
 
     for (_, name, script) in &scripts {
-        let bytecode = encode_script(script);
+        let bytecode = try_encode_script(script)?;
 
         // print bytecode as C
 
@@ -265,7 +268,6 @@ fn main_error() -> Result<(), Error> {
             script_table,
             defines,
         } => {
-            use mary::bytecode::encode_script;
             use mary::compiler::parse_string;
 
             let input_base = input
@@ -364,7 +366,7 @@ fn main_error() -> Result<(), Error> {
                     ))
                 } else {
                     let script = &scripts[0].2;
-                    let bytecode = encode_script(script);
+                    let bytecode = bytecode::try_encode_script(script)?;
 
                     match output {
                         Some(out_path) => {

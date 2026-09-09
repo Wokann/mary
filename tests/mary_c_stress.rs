@@ -1,6 +1,7 @@
 use mary::{
     bytecode::encode_script,
     decompiler::decompile_script,
+    ir::{Ins, JumpId, Script},
     mary_c::{format_script, parse_callable_table, parse_scripts, Options},
 };
 
@@ -79,6 +80,10 @@ fn invalid_constructs_report_the_real_problem() {
         ("mary_script(1) void X(void){P();}", "requires 1"),
         ("mary_script(1) void X(void){Missing(1);}", "not declared"),
         (
+            "mary_script(1) void X(void){P(mary_direct_int(-1));}",
+            "not declared",
+        ),
+        (
             "mary_script(1) void X(void){do{break;}while(1);}",
             "loop break is not supported",
         ),
@@ -91,6 +96,10 @@ fn invalid_constructs_report_the_real_problem() {
             "requires const char *",
         ),
         ("mary_script(1) void X(void){P(\"wrong\");}", "requires int"),
+        (
+            "mary_script(1) void X(void){Text(gText_Missing);}",
+            "not declared",
+        ),
         (
             "mary_script(1) void X(void){P(mary_negated_int());}",
             "requires 1",
@@ -208,6 +217,58 @@ fn arbitrary_binary_offset_outside_the_input_is_a_diagnostic_not_a_panic() {
         "unexpected CLI diagnostic: {stderr}"
     );
     assert!(!stderr.contains("panicked"), "CLI panicked: {stderr}");
+}
+
+#[test]
+fn mary_c_cli_rejects_unstructured_ir_instead_of_emitting_fake_source() {
+    let directory = std::path::PathBuf::from("test_failures")
+        .join(format!("strict_mary_c_{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    for (name, instructions) in [
+        ("stack_underflow", vec![Ins::Add]),
+        (
+            "residual_jump_next",
+            vec![Ins::Jmp(JumpId(0)), Ins::Label(JumpId(0))],
+        ),
+    ] {
+        let input = directory.join(format!("{name}.riff"));
+        let output_path = directory.join(format!("{name}.mary.c"));
+        std::fs::write(
+            &input,
+            encode_script(&Script::new(instructions, Vec::new())),
+        )
+        .unwrap();
+
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_mary"))
+            .args([
+                "decompile",
+                input.to_str().unwrap(),
+                "goodies/mary_callables.mary.h",
+                "--mary-c",
+                "-D",
+                "MARY_FOMT_US",
+                "-o",
+                output_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success(), "{name} unexpectedly succeeded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Decompile error") || stderr.contains("Decompile Error"),
+            "unexpected CLI diagnostic for {name}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("panicked"),
+            "CLI panicked for {name}: {stderr}"
+        );
+        assert!(
+            !output_path.exists(),
+            "Mary-C CLI created source for {name} after structural recovery failed"
+        );
+    }
+    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

@@ -664,13 +664,10 @@ impl<'a> StringDecorateVisitor<'a> {
         let ValueType::UserType(type_id) = value_type else {
             return;
         };
-        // Preserve the enum-valued base of an offset expression. This is used
-        // by native scripts for ranges such as `map < mine_floor_0 + 256`.
-        // The right operand remains an ordinary numeric offset; treating both
-        // operands as enum values would be incorrect for dense ID domains.
-        if let Expr::OpAdd(pair) | Expr::OpSub(pair) = expr {
-            self.decorate_typed_int(&mut pair.0, value_type);
-            return;
+        if let Expr::Call(invoke) = &*expr {
+            if self.const_scope.typed_identity_type(&invoke.func) == Some(value_type) {
+                return;
+            }
         }
         if let Expr::Int(value) = &*expr {
             if let Some(name) = self.const_scope.typed_int_const_name(type_id, *value) {
@@ -711,6 +708,19 @@ impl<'a> StringDecorateVisitor<'a> {
                     ))],
                 ));
             }
+        } else if let Some(wrapper) = self.const_scope.typed_identity_name(type_id) {
+            // A typed identity is a source-only annotation, not an enum base.
+            // Wrap the complete expression so compound coordinates retain
+            // their X/Y domain without changing the emitted VM arithmetic.
+            let inner = std::mem::replace(expr, Expr::Int(0));
+            *expr = Expr::Call(Invoke::new(wrapper.to_owned(), vec![inner]));
+        } else if let Expr::OpAdd(pair) | Expr::OpSub(pair) = expr {
+            // Preserve the enum-valued base of an offset expression. This is
+            // used by native scripts for ranges such as
+            // `map < mine_floor_0 + 256`. The right operand remains an
+            // ordinary numeric offset; treating both operands as enum values
+            // would be incorrect for dense ID domains.
+            self.decorate_typed_int(&mut pair.0, value_type);
         }
     }
 
@@ -755,7 +765,58 @@ impl<'a> StringDecorateVisitor<'a> {
         }
     }
 
-    fn apply_related_refinements(&mut self, condition: &Expr, condition_is_true: bool) {
+    fn collect_related_refinements(
+        &self,
+        condition: &Expr,
+        condition_is_true: bool,
+        refinements: &mut HashMap<String, Option<ValueType>>,
+    ) {
+        match condition {
+            // Both operands necessarily hold when an AND expression is true.
+            // When it is false, either operand may be responsible, so no
+            // branch-wide dependent type is safe.
+            Expr::OpAnd(pair) if condition_is_true => {
+                self.collect_related_refinements(&pair.0, true, refinements);
+                self.collect_related_refinements(&pair.1, true, refinements);
+                return;
+            }
+            // Both operands necessarily fail when an OR expression is false.
+            // A true OR does not identify which operand established the path.
+            Expr::OpOr(pair) if !condition_is_true => {
+                self.collect_related_refinements(&pair.0, false, refinements);
+                self.collect_related_refinements(&pair.1, false, refinements);
+                return;
+            }
+            Expr::OpNot(inner) => {
+                self.collect_related_refinements(inner, !condition_is_true, refinements);
+                return;
+            }
+            _ => {}
+        }
+
+        // A value whose proven domain is MaryBool has exactly the same path
+        // meaning when used directly as `if (predicate)` as it does when
+        // compared with TRUE. Preserve the originating callable through a
+        // local copy, but do not make this inference for arbitrary integers
+        // where any nonzero value would be truthy.
+        if self
+            .const_scope
+            .constant_value_type("TRUE")
+            .is_some_and(|boolean_type| self.expr_type(condition) == boolean_type)
+        {
+            if let Some(discriminator_callable) = self.expr_origin(condition) {
+                let boolean_name = if condition_is_true { "TRUE" } else { "FALSE" };
+                if let Some(discriminator_value) = self.const_scope.const_int_value(boolean_name) {
+                    self.record_related_refinements(
+                        &discriminator_callable,
+                        discriminator_value,
+                        refinements,
+                    );
+                }
+            }
+            return;
+        }
+
         let (pair, equality_holds) = match condition {
             Expr::CmpEq(pair) => (pair, condition_is_true),
             Expr::CmpNe(pair) => (pair, !condition_is_true),
@@ -778,15 +839,83 @@ impl<'a> StringDecorateVisitor<'a> {
         else {
             return;
         };
-        let refinements = self
+        self.record_related_refinements(&discriminator_callable, discriminator_value, refinements);
+    }
+
+    fn record_related_refinements(
+        &self,
+        discriminator_callable: &str,
+        discriminator_value: i64,
+        refinements: &mut HashMap<String, Option<ValueType>>,
+    ) {
+        let related = self
             .const_scope
-            .related_callable_return_types(&discriminator_callable, discriminator_value);
+            .related_callable_return_types(discriminator_callable, discriminator_value);
+        for (value_callable, value_type) in related {
+            if let Some(known) = refinements.get(value_callable).copied() {
+                if let Some(known) = known {
+                    refinements.insert(
+                        value_callable.to_owned(),
+                        self.const_scope.narrower_value_type(known, value_type),
+                    );
+                }
+            } else {
+                refinements.insert(value_callable.to_owned(), Some(value_type));
+            }
+        }
+    }
+
+    fn apply_related_refinements(&mut self, condition: &Expr, condition_is_true: bool) {
+        let mut refinements = HashMap::new();
+        self.collect_related_refinements(condition, condition_is_true, &mut refinements);
+        self.apply_collected_related_refinements(refinements);
+    }
+
+    fn apply_collected_related_refinements(
+        &mut self,
+        refinements: HashMap<String, Option<ValueType>>,
+    ) {
         for (value_callable, value_type) in refinements {
-            self.callable_return_overrides
-                .insert(value_callable.to_owned(), value_type);
+            let Some(value_type) = value_type else {
+                self.callable_return_overrides.remove(&value_callable);
+                for (name, origin) in &self.local_origins {
+                    if origin == &value_callable {
+                        self.local_types.remove(name);
+                    }
+                }
+                continue;
+            };
+            match self.callable_return_overrides.get(&value_callable).copied() {
+                Some(existing) => {
+                    if let Some(merged) = self.const_scope.narrower_value_type(existing, value_type)
+                    {
+                        self.callable_return_overrides
+                            .insert(value_callable.clone(), merged);
+                    } else {
+                        self.callable_return_overrides.remove(&value_callable);
+                    }
+                }
+                None => {
+                    self.callable_return_overrides
+                        .insert(value_callable.clone(), value_type);
+                }
+            }
             for (name, origin) in &self.local_origins {
-                if origin == value_callable {
-                    self.local_types.insert(name.clone(), value_type);
+                if origin == &value_callable {
+                    match self.local_types.get(name).copied() {
+                        Some(existing) => {
+                            if let Some(merged) =
+                                self.const_scope.narrower_value_type(existing, value_type)
+                            {
+                                self.local_types.insert(name.clone(), merged);
+                            } else {
+                                self.local_types.remove(name);
+                            }
+                        }
+                        None => {
+                            self.local_types.insert(name.clone(), value_type);
+                        }
+                    }
                 }
             }
         }
@@ -903,6 +1032,55 @@ impl<'a> StringDecorateVisitor<'a> {
                 _ => {}
             }
         }
+    }
+
+    fn contains_break_outside_nested_switch(stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            Stmt::Break => true,
+            Stmt::If(_, body) | Stmt::DoWhile(_, body) => {
+                Self::contains_break_outside_nested_switch(body)
+            }
+            Stmt::IfElse(_, yes, no) => {
+                Self::contains_break_outside_nested_switch(yes)
+                    || Self::contains_break_outside_nested_switch(no)
+            }
+            Stmt::For(elements) => Self::contains_break_outside_nested_switch(&elements.3),
+            // A break nested in another switch targets that switch and does
+            // not bypass the surrounding loop condition.
+            Stmt::Switch(_, _, _, _) => false,
+            _ => false,
+        })
+    }
+
+    fn stmts_may_fall_through(stmts: &[Stmt]) -> bool {
+        stmts.iter().all(|stmt| match stmt {
+            Stmt::Exit => false,
+            // `mary_break_switch` does not exit the script. It may rejoin at
+            // an enclosing switch outside the construct currently being
+            // inspected, so treating it as a dead branch would let local
+            // refinements leak onto that rejoined path.
+            Stmt::Break => true,
+            Stmt::IfElse(_, yes, no) => {
+                Self::stmts_may_fall_through(yes) || Self::stmts_may_fall_through(no)
+            }
+            // A condition without else can always be false. Loops and
+            // switches are likewise kept conservative here: proving that
+            // they cannot complete requires a separate control-flow model.
+            _ => true,
+        })
+    }
+
+    fn stmts_definitely_exit_script(stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|stmt| match stmt {
+            Stmt::Exit => true,
+            Stmt::IfElse(_, yes, no) => {
+                Self::stmts_definitely_exit_script(yes) && Self::stmts_definitely_exit_script(no)
+            }
+            // Break reaches the enclosing switch exit. Proving that a nested
+            // switch or loop cannot complete needs richer control-flow state,
+            // so those constructs deliberately remain conservative.
+            _ => false,
+        })
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) -> Result<(), DecompileError> {
@@ -1067,18 +1245,26 @@ impl<'a> StringDecorateVisitor<'a> {
                 let outer_overrides = self.callable_return_overrides.clone();
                 self.apply_related_refinements(expr, true);
                 self.visit_stmts(stmts)?;
+                let then_falls_through = Self::stmts_may_fall_through(stmts);
                 let then_types = self.local_types.clone();
                 let then_origins = self.local_origins.clone();
                 let then_values = self.local_values.clone();
-                self.local_types = self.join_local_value_types(
-                    &outer_types,
-                    &outer_values,
-                    &then_types,
-                    &then_values,
-                );
-                self.local_origins = Self::join_local_types([outer_origins, then_origins]);
-                self.local_values = Self::join_local_types([outer_values, then_values]);
                 self.callable_return_overrides = outer_overrides;
+                if then_falls_through {
+                    self.local_types = self.join_local_value_types(
+                        &outer_types,
+                        &outer_values,
+                        &then_types,
+                        &then_values,
+                    );
+                    self.local_origins = Self::join_local_types([outer_origins, then_origins]);
+                    self.local_values = Self::join_local_types([outer_values, then_values]);
+                } else {
+                    self.local_types = outer_types;
+                    self.local_origins = outer_origins;
+                    self.local_values = outer_values;
+                    self.apply_related_refinements(expr, false);
+                }
                 Ok(())
             }
 
@@ -1090,35 +1276,64 @@ impl<'a> StringDecorateVisitor<'a> {
                 let outer_overrides = self.callable_return_overrides.clone();
                 self.apply_related_refinements(expr, true);
                 self.visit_stmts(stmts_then)?;
+                let then_falls_through = Self::stmts_may_fall_through(stmts_then);
                 let then_types = self.local_types.clone();
                 let then_origins = self.local_origins.clone();
                 let then_values = self.local_values.clone();
+                let then_overrides = self.callable_return_overrides.clone();
                 self.local_types = outer_types.clone();
                 self.local_origins = outer_origins.clone();
                 self.local_values = outer_values.clone();
                 self.callable_return_overrides = outer_overrides.clone();
                 self.apply_related_refinements(expr, false);
                 self.visit_stmts(stmts_else)?;
+                let else_falls_through = Self::stmts_may_fall_through(stmts_else);
                 let else_types = self.local_types.clone();
                 let else_origins = self.local_origins.clone();
                 let else_values = self.local_values.clone();
-                self.local_types = self.join_local_value_types(
-                    &then_types,
-                    &then_values,
-                    &else_types,
-                    &else_values,
-                );
-                self.local_origins = Self::join_local_types([then_origins, else_origins]);
-                self.local_values = Self::join_local_types([then_values, else_values]);
-                self.callable_return_overrides = outer_overrides;
+                let else_overrides = self.callable_return_overrides.clone();
+                match (then_falls_through, else_falls_through) {
+                    (true, true) => {
+                        self.local_types = self.join_local_value_types(
+                            &then_types,
+                            &then_values,
+                            &else_types,
+                            &else_values,
+                        );
+                        self.local_origins = Self::join_local_types([then_origins, else_origins]);
+                        self.local_values = Self::join_local_types([then_values, else_values]);
+                        self.callable_return_overrides =
+                            Self::join_local_types([then_overrides, else_overrides]);
+                    }
+                    (true, false) => {
+                        self.local_types = then_types;
+                        self.local_origins = then_origins;
+                        self.local_values = then_values;
+                        self.callable_return_overrides = then_overrides;
+                    }
+                    (false, true) => {
+                        self.local_types = else_types;
+                        self.local_origins = else_origins;
+                        self.local_values = else_values;
+                        self.callable_return_overrides = else_overrides;
+                    }
+                    (false, false) => {
+                        self.local_types = outer_types;
+                        self.local_origins = outer_origins;
+                        self.local_values = outer_values;
+                        self.callable_return_overrides = outer_overrides;
+                    }
+                }
                 Ok(())
             }
 
             Stmt::For(for_elems) => {
+                let has_break = Self::contains_break_outside_nested_switch(&for_elems.3);
                 self.visit_stmt(&mut for_elems.1)?;
                 let entry_types = self.local_types.clone();
                 let entry_origins = self.local_origins.clone();
                 let entry_values = self.local_values.clone();
+                let entry_overrides = self.callable_return_overrides.clone();
                 let mut loop_assigned = HashSet::new();
                 Self::collect_assigned_locals(&for_elems.3, &mut loop_assigned);
                 Self::collect_assigned_locals(
@@ -1131,6 +1346,11 @@ impl<'a> StringDecorateVisitor<'a> {
                     self.local_values.remove(&name);
                 }
                 self.visit_expr(&mut for_elems.0)?;
+                // Reaching the body (and then the iteration expression)
+                // proves the loop condition true. Those refinements do not
+                // survive the body join because loop assignments may change
+                // their inputs.
+                self.apply_related_refinements(&for_elems.0, true);
                 self.visit_stmts(&mut for_elems.3)?;
                 self.visit_stmt(&mut for_elems.2)?;
                 let iterated_types = self.local_types.clone();
@@ -1139,10 +1359,19 @@ impl<'a> StringDecorateVisitor<'a> {
                 self.local_types = Self::join_local_types([entry_types, iterated_types]);
                 self.local_origins = Self::join_local_types([entry_origins, iterated_origins]);
                 self.local_values = Self::join_local_types([entry_values, iterated_values]);
+                self.callable_return_overrides = entry_overrides;
+                // Mary-C rejects loop `break`, so a normal path after the loop
+                // has necessarily observed a false condition. Compound
+                // conditions remain conservative in apply_related_refinements
+                // whenever the failing operand is not uniquely known.
+                if !has_break {
+                    self.apply_related_refinements(&for_elems.0, false);
+                }
                 Ok(())
             }
 
             Stmt::DoWhile(expr, stmts) => {
+                let has_break = Self::contains_break_outside_nested_switch(stmts);
                 let mut loop_assigned = HashSet::new();
                 Self::collect_assigned_locals(stmts, &mut loop_assigned);
                 for name in loop_assigned {
@@ -1152,6 +1381,13 @@ impl<'a> StringDecorateVisitor<'a> {
                 }
                 self.visit_stmts(stmts)?;
                 self.visit_expr(expr)?;
+                // A normal do-while exit is reached only after the condition
+                // evaluates false. Mary-C deliberately rejects loop `break`,
+                // so there is no second exit path which could invalidate this
+                // refinement.
+                if !has_break {
+                    self.apply_related_refinements(expr, false);
+                }
                 Ok(())
             }
 
@@ -1178,6 +1414,7 @@ impl<'a> StringDecorateVisitor<'a> {
                 let mut exit_types = Vec::with_capacity(switch_cases.len() + 1);
                 let mut exit_origins = Vec::with_capacity(switch_cases.len() + 1);
                 let mut exit_values = Vec::with_capacity(switch_cases.len() + 1);
+                let mut exit_overrides = Vec::with_capacity(switch_cases.len() + 1);
                 let mut fallthrough_types = None;
                 let mut fallthrough_origins = None;
                 let mut fallthrough_values = None;
@@ -1186,6 +1423,7 @@ impl<'a> StringDecorateVisitor<'a> {
                     exit_types.push(outer_types.clone());
                     exit_origins.push(outer_origins.clone());
                     exit_values.push(outer_values.clone());
+                    exit_overrides.push(outer_overrides.clone());
                 }
 
                 for switch_case in switch_cases {
@@ -1209,20 +1447,13 @@ impl<'a> StringDecorateVisitor<'a> {
                                         _ => None,
                                     },
                                 ) {
-                                    for (value_callable, value_type) in
-                                        self.const_scope.related_callable_return_types(
-                                            discriminator,
-                                            discriminator_value,
-                                        )
-                                    {
-                                        self.callable_return_overrides
-                                            .insert(value_callable.to_owned(), value_type);
-                                        for (name, origin) in &self.local_origins {
-                                            if origin == value_callable {
-                                                self.local_types.insert(name.clone(), value_type);
-                                            }
-                                        }
-                                    }
+                                    let mut refinements = HashMap::new();
+                                    self.record_related_refinements(
+                                        discriminator,
+                                        discriminator_value,
+                                        &mut refinements,
+                                    );
+                                    self.apply_collected_related_refinements(refinements);
                                 }
                                 self.decorate_typed_int(value, switch_type);
                                 self.visit_expr(value)?;
@@ -1287,7 +1518,13 @@ impl<'a> StringDecorateVisitor<'a> {
                     }
 
                     self.visit_stmts(switch_case.stmts_mut())?;
-                    if matches!(
+                    let definitely_exits = Self::stmts_definitely_exit_script(switch_case.stmts());
+                    if definitely_exits {
+                        fallthrough_types = None;
+                        fallthrough_origins = None;
+                        fallthrough_values = None;
+                        fallthrough_overrides = None;
+                    } else if matches!(
                         switch_case,
                         SwitchCase::Fallthrough(_, _)
                             | SwitchCase::DefaultFallthrough(_)
@@ -1302,21 +1539,26 @@ impl<'a> StringDecorateVisitor<'a> {
                         exit_types.push(self.local_types.clone());
                         exit_origins.push(self.local_origins.clone());
                         exit_values.push(self.local_values.clone());
+                        exit_overrides.push(self.callable_return_overrides.clone());
                     }
                 }
 
-                if let (Some(types), Some(origins), Some(values)) =
-                    (fallthrough_types, fallthrough_origins, fallthrough_values)
-                {
+                if let (Some(types), Some(origins), Some(values), Some(overrides)) = (
+                    fallthrough_types,
+                    fallthrough_origins,
+                    fallthrough_values,
+                    fallthrough_overrides,
+                ) {
                     exit_types.push(types);
                     exit_origins.push(origins);
                     exit_values.push(values);
+                    exit_overrides.push(overrides);
                 }
 
                 self.local_types = Self::join_local_types(exit_types);
                 self.local_origins = Self::join_local_types(exit_origins);
                 self.local_values = Self::join_local_types(exit_values);
-                self.callable_return_overrides = outer_overrides;
+                self.callable_return_overrides = Self::join_local_types(exit_overrides);
 
                 Ok(())
             }

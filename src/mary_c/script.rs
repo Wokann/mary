@@ -337,6 +337,14 @@ fn validate_calls(statements: &[Stmt], scope: &ConstScope) -> Vec<CompileError> 
             } else {
                 for (index, (arg, expected)) in args.iter().zip(shape.parameter_types()).enumerate()
                 {
+                    if let Expr::Name(argument_name) = arg {
+                        if !locals.contains_key(argument_name)
+                            && scope.lookup_name(argument_name).is_none()
+                        {
+                            out.push(CompileError::NameNotDeclared(argument_name.clone()));
+                            continue;
+                        }
+                    }
                     if *expected == ValueType::Undefined {
                         continue;
                     }

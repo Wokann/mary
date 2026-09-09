@@ -55,7 +55,11 @@
  * contain 2,636 entries (0-2635). Numbered names are deliberate: the
  * physical slots are proven, while per-animation official English meanings
  * are not yet independently established. Community catalog labels may be
- * added later only as verified aliases.
+ * added later only as verified aliases. SetEntityAnim consumes a direction-
+ * group base; the native actor adds its current facing (down 0, up 1, left 2,
+ * right 3) before looking up the physical table. Consequently, base+1 through
+ * base+3 remain numbered physical slots: exposing them as ordinary
+ * SetEntityAnim inputs would make the runtime add facing a second time.
  *
  * 完整的角色动画物理 ID 域。每张连续动画记录表都恰好在相应 ROM 的帧结构
  * 数组起点结束：FoMT-US 0x0858BA2C-0x0858E20C 与 FoMT-JP
@@ -63,7 +67,10 @@
  * 0x08522C4C-0x0852557C 与 MFoMT-JP 0x0852455C-0x08526E8C
  * 各有 2636 项（0-2635）。编号名称是有意采用的中性名称：物理槽已经证实，
  * 但每项动画的官方英文语义尚未逐项独立确认；社区目录名称只能在核实后作为
- * 别名补充。 */
+ * 别名补充。SetEntityAnim 接收随朝向变化的动画组起点，原生 actor 会先加上
+ * 当前朝向（下 0、上 1、左 2、右 3），再查询物理表。因此，起点后的
+ * base+1 至 base+3 继续使用物理编号名称；若把它们作为普通 SetEntityAnim
+ * 输入，运行时会再次叠加朝向。 */
 typedef enum MaryAnimationId
 {
     ANIMATION_ID_0000 = 0,
@@ -1257,7 +1264,7 @@ typedef enum MaryAnimationId
     ANIMATION_ID_0940 = 940,
     ANIMATION_ID_0941 = 941,
 #if defined(MARY_FOMT)
-    ANIMATION_FARM_DOG_YOUNG_IDLE = 942,
+    ANIMATION_FARM_DOG_PUPPY_IDLE = 942,
 #elif defined(MARY_MFOMT)
     ANIMATION_ID_0942 = 942,
 #endif
@@ -1299,7 +1306,7 @@ typedef enum MaryAnimationId
 #if defined(MARY_FOMT)
     ANIMATION_ID_0978 = 978,
 #elif defined(MARY_MFOMT)
-    ANIMATION_FARM_DOG_YOUNG_IDLE = 978,
+    ANIMATION_FARM_DOG_PUPPY_IDLE = 978,
 #endif
     ANIMATION_ID_0979 = 979,
     ANIMATION_ID_0980 = 980,
@@ -4490,23 +4497,26 @@ mary_const_alias(ANIMATION_ID_1872, ANIMATION_CHICKEN_WALK);
 mary_const_alias(ANIMATION_ID_1884, ANIMATION_CHICKEN_SICK_IDLE);
 #endif
 
-/* The newborn and infant-sleeping animations are shared by all four targets.
- * Direct frame rendering shows slot 12 as a two-frame sleeping swaddled infant;
- * family scenes select it only while VAR_CHILD_AGE_DAYS is below 60. The later
- * sleeping animation shows the older child and is shifted from 631 in FoMT to
- * 643 in MFoMT. The newborn animation is used exclusively
+/* The newborn animation is shared by all four targets and is used exclusively
  * for ENTITY_CHILD immediately after CreatePlayerChildEntity in childbirth
- * scenes. The later child base animations are shifted by game family. In
+ * scenes. Direct reconstruction from the FoMT-US animation records, tiles, and
+ * palette proves that slot 12 is the two-frame swaddled-infant sleeping pose and
+ * FoMT slot 631 is the older, capped child sleeping pose. MFoMT slot 643 has the
+ * same timing and the corresponding frame index shifted by three; US and JP
+ * agree within each family. The event scripts independently select slot 12 below
+ * child age day 60 and 631/643 at or above day 60 in nighttime family scenes.
+ * The proven later child base animations are shifted by game family. In
  * ordinary family scenes, VAR_CHILD_CAN_WALK selects walking-idle versus
  * pre-walking-idle. The first-steps event switches to the matching movement
  * animation immediately before MoveEntityXTo and restores walking-idle after
  * movement. US and JP agree within each game family.
  *
- * 新生儿与婴儿睡眠动画由四个目标共享。原生帧直接渲染显示槽 12 是襁褓婴儿的
- * 两帧睡眠动作，家庭事件仅在 VAR_CHILD_AGE_DAYS 小于 60 时选择它；较大孩子的
- * 睡眠动画在 FoMT 为 631、MFoMT 为 643。新生儿动画只在分娩事件中
- * CreatePlayerChildEntity 之后立即用于 ENTITY_CHILD。孩子后续阶段的基础动画
- * 则按男女版错位。普通家庭事件中，
+ * 新生儿动画由四个目标共享，只在分娩事件中 CreatePlayerChildEntity 之后立即
+ * 用于 ENTITY_CHILD。直接使用 FoMT-US 的动画记录、图块和调色板重建，已经证实
+ * 槽 12 是襁褓婴儿的两帧睡眠姿态，FoMT 槽 631 是戴帽较大孩子的睡眠姿态；MFoMT
+ * 槽 643 具有相同时序，对应帧编号整体后移三位。同一游戏族的 US／JP 完全一致。
+ * 事件脚本又独立证明夜间家庭场景在孩子年龄不足 60 日时选择槽 12，达到 60 日后
+ * 选择 631／643。已证实的孩子后续阶段基础动画按男女版错位。普通家庭事件中，
  * VAR_CHILD_CAN_WALK 在“会走后的待机”和“尚不会走的待机”之间选择；学步事件
  * 在 MoveEntityXTo 前切换到对应移动动画，并在移动完成后恢复会走待机。同一
  * 游戏族内部的 US／JP 编号一致。 */
@@ -4537,21 +4547,26 @@ mary_const_alias(ANIMATION_ID_0643, ANIMATION_CHILD_SLEEPING);
 mary_const_alias(ANIMATION_ID_0892, ANIMATION_FARM_DOG_SICK_IDLE);
 #endif
 
-/* The young farm dog's directional idle group starts at 942 in FoMT and 978
- * in MFoMT. Direct FoMT frame rendering shows the small dog in four facing
- * directions; the corresponding eight-entry groups have identical timing and
- * MFoMT frame indices are uniformly nine higher. The MFoMT opening sets the
- * farm dog facing left before selecting the base, reaching the left-facing
- * member of this group. Regional ROMs agree within each game family.
+/* FoMT 942..949 and MFoMT 978..985 are matching eight-entry animation groups:
+ * their timing is identical and every MFoMT frame index is shifted by nine.
+ * The MFoMT opening applies base 978 to ENTITY_FARM_DOG after selecting the
+ * puppy growth stage and facing left. Native SetAnim renders base + facing,
+ * so this call selects physical entry 980. Direct FoMT-US reconstruction shows
+ * 942..945 as the down, up, left, and right stationary puppy poses; the
+ * corresponding MFoMT records are 978..981. This proves 942/978 as the puppy
+ * idle base. The external FOMT Studio labels around this range are offset from
+ * the directly indexed ROM records and are retained only as untrusted hints.
  *
- * 幼年农场狗的四方向待机组在 FoMT 从 942 开始，在 MFoMT 从 978 开始。
- * FoMT 原生帧直接渲染显示四个朝向的小狗；两边八项对应组的时序相同，MFoMT
- * 帧号统一高 9。MFoMT 开场先把农场狗设为朝左，再选择该基础编号，最终落到
- * 本组朝左项。同一游戏族的 US／JP ROM 一致。 */
+ * FoMT 942..949 与 MFoMT 978..985 是对应的八项动画组：时序完全相同，MFoMT
+ * 帧号统一高 9。MFoMT 开场在选择幼犬成长阶段并令农场狗朝左后，把基础编号
+ * 978 用于 ENTITY_FARM_DOG；原生 SetAnim 实际渲染 base + facing，因此访问 980。
+ * FoMT-US 直接重建又显示 942..945 依次为幼犬朝下、朝上、朝左、朝右的静止姿态，
+ * MFoMT 对应记录为 978..981，故可确认 942／978 是幼犬待机基准。FOMT Studio
+ * 在本段的外部标签与 ROM 直接索引存在偏移，只保留为不可信候选。 */
 #if defined(MARY_FOMT)
-mary_const_alias(ANIMATION_ID_0942, ANIMATION_FARM_DOG_YOUNG_IDLE);
+mary_const_alias(ANIMATION_ID_0942, ANIMATION_FARM_DOG_PUPPY_IDLE);
 #elif defined(MARY_MFOMT)
-mary_const_alias(ANIMATION_ID_0978, ANIMATION_FARM_DOG_YOUNG_IDLE);
+mary_const_alias(ANIMATION_ID_0978, ANIMATION_FARM_DOG_PUPPY_IDLE);
 #endif
 
 /* Rick's base pair is the only one in this first group whose physical IDs are
@@ -4875,17 +4890,42 @@ typedef int MaryNpcFriendshipValue;
  */
 typedef int MaryCharacterLoveDelta;
 
-/* Absolute romantic-love value; emitted as a plain integer.
+/* Absolute romantic-love value and the seven visible heart-colour lower
+ * bounds. The game stores a continuous 0-65535 value, so arbitrary numeric
+ * values remain valid; these named members are the exact boundaries used by
+ * romance and rival-event dispatchers. A comparison against the next colour's
+ * lower bound expresses the upper edge of the current colour, for example
+ * `love < LOVE_HEART_PURPLE_MIN` means a black heart.
  *
- * 爱情度的绝对值；输出时保持普通整数。
+ * 爱情度的绝对值，以及七种可见心色的下界。游戏实际保存的是
+ * 0--65535 连续数值，因此仍允许任意数字；下列名称是恋爱与情敌事件
+ * 分派器实际使用的精确边界。与下一心色下界比较即表示当前心色的
+ * 上界，例如 `love < LOVE_HEART_PURPLE_MIN` 表示黑心。
  */
-typedef int MaryCharacterLoveValue;
+typedef enum MaryCharacterLoveValue
+{
+    LOVE_HEART_BLACK_MIN = 0,
+    LOVE_HEART_PURPLE_MIN = 10000,
+    LOVE_HEART_BLUE_MIN = 20000,
+    LOVE_HEART_GREEN_MIN = 30000,
+    LOVE_HEART_YELLOW_MIN = 40000,
+    LOVE_HEART_ORANGE_MIN = 50000,
+    LOVE_HEART_RED_MIN = 60000,
+} MaryCharacterLoveValue;
 
-/* Harvest Sprite work-contract duration in days; emitted as a plain integer.
+/* Harvest Sprite work-contract duration in days. Vanilla hiring dialogue offers
+ * one day, three days, or one week. The engine stores a numeric day count, so
+ * other integer durations remain valid and are emitted numerically.
  *
- * 小矮人工作委托的天数；输出时保持普通整数。
+ * 小矮人工作委托的天数。原版雇佣对话提供一天、三天或一周；引擎实际保存数字
+ * 天数，因此其他整数时长仍然有效，并保持数字形式输出。
  */
-typedef int MaryHarvestSpriteWorkDays;
+typedef enum MaryHarvestSpriteWorkDays
+{
+    HARVEST_SPRITE_WORK_DAYS_ONE_DAY = 1,
+    HARVEST_SPRITE_WORK_DAYS_THREE_DAYS = 3,
+    HARVEST_SPRITE_WORK_DAYS_ONE_WEEK = 7,
+} MaryHarvestSpriteWorkDays;
 
 /* Currency amount added or subtracted by a callable; emitted as a plain integer.
  *
@@ -4975,23 +5015,45 @@ typedef int MaryRgb5Channel;
  */
 typedef int MaryDaysSinceNpcConversation;
 
-/* Number of usable chicken incubators; emitted as a plain integer.
+/* Complete usable chicken-incubator capacity domain, derived solely from the
+ * coop's upgrade bit: one before expansion and two after expansion. This is a
+ * capacity, not an occupied-incubator count.
  *
- * 可用鸡舍孵化位数量；输出时保持普通整数。
+ * 仅由鸡舍扩建位决定的可用孵化箱数量：扩建前为 1，扩建后为 2。它表示容量，
+ * 不是已占用孵化箱数量。下列两项是完整的原生返回域。
  */
-typedef int MaryIncubatorCapacity;
+typedef enum MaryIncubatorCapacity
+{
+    INCUBATOR_CAPACITY_BASIC_COOP = 1,
+    INCUBATOR_CAPACITY_EXPANDED_COOP = 2,
+} MaryIncubatorCapacity;
 
-/* Number of usable barn pregnancy stalls; emitted as a plain integer.
+/* Complete usable barn pregnancy-stall capacity domain, derived solely from
+ * the barn's upgrade bit: one before expansion and two after expansion. This
+ * is a capacity, not an occupied-stall count.
  *
- * 可用畜棚怀孕栏数量；输出时保持普通整数。
+ * 仅由畜棚扩建位决定的可用怀孕栏数量：扩建前为 1，扩建后为 2。它表示容量，
+ * 不是已占用怀孕栏数量。下列两项是完整的原生返回域。
  */
-typedef int MaryPregnancyStallCapacity;
+typedef enum MaryPregnancyStallCapacity
+{
+    PREGNANCY_STALL_CAPACITY_BASIC_BARN = 1,
+    PREGNANCY_STALL_CAPACITY_EXPANDED_BARN = 2,
+} MaryPregnancyStallCapacity;
 
-/* Harvest Sprite experience in one work category; emitted as a plain integer.
+/* Harvest Sprite experience in one work category. Vanilla dialogue divides the
+ * continuous value into four bands at 50, 100, and 150; values other than the
+ * three proven boundaries remain numeric.
  *
- * 小矮人在一种工作类别中的经验值；输出时保持普通整数。
+ * 小矮人在一种工作类别中的经验值。原版对话以 50、100、150 为边界，将连续数值
+ * 分成四档；除这三个已确认边界外，其他数值仍保持数字形式。
  */
-typedef int MaryHarvestSpriteTaskExperience;
+typedef enum MaryHarvestSpriteTaskExperience
+{
+    HARVEST_SPRITE_TASK_EXPERIENCE_BEGINNER_MAX = 50,
+    HARVEST_SPRITE_TASK_EXPERIENCE_IMPROVING_MAX = 100,
+    HARVEST_SPRITE_TASK_EXPERIENCE_ENJOYING_MAX = 150,
+} MaryHarvestSpriteTaskExperience;
 
 /* Fish quantity accumulated by a record or globally; emitted as a plain integer.
  *
@@ -5035,9 +5097,11 @@ typedef int MaryAnimalAffectionValue;
  */
 typedef int MaryAnimalCount;
 
-/* Caught-fish size stored by a fishing record; emitted as a plain integer.
+/* Caught-fish size in whole centimeters; emitted as a plain integer. Vanilla
+ * scripts split it into meters and centimeters with division/modulo by 100.
  *
- * 钓鱼记录保存的鱼体尺寸；输出时保持普通整数。
+ * 以整厘米表示的捕获鱼尺寸；输出时保持普通整数。原版脚本以除以 100 和对 100
+ * 取模的方式拆分为米与厘米。
  */
 typedef int MaryFishSize;
 
@@ -5133,22 +5197,31 @@ mary_const_alias(CAMERA_MOVE_SPEED_5, CAMERA_MOVE_SPEED_NOMINAL_5_PIXELS_PER_UPD
  * reads byte +0x21, masks it with 3 and repeats the pair four times before
  * passing it to the shared OBJ renderer. Verified read paths: FoMT-US
  * 0x080327D4, FoMT-JP 0x08032568, MFoMT-US 0x08032B90, MFoMT-JP 0x08032A04.
- * Lower values have higher priority relative to backgrounds. Visual-controller
- * modes 1/2 can replace this with mappings 0x19/0x1A. Tea-party use of 1/2 is
+ * Lower values have higher priority relative to backgrounds. The semantic
+ * HIGHEST/HIGH/LOW/LOWEST names describe this four-value hardware ordering;
+ * the former numbered spellings remain source-compatibility aliases.
+ * Visual-controller modes 1/2 can replace this with mappings 0x19/0x1A. Tea-party use of 1/2 is
  * occlusion control, not evidence of a general seated/released state machine.
  *
  * 实体默认 OBJ 显示优先级，不是就座状态。绘制端读取角色 +0x21 字节，与 3
  * 相与后将该两位值重复四次，交给共享 OBJ 绘制函数。四版读取入口分别为
  * FoMT-US 0x080327D4、FoMT-JP 0x08032568、MFoMT-US 0x08032B90、
- * MFoMT-JP 0x08032A04。数值越小，相对背景的优先级越高；视觉控制器模式 1/2
- * 可以用 0x19/0x1A 映射覆盖此值。茶会使用 1/2 是遮挡控制，并非通用就座状态机。 */
+ * MFoMT-JP 0x08032A04。数值越小，相对背景的优先级越高；
+ * HIGHEST/HIGH/LOW/LOWEST 表示这四级硬件顺序，旧编号写法仅作为源码兼容别名。
+ * 视觉控制器模式 1/2 可以用 0x19/0x1A 映射覆盖此值。茶会使用 1/2 是遮挡控制，
+ * 并非通用就座状态机。 */
 typedef enum MaryEntitySpritePriority
 {
-    ENTITY_SPRITE_PRIORITY_0 = 0,
-    ENTITY_SPRITE_PRIORITY_1 = 1,
-    ENTITY_SPRITE_PRIORITY_2 = 2,
-    ENTITY_SPRITE_PRIORITY_3 = 3,
+    ENTITY_SPRITE_PRIORITY_HIGHEST = 0,
+    ENTITY_SPRITE_PRIORITY_HIGH = 1,
+    ENTITY_SPRITE_PRIORITY_LOW = 2,
+    ENTITY_SPRITE_PRIORITY_LOWEST = 3,
 } MaryEntitySpritePriority;
+
+mary_const_alias(ENTITY_SPRITE_PRIORITY_0, ENTITY_SPRITE_PRIORITY_HIGHEST);
+mary_const_alias(ENTITY_SPRITE_PRIORITY_1, ENTITY_SPRITE_PRIORITY_HIGH);
+mary_const_alias(ENTITY_SPRITE_PRIORITY_2, ENTITY_SPRITE_PRIORITY_LOW);
+mary_const_alias(ENTITY_SPRITE_PRIORITY_3, ENTITY_SPRITE_PRIORITY_LOWEST);
 
 /* Auxiliary render-component profiles assigned to temporary event entities.
  * The native renderer maps values 0, 1, and 2 to visual-controller components
@@ -5234,15 +5307,21 @@ typedef enum MaryTextVariableSlot
 
 /* Entity emote-bubble animation IDs shared by all four targets. Callable
  * 0x011 forwards this value unchanged to the entity's emote DefinedSprite;
- * FOMT-DOC identifies that resource, FOMT_Studio provides its complete 0-10
- * catalog, and equivalent US/JP scripts in both game families use the same
- * values. ID 8 is present in the resource catalog but is not used by the four
- * vanilla script sets. HEART corrects the source catalog's `Hearth` typo.
+ * FOMT-DOC identifies that resource, and equivalent US/JP scripts in both game
+ * families establish the meanings used below. ID 8 is present in the physical
+ * 0-10 domain but is not used by any of the four vanilla script sets. Its
+ * `Sleep` label occurs only in FOMT_Studio's community catalog and has not been
+ * confirmed through a correct graphics binding or a native call site, so Mary
+ * deliberately keeps that member numbered. HEART corrects the source
+ * catalog's `Hearth` typo, with the heart-event call sites as the primary
+ * evidence for the corrected meaning.
  *
  * 四个目标版本共用的实体表情气泡动画 ID。callable 0x011 会把该值原样交给
- * 实体的 emote DefinedSprite；FOMT-DOC 确认资源身份，FOMT_Studio 给出完整
- * 0-10 目录，男女版 US/JP 的对应脚本也使用相同数值。ID 8 虽存在于资源目录，
- * 但四套原版脚本均未使用。HEART 修正了来源目录中的 `Hearth` 拼写错误。 */
+ * 实体的 emote DefinedSprite；FOMT-DOC 确认资源身份，男女版 US/JP 的对应脚本
+ * 则证实下列已命名成员的含义。ID 8 属于物理 0-10 域，但四套原版脚本均未使用；
+ * `Sleep` 只见于 FOMT_Studio 社区目录，尚未由正确图形绑定或原生调用点证实，
+ * 因此 Mary 有意保留编号名称。HEART 修正来源目录中的 `Hearth` 拼写错误，
+ * 其主要依据是实际爱心事件调用点。 */
 typedef enum MaryEntityEmoteId
 {
     ENTITY_EMOTE_ANGRY = 0,
@@ -5253,7 +5332,7 @@ typedef enum MaryEntityEmoteId
     ENTITY_EMOTE_HAPPY = 5,
     ENTITY_EMOTE_THINKING = 6,
     ENTITY_EMOTE_SKULL = 7,
-    ENTITY_EMOTE_SLEEP = 8,
+    ENTITY_EMOTE_08 = 8,
     ENTITY_EMOTE_GOOD = 9,
     ENTITY_EMOTE_BAD = 10,
 } MaryEntityEmoteId;
@@ -5297,6 +5376,10 @@ typedef enum MaryAudioStartMode
  * names are deliberate evidence-neutral placeholders until a sequence's
  * official English identity is established. A numbered placeholder is not a
  * claim about whether that slot is music, ambience, or an effect.
+ * RecordPlayer's native 15-entry table maps Album 1 through Album 15 directly
+ * to sequence IDs 18 through 32. The official US item text calls the final
+ * five only Album 11 through Album 15 and marks them unused; it provides no
+ * song titles, so those five constants deliberately retain the album numbers.
  *
  * 完整的 m4a 物理序列 ID 域。四个目标各自独立具有 211 条连续 SongEnt：
  * FoMT-US 为 0x0813ABF0-0x0813B288，FoMT-JP 为
@@ -5306,10 +5389,13 @@ typedef enum MaryAudioStartMode
  * 从未引用某个槽，也必须保留。已经证实的前段背景音乐、环境声、唱片和小游戏
  * 序列使用语义名称；其余编号名称是在序列的官方英文身份得到确认前采用的中性
  * 占位，不表示该槽究竟属于音乐、环境音还是音效。
+ * RecordPlayer 的原生 15 项表将唱片 1 至 15 直接映射到序列 18 至 32。US 官方
+ * 物品文本只把最后五项称为 Album 11 至 Album 15，并标明它们未使用，没有提供
+ * 曲名，因此这五项常量有意保留唱片编号。
  */
 typedef enum MaryAudioSequenceId
 {
-    AUDIO_SEQUENCE_000 = 0,
+    AUDIO_UNUSED_SLOT_000 = 0,
     AUDIO_BGM_SPRING = 1,
     AUDIO_BGM_SUMMER = 2,
     AUDIO_BGM_AUTUMN = 3,
@@ -5337,11 +5423,11 @@ typedef enum MaryAudioSequenceId
     AUDIO_RECORD_AUTUMN_JOY = 25,
     AUDIO_RECORD_QUIET_WINTER = 26,
     AUDIO_RECORD_GRIFFIN_BLUE = 27,
-    AUDIO_SEQUENCE_028 = 28,
-    AUDIO_SEQUENCE_029 = 29,
-    AUDIO_SEQUENCE_030 = 30,
-    AUDIO_SEQUENCE_031 = 31,
-    AUDIO_SEQUENCE_032 = 32,
+    AUDIO_RECORD_ALBUM_11 = 28,
+    AUDIO_RECORD_ALBUM_12 = 29,
+    AUDIO_RECORD_ALBUM_13 = 30,
+    AUDIO_RECORD_ALBUM_14 = 31,
+    AUDIO_RECORD_ALBUM_15 = 32,
     AUDIO_BGM_HORSE_RACE_MINIGAME = 33,
     AUDIO_BGM_HARVEST_SPRITE_MINIGAME = 34,
     AUDIO_BGM_TITLE_SCREEN = 35,
@@ -5354,70 +5440,70 @@ typedef enum MaryAudioSequenceId
     AUDIO_RECORD_NEW_RECORD_4 = 41,
     AUDIO_RECORD_NEW_RECORD_5 = 42,
 #else
-    AUDIO_SEQUENCE_038 = 38,
-    AUDIO_SEQUENCE_039 = 39,
-    AUDIO_SEQUENCE_040 = 40,
-    AUDIO_SEQUENCE_041 = 41,
-    AUDIO_SEQUENCE_042 = 42,
+    AUDIO_UNUSED_SLOT_038 = 38,
+    AUDIO_UNUSED_SLOT_039 = 39,
+    AUDIO_UNUSED_SLOT_040 = 40,
+    AUDIO_UNUSED_SLOT_041 = 41,
+    AUDIO_UNUSED_SLOT_042 = 42,
 #endif
-    AUDIO_SEQUENCE_043 = 43,
-    AUDIO_SEQUENCE_044 = 44,
-    AUDIO_SEQUENCE_045 = 45,
-    AUDIO_SEQUENCE_046 = 46,
-    AUDIO_SEQUENCE_047 = 47,
-    AUDIO_SEQUENCE_048 = 48,
-    AUDIO_SEQUENCE_049 = 49,
-    AUDIO_SEQUENCE_050 = 50,
-    AUDIO_SEQUENCE_051 = 51,
-    AUDIO_SEQUENCE_052 = 52,
-    AUDIO_SEQUENCE_053 = 53,
-    AUDIO_SEQUENCE_054 = 54,
-    AUDIO_SEQUENCE_055 = 55,
-    AUDIO_SEQUENCE_056 = 56,
-    AUDIO_SEQUENCE_057 = 57,
-    AUDIO_SEQUENCE_058 = 58,
-    AUDIO_SEQUENCE_059 = 59,
-    AUDIO_SEQUENCE_060 = 60,
-    AUDIO_SEQUENCE_061 = 61,
-    AUDIO_SEQUENCE_062 = 62,
-    AUDIO_SEQUENCE_063 = 63,
-    AUDIO_SEQUENCE_064 = 64,
-    AUDIO_SEQUENCE_065 = 65,
-    AUDIO_SEQUENCE_066 = 66,
-    AUDIO_SEQUENCE_067 = 67,
-    AUDIO_SEQUENCE_068 = 68,
-    AUDIO_SEQUENCE_069 = 69,
-    AUDIO_SEQUENCE_070 = 70,
-    AUDIO_SEQUENCE_071 = 71,
-    AUDIO_SEQUENCE_072 = 72,
-    AUDIO_SEQUENCE_073 = 73,
-    AUDIO_SEQUENCE_074 = 74,
-    AUDIO_SEQUENCE_075 = 75,
-    AUDIO_SEQUENCE_076 = 76,
-    AUDIO_SEQUENCE_077 = 77,
-    AUDIO_SEQUENCE_078 = 78,
-    AUDIO_SEQUENCE_079 = 79,
-    AUDIO_SEQUENCE_080 = 80,
-    AUDIO_SEQUENCE_081 = 81,
-    AUDIO_SEQUENCE_082 = 82,
-    AUDIO_SEQUENCE_083 = 83,
-    AUDIO_SEQUENCE_084 = 84,
-    AUDIO_SEQUENCE_085 = 85,
-    AUDIO_SEQUENCE_086 = 86,
-    AUDIO_SEQUENCE_087 = 87,
-    AUDIO_SEQUENCE_088 = 88,
-    AUDIO_SEQUENCE_089 = 89,
-    AUDIO_SEQUENCE_090 = 90,
-    AUDIO_SEQUENCE_091 = 91,
-    AUDIO_SEQUENCE_092 = 92,
-    AUDIO_SEQUENCE_093 = 93,
-    AUDIO_SEQUENCE_094 = 94,
-    AUDIO_SEQUENCE_095 = 95,
-    AUDIO_SEQUENCE_096 = 96,
-    AUDIO_SEQUENCE_097 = 97,
-    AUDIO_SEQUENCE_098 = 98,
-    AUDIO_SEQUENCE_099 = 99,
-    AUDIO_SEQUENCE_100 = 100,
+    AUDIO_UNUSED_SLOT_043 = 43,
+    AUDIO_UNUSED_SLOT_044 = 44,
+    AUDIO_UNUSED_SLOT_045 = 45,
+    AUDIO_UNUSED_SLOT_046 = 46,
+    AUDIO_UNUSED_SLOT_047 = 47,
+    AUDIO_UNUSED_SLOT_048 = 48,
+    AUDIO_UNUSED_SLOT_049 = 49,
+    AUDIO_UNUSED_SLOT_050 = 50,
+    AUDIO_UNUSED_SLOT_051 = 51,
+    AUDIO_UNUSED_SLOT_052 = 52,
+    AUDIO_UNUSED_SLOT_053 = 53,
+    AUDIO_UNUSED_SLOT_054 = 54,
+    AUDIO_UNUSED_SLOT_055 = 55,
+    AUDIO_UNUSED_SLOT_056 = 56,
+    AUDIO_UNUSED_SLOT_057 = 57,
+    AUDIO_UNUSED_SLOT_058 = 58,
+    AUDIO_UNUSED_SLOT_059 = 59,
+    AUDIO_UNUSED_SLOT_060 = 60,
+    AUDIO_UNUSED_SLOT_061 = 61,
+    AUDIO_UNUSED_SLOT_062 = 62,
+    AUDIO_UNUSED_SLOT_063 = 63,
+    AUDIO_UNUSED_SLOT_064 = 64,
+    AUDIO_UNUSED_SLOT_065 = 65,
+    AUDIO_UNUSED_SLOT_066 = 66,
+    AUDIO_UNUSED_SLOT_067 = 67,
+    AUDIO_UNUSED_SLOT_068 = 68,
+    AUDIO_UNUSED_SLOT_069 = 69,
+    AUDIO_UNUSED_SLOT_070 = 70,
+    AUDIO_UNUSED_SLOT_071 = 71,
+    AUDIO_UNUSED_SLOT_072 = 72,
+    AUDIO_UNUSED_SLOT_073 = 73,
+    AUDIO_UNUSED_SLOT_074 = 74,
+    AUDIO_UNUSED_SLOT_075 = 75,
+    AUDIO_UNUSED_SLOT_076 = 76,
+    AUDIO_UNUSED_SLOT_077 = 77,
+    AUDIO_UNUSED_SLOT_078 = 78,
+    AUDIO_UNUSED_SLOT_079 = 79,
+    AUDIO_UNUSED_SLOT_080 = 80,
+    AUDIO_UNUSED_SLOT_081 = 81,
+    AUDIO_UNUSED_SLOT_082 = 82,
+    AUDIO_UNUSED_SLOT_083 = 83,
+    AUDIO_UNUSED_SLOT_084 = 84,
+    AUDIO_UNUSED_SLOT_085 = 85,
+    AUDIO_UNUSED_SLOT_086 = 86,
+    AUDIO_UNUSED_SLOT_087 = 87,
+    AUDIO_UNUSED_SLOT_088 = 88,
+    AUDIO_UNUSED_SLOT_089 = 89,
+    AUDIO_UNUSED_SLOT_090 = 90,
+    AUDIO_UNUSED_SLOT_091 = 91,
+    AUDIO_UNUSED_SLOT_092 = 92,
+    AUDIO_UNUSED_SLOT_093 = 93,
+    AUDIO_UNUSED_SLOT_094 = 94,
+    AUDIO_UNUSED_SLOT_095 = 95,
+    AUDIO_UNUSED_SLOT_096 = 96,
+    AUDIO_UNUSED_SLOT_097 = 97,
+    AUDIO_UNUSED_SLOT_098 = 98,
+    AUDIO_UNUSED_SLOT_099 = 99,
+    AUDIO_UNUSED_SLOT_100 = 100,
     AUDIO_SFX_EAT = 101,
     AUDIO_SFX_DRINK = 102,
     AUDIO_SEQUENCE_103 = 103,
@@ -5448,21 +5534,21 @@ typedef enum MaryAudioSequenceId
     AUDIO_SEQUENCE_128 = 128,
     AUDIO_SEQUENCE_129 = 129,
     AUDIO_SEQUENCE_130 = 130,
-    AUDIO_SEQUENCE_131 = 131,
+    AUDIO_SFX_HAMMER_MAX_CHARGED_SWING = 131,
     AUDIO_SFX_AXE_BRANCH_CHOP = 132,
     AUDIO_SFX_AXE_STUMP_CHOP = 133,
     AUDIO_SEQUENCE_134 = 134,
     AUDIO_SEQUENCE_135 = 135,
     AUDIO_SEQUENCE_136 = 136,
     AUDIO_SEQUENCE_137 = 137,
-    AUDIO_SEQUENCE_138 = 138,
+    AUDIO_SFX_AXE_MAX_CHARGED_SWING = 138,
     AUDIO_SFX_WATERING_CAN_POUR = 139,
     AUDIO_SEQUENCE_140 = 140,
     AUDIO_SEQUENCE_141 = 141,
     AUDIO_SEQUENCE_142 = 142,
     AUDIO_SEQUENCE_143 = 143,
     AUDIO_SEQUENCE_144 = 144,
-    AUDIO_SEQUENCE_145 = 145,
+    AUDIO_SFX_WATERING_CAN_MAX_CHARGED_POUR = 145,
     AUDIO_SFX_WATER_SPLASH = 146,
     AUDIO_SFX_BRUSH_LIVESTOCK = 147,
     AUDIO_SFX_SOW_SEEDS = 148,
@@ -5490,8 +5576,8 @@ typedef enum MaryAudioSequenceId
     AUDIO_SEQUENCE_170 = 170,
     AUDIO_SEQUENCE_171 = 171,
     AUDIO_SFX_BABY_CRY = 172,
-    AUDIO_SEQUENCE_173 = 173,
-    AUDIO_SEQUENCE_174 = 174,
+    AUDIO_SFX_HARVEST_SPRITE_FUSION_FINISH = 173,
+    AUDIO_SFX_HARVEST_SPRITE_FUSION_PULSE = 174,
     AUDIO_SFX_TIME_PASSES = 175,
     AUDIO_SFX_SUCCESS = 176,
     AUDIO_SFX_FIREWORK_LAUNCH = 177,
@@ -5511,9 +5597,9 @@ typedef enum MaryAudioSequenceId
     AUDIO_SEQUENCE_191 = 191,
     AUDIO_SFX_QUESTION_EMOTE = 192,
     AUDIO_SFX_APPLAUSE = 193,
-    AUDIO_SEQUENCE_194 = 194,
-    AUDIO_SEQUENCE_195 = 195,
-    AUDIO_SEQUENCE_196 = 196,
+    AUDIO_UNUSED_SLOT_194 = 194,
+    AUDIO_UNUSED_SLOT_195 = 195,
+    AUDIO_UNUSED_SLOT_196 = 196,
     AUDIO_SEQUENCE_197 = 197,
     AUDIO_SEQUENCE_198 = 198,
     AUDIO_SFX_INCORRECT_ANSWER = 199,
@@ -5550,28 +5636,38 @@ typedef enum MaryAudioSequenceId
  * repeated large Stone strikes, and six repeated huge Stone strikes. IDs 132
  * and 133 occur at the impact frames for chopping a branch and repeatedly
  * chopping a stump respectively. A direct Sappy sequence comparison also
- * shows why 131, 138, 144, and 145 remain numbered: 125-131 are pitch/duration
+ * shows the physical families: 125-131 are pitch/duration
  * variants of one hammer timbre, 132-138 are variants of one axe timbre, and
- * 139-145 are variants of one watering-can timbre. MFoMT's blackout scene
+ * 139-145 are variants of one watering-can timbre. The MFoMT opening directly
+ * pairs 131, 138, and 145 with the player's maximum charged hammer swing, axe
+ * swing, and watering-can pour respectively, so those three terminal family
+ * members have semantic names. MFoMT's blackout scene
  * alternates 144 and 131 between one-frame waits and screen flashes. The
  * MFoMT opening also calls 131 after the protagonist's animation and before
  * Thomas's exclamation or the next scene-state value; its adjacent reaction
  * branches call 138 and 145 after two different player animations and
  * immediately before assigning the next scene-state value. Consequently
- * 131, 138, 144, and 145 are action-synchronized members of their respective
- * tool-timbre families, not blackout- or opening-specific sounds.
+ * 131 is therefore a hammer sound reused for the blackout rather than a
+ * blackout-specific identity. ID 144 lacks a corresponding watering action
+ * call and remains numbered.
  * Call-site timing is audited separately from sequence identity: in MFoMT's
  * New Year's Eve bad-dream event, 170 plays immediately before Karen's attack
- * animation and a screen flash, 174 repeats as individual Harvest Sprites
- * vanish with colored flashes, and 173 follows the final grouped disappearance
- * immediately before the white fade. These timings document their dramatic
- * use, but do not establish sufficiently precise official sound names, so the
- * three IDs remain numbered.
- * An exhaustive scan of the four vanilla Mary-C script sets leaves exactly seven
- * referenced sequences under neutral numbered names: 131, 138, 144, 145, 170,
- * 173, and 174. Every other sequence referenced by an event
- * script has a call-site-supported semantic name; unreferenced physical slots
- * remain numbered because call timing cannot establish their identity.
+ * animation and a screen flash. ID 174 is a short noise pulse repeated as each
+ * Harvest Sprite vanishes with a colored flash and once more when the grouped
+ * fusion effect appears. The two-track ID 173 follows that final pulse and
+ * closes the fusion immediately before the white fade. Their complete call
+ * topology and rendered sequence envelopes therefore support the broad
+ * FUSION_PULSE and FUSION_FINISH names without inventing an official onomatopoeia.
+ * ID 170 still has only one composite attack-scene use and remains numbered.
+ * An exhaustive scan of the four vanilla Mary-C script sets leaves exactly two
+ * referenced sequences under neutral numbered names: 144 and 170.
+ * Every other sequence referenced by an event
+ * script has a call-site-supported semantic name. Slots 0, 43-100, and
+ * 194-196 in all four ROMs point to the same zero-track SongEnt and are named
+ * as unused physical slots. FoMT slots 38-42 also point to that zero-track
+ * entry, whereas MFoMT replaces them with five real New Record sequences.
+ * Other unreferenced, nonempty physical slots remain numbered because their
+ * data alone cannot establish an English identity.
  * Three reusable cues have deliberately broad names backed by both sequence
  * structure and cross-call-site evidence. ID 157 is a multi-note sequence
  * called after explanatory dialogue and immediately
@@ -5624,21 +5720,27 @@ typedef enum MaryAudioSequenceId
  * 被点亮前调用。125-127 只出现在
  * 种田教程的锤击命中帧：依次对应敲击一次小石头、重复敲击三次大型石头、重复
  * 敲击六次巨型石头。132、133 分别位于砍断树枝与反复劈砍树桩的命中帧。
- * 对 Sappy 序列的直接比较也说明了为什么 131、138、144、145 继续保留编号：
+ * 对 Sappy 序列的直接比较可确认各项所属的物理音色族：
  * 125-131 是同一锤击音色的音高／时长变体，132-138 是同一斧击音色的变体，
- * 139-145 是同一洒水壶音色的变体。MFoMT 停电演出会在单帧等待与屏幕闪烁之间
+ * 139-145 是同一洒水壶音色的变体。MFoMT 开场又把 131、138、145 分别直接配在
+ * 玩家最大蓄力锤挥击、最大蓄力斧挥击和最大蓄力洒水动作之后，因此三个音色族末项
+ * 已取得动作级语义名称。MFoMT 停电演出会在单帧等待与屏幕闪烁之间
  * 交替调用 144 和 131。MFoMT 开场还会在主角动作之后、Thomas 的惊叹号或下一个
  * 场景状态赋值之前调用 131；与其相邻的两种反应分支则会在不同的主角动作之后、
- * 写入下一个场景状态之前分别调用 138 与 145。因此 131、138、144、145 只能确认
- * 是各自工具音色族中与动作同步的成员，不能命名成停电或开场专用音效。调用时机与
+ * 写入下一个场景状态之前分别调用 138 与 145。因此 131 是被停电演出复用的锤击音，
+ * 不是停电专用音效；144 缺少对应的洒水动作调用，继续保留编号。调用时机与
  * 序列身份分开审计：在 MFoMT 的除夕噩梦事件中，
- * 170 紧接在 Karen 的攻击动画和屏幕闪烁之前；174 在每个小矮人伴随彩色闪光
- * 消失时重复播放；173 则在最后一组角色消失后、白色淡出前播放。这些时机能够
- * 记录其演出用途，但还不足以证明精确的官方音效名称，因此三个 ID 继续保留编号。
+ * 170 紧接在 Karen 的攻击动画和屏幕闪烁之前。174 是短噪声脉冲，会在每个小矮人
+ * 伴随彩色闪光消失时重复播放，并在组合融合特效出现时再播放一次；双轨 173 紧随
+ * 最后一次脉冲，在白色淡出前结束融合。完整调用拓扑及实际渲染包络足以支持宽泛的
+ * FUSION_PULSE 与 FUSION_FINISH 名称，而无需杜撰官方拟声词。170 仍只有一个复合攻击
+ * 场景用途，继续保留编号。
  * 对四套原版 Mary-C 脚本进行完整扫描后，仍以中性编号形式被脚本引用的序列恰好只有
- * 七个：131、138、144、145、170、173、174。其余被事件脚本调用的
- * 序列均已获得调用位置支持的语义名称；从未被脚本引用的物理槽仍保留编号，因为无法
- * 从调用时机证明其身份。另有三个复用提示音采用了同时受音轨结构与跨调用点支持的
+ * 两个：144、170。其余被事件脚本调用的
+ * 序列均已获得调用位置支持的语义名称。四套 ROM 的 0、43-100、194-196 槽都指向
+ * 同一个零音轨 SongEnt，因此命名为未使用物理槽；FoMT 的 38-42 也指向该空项，
+ * MFoMT 则在这五个槽中放入真实的 New Record 序列。其他未被脚本引用但实际非空的
+ * 物理槽仍保留编号，因为单凭序列数据无法证明其英文身份。另有三个复用提示音采用了同时受音轨结构与跨调用点支持的
  * 宽泛名称。157 是多音符序列，会在鸡、牛、羊教程的说明对白结束后、动物药或奇迹药
  * 演示动作之前调用，也会在 Carter 的解除诅咒农具祈祷之后、六十帧等待之前调用，故命名为
  * HEAL_OR_PURIFY，而不是局限于药物或诅咒。179 是双轨钟琴式序列，通常在婚礼淡入后以三秒
@@ -5660,6 +5762,7 @@ typedef enum MaryAudioSequenceId
  * 保留编号名称。FOMT Studio 的
  * 简略 `sonidos.json` 标签若与这些原生调用位置冲突，则不作为权威依据；其详细
  * SongEnt 偏移 CSV 仅在记录指针与 FoMT-US ROM 逐字节相符时采用。 */
+mary_const_alias(AUDIO_SEQUENCE_000, AUDIO_UNUSED_SLOT_000);
 mary_const_alias(AUDIO_SEQUENCE_001, AUDIO_BGM_SPRING);
 mary_const_alias(AUDIO_SEQUENCE_002, AUDIO_BGM_SUMMER);
 mary_const_alias(AUDIO_SEQUENCE_003, AUDIO_BGM_AUTUMN);
@@ -5687,18 +5790,87 @@ mary_const_alias(AUDIO_SEQUENCE_024, AUDIO_RECORD_SUMMER_MEMORIES);
 mary_const_alias(AUDIO_SEQUENCE_025, AUDIO_RECORD_AUTUMN_JOY);
 mary_const_alias(AUDIO_SEQUENCE_026, AUDIO_RECORD_QUIET_WINTER);
 mary_const_alias(AUDIO_SEQUENCE_027, AUDIO_RECORD_GRIFFIN_BLUE);
+mary_const_alias(AUDIO_SEQUENCE_028, AUDIO_RECORD_ALBUM_11);
+mary_const_alias(AUDIO_SEQUENCE_029, AUDIO_RECORD_ALBUM_12);
+mary_const_alias(AUDIO_SEQUENCE_030, AUDIO_RECORD_ALBUM_13);
+mary_const_alias(AUDIO_SEQUENCE_031, AUDIO_RECORD_ALBUM_14);
+mary_const_alias(AUDIO_SEQUENCE_032, AUDIO_RECORD_ALBUM_15);
 mary_const_alias(AUDIO_SEQUENCE_033, AUDIO_BGM_HORSE_RACE_MINIGAME);
 mary_const_alias(AUDIO_SEQUENCE_034, AUDIO_BGM_HARVEST_SPRITE_MINIGAME);
 mary_const_alias(AUDIO_SEQUENCE_035, AUDIO_BGM_TITLE_SCREEN);
 mary_const_alias(AUDIO_SEQUENCE_036, AUDIO_BGM_CREDITS);
 mary_const_alias(AUDIO_SEQUENCE_037, AUDIO_BGM_CHILDHOOD);
-#if defined(MARY_MFOMT)
+#if defined(MARY_FOMT)
+mary_const_alias(AUDIO_SEQUENCE_038, AUDIO_UNUSED_SLOT_038);
+mary_const_alias(AUDIO_SEQUENCE_039, AUDIO_UNUSED_SLOT_039);
+mary_const_alias(AUDIO_SEQUENCE_040, AUDIO_UNUSED_SLOT_040);
+mary_const_alias(AUDIO_SEQUENCE_041, AUDIO_UNUSED_SLOT_041);
+mary_const_alias(AUDIO_SEQUENCE_042, AUDIO_UNUSED_SLOT_042);
+#elif defined(MARY_MFOMT)
 mary_const_alias(AUDIO_SEQUENCE_038, AUDIO_RECORD_NEW_RECORD_1);
 mary_const_alias(AUDIO_SEQUENCE_039, AUDIO_RECORD_NEW_RECORD_2);
 mary_const_alias(AUDIO_SEQUENCE_040, AUDIO_RECORD_NEW_RECORD_3);
 mary_const_alias(AUDIO_SEQUENCE_041, AUDIO_RECORD_NEW_RECORD_4);
 mary_const_alias(AUDIO_SEQUENCE_042, AUDIO_RECORD_NEW_RECORD_5);
 #endif
+mary_const_alias(AUDIO_SEQUENCE_043, AUDIO_UNUSED_SLOT_043);
+mary_const_alias(AUDIO_SEQUENCE_044, AUDIO_UNUSED_SLOT_044);
+mary_const_alias(AUDIO_SEQUENCE_045, AUDIO_UNUSED_SLOT_045);
+mary_const_alias(AUDIO_SEQUENCE_046, AUDIO_UNUSED_SLOT_046);
+mary_const_alias(AUDIO_SEQUENCE_047, AUDIO_UNUSED_SLOT_047);
+mary_const_alias(AUDIO_SEQUENCE_048, AUDIO_UNUSED_SLOT_048);
+mary_const_alias(AUDIO_SEQUENCE_049, AUDIO_UNUSED_SLOT_049);
+mary_const_alias(AUDIO_SEQUENCE_050, AUDIO_UNUSED_SLOT_050);
+mary_const_alias(AUDIO_SEQUENCE_051, AUDIO_UNUSED_SLOT_051);
+mary_const_alias(AUDIO_SEQUENCE_052, AUDIO_UNUSED_SLOT_052);
+mary_const_alias(AUDIO_SEQUENCE_053, AUDIO_UNUSED_SLOT_053);
+mary_const_alias(AUDIO_SEQUENCE_054, AUDIO_UNUSED_SLOT_054);
+mary_const_alias(AUDIO_SEQUENCE_055, AUDIO_UNUSED_SLOT_055);
+mary_const_alias(AUDIO_SEQUENCE_056, AUDIO_UNUSED_SLOT_056);
+mary_const_alias(AUDIO_SEQUENCE_057, AUDIO_UNUSED_SLOT_057);
+mary_const_alias(AUDIO_SEQUENCE_058, AUDIO_UNUSED_SLOT_058);
+mary_const_alias(AUDIO_SEQUENCE_059, AUDIO_UNUSED_SLOT_059);
+mary_const_alias(AUDIO_SEQUENCE_060, AUDIO_UNUSED_SLOT_060);
+mary_const_alias(AUDIO_SEQUENCE_061, AUDIO_UNUSED_SLOT_061);
+mary_const_alias(AUDIO_SEQUENCE_062, AUDIO_UNUSED_SLOT_062);
+mary_const_alias(AUDIO_SEQUENCE_063, AUDIO_UNUSED_SLOT_063);
+mary_const_alias(AUDIO_SEQUENCE_064, AUDIO_UNUSED_SLOT_064);
+mary_const_alias(AUDIO_SEQUENCE_065, AUDIO_UNUSED_SLOT_065);
+mary_const_alias(AUDIO_SEQUENCE_066, AUDIO_UNUSED_SLOT_066);
+mary_const_alias(AUDIO_SEQUENCE_067, AUDIO_UNUSED_SLOT_067);
+mary_const_alias(AUDIO_SEQUENCE_068, AUDIO_UNUSED_SLOT_068);
+mary_const_alias(AUDIO_SEQUENCE_069, AUDIO_UNUSED_SLOT_069);
+mary_const_alias(AUDIO_SEQUENCE_070, AUDIO_UNUSED_SLOT_070);
+mary_const_alias(AUDIO_SEQUENCE_071, AUDIO_UNUSED_SLOT_071);
+mary_const_alias(AUDIO_SEQUENCE_072, AUDIO_UNUSED_SLOT_072);
+mary_const_alias(AUDIO_SEQUENCE_073, AUDIO_UNUSED_SLOT_073);
+mary_const_alias(AUDIO_SEQUENCE_074, AUDIO_UNUSED_SLOT_074);
+mary_const_alias(AUDIO_SEQUENCE_075, AUDIO_UNUSED_SLOT_075);
+mary_const_alias(AUDIO_SEQUENCE_076, AUDIO_UNUSED_SLOT_076);
+mary_const_alias(AUDIO_SEQUENCE_077, AUDIO_UNUSED_SLOT_077);
+mary_const_alias(AUDIO_SEQUENCE_078, AUDIO_UNUSED_SLOT_078);
+mary_const_alias(AUDIO_SEQUENCE_079, AUDIO_UNUSED_SLOT_079);
+mary_const_alias(AUDIO_SEQUENCE_080, AUDIO_UNUSED_SLOT_080);
+mary_const_alias(AUDIO_SEQUENCE_081, AUDIO_UNUSED_SLOT_081);
+mary_const_alias(AUDIO_SEQUENCE_082, AUDIO_UNUSED_SLOT_082);
+mary_const_alias(AUDIO_SEQUENCE_083, AUDIO_UNUSED_SLOT_083);
+mary_const_alias(AUDIO_SEQUENCE_084, AUDIO_UNUSED_SLOT_084);
+mary_const_alias(AUDIO_SEQUENCE_085, AUDIO_UNUSED_SLOT_085);
+mary_const_alias(AUDIO_SEQUENCE_086, AUDIO_UNUSED_SLOT_086);
+mary_const_alias(AUDIO_SEQUENCE_087, AUDIO_UNUSED_SLOT_087);
+mary_const_alias(AUDIO_SEQUENCE_088, AUDIO_UNUSED_SLOT_088);
+mary_const_alias(AUDIO_SEQUENCE_089, AUDIO_UNUSED_SLOT_089);
+mary_const_alias(AUDIO_SEQUENCE_090, AUDIO_UNUSED_SLOT_090);
+mary_const_alias(AUDIO_SEQUENCE_091, AUDIO_UNUSED_SLOT_091);
+mary_const_alias(AUDIO_SEQUENCE_092, AUDIO_UNUSED_SLOT_092);
+mary_const_alias(AUDIO_SEQUENCE_093, AUDIO_UNUSED_SLOT_093);
+mary_const_alias(AUDIO_SEQUENCE_094, AUDIO_UNUSED_SLOT_094);
+mary_const_alias(AUDIO_SEQUENCE_095, AUDIO_UNUSED_SLOT_095);
+mary_const_alias(AUDIO_SEQUENCE_096, AUDIO_UNUSED_SLOT_096);
+mary_const_alias(AUDIO_SEQUENCE_097, AUDIO_UNUSED_SLOT_097);
+mary_const_alias(AUDIO_SEQUENCE_098, AUDIO_UNUSED_SLOT_098);
+mary_const_alias(AUDIO_SEQUENCE_099, AUDIO_UNUSED_SLOT_099);
+mary_const_alias(AUDIO_SEQUENCE_100, AUDIO_UNUSED_SLOT_100);
 mary_const_alias(AUDIO_SEQUENCE_101, AUDIO_SFX_EAT);
 mary_const_alias(AUDIO_SEQUENCE_102, AUDIO_SFX_DRINK);
 mary_const_alias(AUDIO_SEQUENCE_105, AUDIO_SFX_ENTER_HOT_SPRING);
@@ -5713,10 +5885,13 @@ mary_const_alias(AUDIO_SEQUENCE_124, AUDIO_SFX_ADD_ITEM_TO_FIRE);
 mary_const_alias(AUDIO_SEQUENCE_125, AUDIO_SFX_HAMMER_SMALL_STONE);
 mary_const_alias(AUDIO_SEQUENCE_126, AUDIO_SFX_HAMMER_LARGE_STONE);
 mary_const_alias(AUDIO_SEQUENCE_127, AUDIO_SFX_HAMMER_HUGE_STONE);
+mary_const_alias(AUDIO_SEQUENCE_131, AUDIO_SFX_HAMMER_MAX_CHARGED_SWING);
 mary_const_alias(AUDIO_SEQUENCE_132, AUDIO_SFX_AXE_BRANCH_CHOP);
 mary_const_alias(AUDIO_SFX_AXE_CHOP, AUDIO_SFX_AXE_BRANCH_CHOP);
 mary_const_alias(AUDIO_SEQUENCE_133, AUDIO_SFX_AXE_STUMP_CHOP);
+mary_const_alias(AUDIO_SEQUENCE_138, AUDIO_SFX_AXE_MAX_CHARGED_SWING);
 mary_const_alias(AUDIO_SEQUENCE_139, AUDIO_SFX_WATERING_CAN_POUR);
+mary_const_alias(AUDIO_SEQUENCE_145, AUDIO_SFX_WATERING_CAN_MAX_CHARGED_POUR);
 mary_const_alias(AUDIO_SEQUENCE_146, AUDIO_SFX_WATER_SPLASH);
 mary_const_alias(AUDIO_SEQUENCE_147, AUDIO_SFX_BRUSH_LIVESTOCK);
 mary_const_alias(AUDIO_SEQUENCE_148, AUDIO_SFX_SOW_SEEDS);
@@ -5730,6 +5905,8 @@ mary_const_alias(AUDIO_SEQUENCE_163, AUDIO_SFX_SHEEP_BLEAT);
 mary_const_alias(AUDIO_SEQUENCE_167, AUDIO_SFX_FOAL_NEIGH);
 mary_const_alias(AUDIO_SEQUENCE_169, AUDIO_SFX_DOG_BARK);
 mary_const_alias(AUDIO_SEQUENCE_172, AUDIO_SFX_BABY_CRY);
+mary_const_alias(AUDIO_SEQUENCE_173, AUDIO_SFX_HARVEST_SPRITE_FUSION_FINISH);
+mary_const_alias(AUDIO_SEQUENCE_174, AUDIO_SFX_HARVEST_SPRITE_FUSION_PULSE);
 mary_const_alias(AUDIO_SEQUENCE_175, AUDIO_SFX_TIME_PASSES);
 mary_const_alias(AUDIO_SEQUENCE_176, AUDIO_SFX_SUCCESS);
 mary_const_alias(AUDIO_SEQUENCE_177, AUDIO_SFX_FIREWORK_LAUNCH);
@@ -5742,6 +5919,9 @@ mary_const_alias(AUDIO_SEQUENCE_188, AUDIO_SFX_STAR_SPARKLE);
 mary_const_alias(AUDIO_SEQUENCE_190, AUDIO_SFX_HARVEST_GODDESS_APPEARS);
 mary_const_alias(AUDIO_SEQUENCE_192, AUDIO_SFX_QUESTION_EMOTE);
 mary_const_alias(AUDIO_SEQUENCE_193, AUDIO_SFX_APPLAUSE);
+mary_const_alias(AUDIO_SEQUENCE_194, AUDIO_UNUSED_SLOT_194);
+mary_const_alias(AUDIO_SEQUENCE_195, AUDIO_UNUSED_SLOT_195);
+mary_const_alias(AUDIO_SEQUENCE_196, AUDIO_UNUSED_SLOT_196);
 mary_const_alias(AUDIO_SEQUENCE_199, AUDIO_SFX_INCORRECT_ANSWER);
 mary_const_alias(AUDIO_SEQUENCE_200, AUDIO_SFX_KAPPA_SURPRISE);
 mary_const_alias(AUDIO_SEQUENCE_204, AUDIO_SFX_CHICKEN_CLUCK);
@@ -5751,10 +5931,13 @@ mary_const_alias(AUDIO_SEQUENCE_205, AUDIO_SFX_CLOSE_DOOR);
  * all four targets. Each ROM's portrait table independently declares 0xB8
  * entries; its program references resolve to A4NJ:0x2B3AE0,
  * A4NE:0x52D984, BFGE:0x4C4A44, and BFGJ:0x4C64B4. Character ownership is
- * confirmed from SetTalkNameplateCharacter / SetTalkPortrait call-site pairs, the
- * corresponding family source tables, and visual inspection of the decoded
- * portrait pixels. Expression and costume suffixes describe the actual image
- * rather than its numeric position. The Lou/Ruby character occupies slots
+ * confirmed primarily from SetTalkNameplateCharacter / SetTalkPortrait call-site
+ * pairs and the corresponding family source tables. Decoded portrait images are
+ * only supporting clues because the current extraction path is known to produce
+ * incorrect output for some entries; they are never accepted as independent
+ * proof. Expression and costume suffixes are retained only where script context
+ * or another independent mapping supports the visual interpretation. The
+ * Lou/Ruby character occupies slots
  * 94-97 and Van occupies
  * 141-144 in all four targets. The four GBA ROMs spell this same character's
  * name differently by language/release. Both Japanese GBA ROMs use the actual
@@ -5791,8 +5974,10 @@ mary_const_alias(AUDIO_SEQUENCE_205, AUDIO_SFX_CLOSE_DOOR);
  * 四个目标版本的对话头像 ID 均按相同的物理头像槽顺序排列，各 ROM 的立绘表
  * 均独立声明 0xB8 项；程序引用解析到 A4NJ:0x2B3AE0、A4NE:0x52D984、
  * BFGE:0x4C4A44、BFGJ:0x4C64B4。人物归属由 SetTalkNameplateCharacter/SetTalkPortrait
- * 调用配对、相应版本族源码表以及解码后的实际立绘像素共同确认。表情与服装
- * 后缀描述实际画面含义，而不是数字位置。四版本的 94-97 槽均属于 Lou／Ruby，
+ * 调用配对及相应版本族源码表作为主要依据。当前图片提取流程已知会对部分项目
+ * 产生错误输出，因此解包立绘只能作为辅助线索，绝不能独立证明编号语义。表情
+ * 与服装后缀仅在脚本上下文或另一份独立映射能够支持视觉解释时保留。四版本的
+ * 94-97 槽均属于 Lou／Ruby，
  * 141-144 槽均属于 Van。两个日版 GBA ROM 的实际日文名均为 `ルウ`。FoMT-US 的
  * 人物姓名表和对话始终使用 `Lou`（包括 “My name's Lou.”），MFoMT-US 的姓名表
  * 和对话则始终使用 `Ruby`（包括 “The name's Ruby.”）。两版人物数字 ID 都是 34，
@@ -6409,12 +6594,18 @@ typedef enum MaryTelevisionInput
 } MaryTelevisionInput;
 
 /* One-based result domain returned by TalkPromptChoice2 through
- * TalkPromptChoice4. These handlers combine a prompt with the choices and
- * return 1 for the first visible option, up to 4 for the fourth.
+ * TalkPromptChoice4. The native menu builder stores ordinal values 1 through
+ * N in the visible menu entries; selecting an entry returns that stored value,
+ * rather than exposing the cursor's zero-based array index. These handlers
+ * combine a prompt with the choices and return 1 for the first visible option,
+ * up to 4 for the fourth. Forced UI teardown is not a visible menu choice and
+ * is outside this successful-selection domain.
  *
  * TalkPromptChoice2 至 TalkPromptChoice4 返回的从 1 开始结果域。这组处理
- * 函数会把提示与选项组合显示，并以 1 表示第一个可见选项，依次到 4 表示
- * 第四个选项。 */
+ * 函数会把提示与选项组合显示；原生菜单构造器把 1 至 N 的序号值存入各可见
+ * 菜单项，选择时返回该项携带的值，而不是暴露光标的从 0 开始数组下标。因此
+ * 1 表示第一项，依次到 4 表示第四项。强制销毁 UI 不属于可见菜单选项，也不在
+ * 此成功选择结果域内。 */
 typedef enum MaryPromptChoiceResult
 {
     PROMPT_CHOICE_OPTION_1 = 1,
@@ -6424,13 +6615,16 @@ typedef enum MaryPromptChoiceResult
 } MaryPromptChoiceResult;
 
 /* One-based result domain returned by TalkChoice2 through TalkChoice6.
- * The four vanilla script sets consistently branch on 1 for the first
- * visible option, up to 6 for the sixth; no direct choice dispatch treats
- * zero as the first option.
+ * The native menu builder stores ordinals 1 through N in its visible entries,
+ * and the four vanilla script sets consistently branch on 1 for the first
+ * visible option, up to 6 for the sixth. No direct choice dispatch treats
+ * zero as the first option. Forced UI teardown is outside this successful
+ * selection domain.
  *
- * TalkChoice2 至 TalkChoice6 返回的从 1 开始结果域。四套原版脚本均稳定以
- * 1 表示第一个可见选项、依次到 6 表示第六个选项；没有直接选项分派把 0
- * 作为第一项。 */
+ * TalkChoice2 至 TalkChoice6 返回的从 1 开始结果域。原生菜单构造器把 1 至 N
+ * 的序号存入可见菜单项，四套原版脚本也稳定以 1 表示第一项、依次到 6 表示
+ * 第六项；没有直接选项分派把 0 作为第一项。强制销毁 UI 不属于此成功选择
+ * 结果域。 */
 typedef enum MaryChoiceResult
 {
     CHOICE_OPTION_1 = 1,
@@ -7375,13 +7569,15 @@ typedef enum MaryAnimalKind
 
 /* Complete family-local animal-record slot domain. The shared barn has a
  * physical maximum of sixteen cow/sheep records and the coop uses the first
- * eight values for chickens. Horse and dog use the first slot. -1 is the
- * native no-selection/no-registered-animal sentinel returned by selector
- * interfaces. The animal family remains a separate MaryAnimalKind argument.
+ * eight values for chickens. Horse and dog do not use this roster domain:
+ * their native resolvers ignore the index argument. -1 is the native
+ * no-selection/no-registered-animal sentinel returned by selector interfaces.
+ * The animal family remains a separate MaryAnimalKind argument.
  *
  * 完整的动物类别内记录槽位域。共享牛羊舍最多有十六个牛／羊记录，鸡舍使用
- * 前八个值，马与狗使用首槽。-1 是选择界面及参赛登记读取函数返回的原生
- * “未选择／未登记”哨兵；动物类别仍由独立的 MaryAnimalKind 参数指定。 */
+ * 前八个值。马与狗不使用此名册域，其原生解析器会忽略索引参数。-1 是选择界面
+ * 及参赛登记读取函数返回的原生“未选择／未登记”哨兵；动物类别仍由独立的
+ * MaryAnimalKind 参数指定。 */
 typedef enum MaryAnimalSlotIndex
 {
     ANIMAL_SLOT_NOT_SELECTED = -1,
@@ -7402,6 +7598,21 @@ typedef enum MaryAnimalSlotIndex
     ANIMAL_SLOT_15 = 14,
     ANIMAL_SLOT_16 = 15,
 } MaryAnimalSlotIndex;
+
+/* Canonical spellings for the otherwise ignored index argument of horse and
+ * dog handlers. The native resolver does not inspect this value; zero and one
+ * are both retained because vanilla scripts physically use both encodings.
+ * Other authored integers remain legal and are deliberately printed as raw
+ * numbers rather than being mistaken for livestock roster slots.
+ *
+ * 马与狗 handler 中实际会被忽略的索引参数之规范写法。原生解析器不读取该值；
+ * 原版脚本实际同时使用 0 和 1，因此保留两种物理编码。其他手写整数仍然合法，
+ * 但会故意保持为裸数字，避免被误解成家畜名册槽位。 */
+typedef enum MaryIgnoredPetIndexArgument
+{
+    PET_INDEX_ARGUMENT_IGNORED_ZERO = 0,
+    PET_INDEX_ARGUMENT_IGNORED_ONE = 1,
+} MaryIgnoredPetIndexArgument;
 
 /* Tool categories used by MFoMT's tool-experience query. The public order is
  * sickle, hoe, axe, hammer, watering can, and fishing rod; the engine maps the
@@ -7604,14 +7815,19 @@ typedef enum MaryFireworksFestivalPartner
  * bit 1. FoMT source and both MFoMT ROM regions preserve this ordering.
  * IDs 45-52 expose the step counter, child age/walking state and birthday,
  * elapsed married days, and the stored wedding date. From ID 54 onward the
- * two game families diverge: FoMT enumerates six final love-event timers and
- * five final rival-event timers, whereas MFoMT enumerates eight bachelor love
- * timers and five rival timers. Each helper returns elapsed days only after
- * the engine's final event-count state (5 for player love events, 4 for rival
- * events). The following dog and horse accessors are therefore shifted by two
- * slots in MFoMT. FoMT source establishes the helper contracts; MFoMT-US and
- * MFoMT-JP Ghidra dispatches independently confirm the character order and
- * the shifted animal fields. FoMT ID 53 records whether Ann, Karen, or Popuri
+ * two game families diverge: FoMT enumerates six final player-event timer
+ * accessors and five final rival-event timers, whereas MFoMT enumerates eight
+ * bachelor player-event accessors and five rival timers. The player-event
+ * accessor first requires the final player-event count (5), but then calls a
+ * bugged native getter that reads the rival-event timer; the rival accessor
+ * requires count 4 and reads that same timer normally. The duplicate eight-
+ * byte getter bodies are independently present in all four ROMs. The public
+ * names therefore expose the bug instead of pretending that the inaccessible
+ * player-event timer was returned. The following dog and horse accessors are
+ * shifted by two slots in MFoMT. FoMT source establishes the field contract;
+ * MFoMT-US and MFoMT-JP native dispatches independently confirm the character
+ * order, duplicate getter behavior, and shifted animal fields. FoMT ID 53
+ * records whether Ann, Karen, or Popuri
  * continues helping her family business after marriage; MFoMT retains a
  * native field at the corresponding slot but lacks equivalent script evidence
  * and therefore keeps that ID as an explicit UNKNOWN_SLOT placeholder.
@@ -7741,12 +7957,13 @@ typedef enum MaryFireworksFestivalPartner
  * dog house, street lamp, and water tank. Native merchandise handlers further
  * identify 527 as the 1,000-medal horse-race prize and 528 as Won's item-ID
  * 0x27 offer costing 50,000G.
- * FoMT fields 535 and 537-571, and MFoMT fields 627 and 629-663, are the unlock
- * levels for the 36 A Wonderful Life profiles shown by farmhouse bookshelf
+ * FoMT fields 535-571 and MFoMT fields 627-663 are the unlock levels for the
+ * 37 A Wonderful Life profiles shown by farmhouse bookshelf
  * reference pages 18-54. Their names follow the explicit ShowReferencePage
  * argument and the MaryReferencePage table, not a positional character guess.
- * Both shipped menus deliberately skip the field corresponding to reference
- * page 50 (Child): FoMT 536 and MFoMT 628 therefore retain UNKNOWN_SLOT placeholders.
+ * The profile-text filter independently maps page marker 32 (Child) to FoMT
+ * field 536 and MFoMT field 628 in both regions; the catalogue menu does not
+ * expose a separate selectable Child row, but the stored unlock field is real.
  * FoMT daily interaction fields 572-579 cover the day-start golden-lumber
  * snapshot, once-per-day Harvest Goddess/Kappa offerings, their cyclic reward
  * counters, daily confession use, farmhouse entry, and the confessional
@@ -7850,11 +8067,14 @@ typedef enum MaryFireworksFestivalPartner
  * 更新会重置它。
  * 编号 45-52 依次公开步数、孩子年龄/学步状态与生日、结婚经过天数及保存的
  * 婚礼日期。从编号 54 起男女版发生分歧：FoMT 依次提供六位结婚候选人的最终
- * 爱情事件计时和五组最终情敌事件计时；MFoMT 则提供八位男性候选人的爱情事件
- * 计时及五组情敌事件计时。只有事件计数达到最终状态时（玩家爱情事件为 5，
- * 情敌事件为 4），底层 helper 才返回经过天数。因此其后的狗与马字段在 MFoMT
- * 中整体后移两个槽。FoMT 源码确认 helper 契约，MFoMT-US/JP 的 Ghidra 分发表
- * 又分别确认人物顺序和动物字段偏移。FoMT 的编号 53 记录 Ann、Karen 或 Popuri
+ * 玩家事件计时访问器和五组最终情敌事件计时；MFoMT 则提供八位男性候选人的
+ * 玩家事件访问器及五组情敌事件计时。玩家事件访问器会先要求玩家事件计数达到
+ * 最终状态 5，却随后调用一个错误的原生 getter，实际读取情敌事件计时；情敌事件
+ * 访问器要求计数达到 4，并正常读取同一个计时字段。四个 ROM 中都独立存在两份
+ * 完全相同的八字节 getter 函数体。因此公开名称明确暴露该 bug，不再伪装成能够
+ * 读取实际上没有返回的玩家事件计时。其后的狗与马字段在 MFoMT 中整体后移两个
+ * 槽。FoMT 源码确认字段契约，MFoMT-US/JP 原生分发表又分别确认人物顺序、重复
+ * getter 行为和动物字段偏移。FoMT 的编号 53 记录 Ann、Karen 或 Popuri
  * 婚后是否继续帮助各自的家庭生意；MFoMT 对应位置虽有原生字段，却没有等价的
  * 脚本证据，因此女孩版仍故意保留明确的 UNKNOWN_SLOT 占位。下方爱情事件字段来自实际写入脚本，
  * 而不是假定连续布局：每个符号都能在两个地区版本对应的黑心、紫心、蓝心、黄心、
@@ -7940,10 +8160,11 @@ typedef enum MaryFireworksFestivalPartner
  * 脚本可见的真实之玉取得状态按确切来源命名：冰箱、日历、书架、女神算术问答、
  * 狗屋、路灯和水槽。原生商品处理路径进一步确认 527 是赛马奖品兑换表中价值
  * 1000 枚奖牌的真实之玉，528 是 Won 商品表中 ID 0x27、价格 50000G 的真实之玉。
- * FoMT 的 535、537-571 与 MFoMT 的 627、629-663 是农舍书架资料页 18-54 所显示
- * 的 36 个《A Wonderful Life》人物档案解锁等级。名称依据脚本明确传入的
- * ShowReferencePage 参数及 MaryReferencePage 表，而不是按人物位置猜测。两版
- * 菜单都跳过对应资料页 50（Child）的字段，因此 FoMT 536 与 MFoMT 628 均保留 UNKNOWN_SLOT 占位。
+ * FoMT 的 535-571 与 MFoMT 的 627-663 是农舍书架资料页 18-54 所显示
+ * 的 37 个《A Wonderful Life》人物档案解锁等级。名称依据脚本明确传入的
+ * ShowReferencePage 参数及 MaryReferencePage 表，而不是按人物位置猜测。资料
+ * 文本过滤器又在两个游戏、两个地区中分别把页面标记 32（Child）映射到 FoMT
+ * 槽 536 与 MFoMT 槽 628；目录菜单虽没有独立可选的 Child 行，存储字段真实存在。
  * FoMT 的每日交互字段 572-579 依次涵盖当日开始时的黄金资材快照、女神／河童
  * 每日一次献礼、两者的循环奖励计数、当日忏悔使用、自宅进入状态，以及向女神
  * 求婚所需的教堂祝福。献礼计数是循环累计值，并不要求连续每天献礼。
@@ -8076,12 +8297,12 @@ typedef enum MaryVarId
     VAR_WEDDING_DAY = 52,
 #if defined(MARY_FOMT)
     VAR_SPOUSE_CONTINUES_FAMILY_WORK = 53,
-    VAR_DAYS_SINCE_KAREN_FINAL_LOVE_EVENT = 54,
-    VAR_DAYS_SINCE_POPURI_FINAL_LOVE_EVENT = 55,
-    VAR_DAYS_SINCE_MARY_FINAL_LOVE_EVENT = 56,
-    VAR_DAYS_SINCE_ELLI_FINAL_LOVE_EVENT = 57,
-    VAR_DAYS_SINCE_ANN_FINAL_LOVE_EVENT = 58,
-    VAR_DAYS_SINCE_HARVEST_GODDESS_FINAL_LOVE_EVENT = 59,
+    VAR_BUGGED_KAREN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 54,
+    VAR_BUGGED_POPURI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 55,
+    VAR_BUGGED_MARY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 56,
+    VAR_BUGGED_ELLI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 57,
+    VAR_BUGGED_ANN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 58,
+    VAR_BUGGED_HARVEST_GODDESS_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 59,
     VAR_DAYS_SINCE_KAREN_FINAL_RIVAL_EVENT = 60,
     VAR_DAYS_SINCE_POPURI_FINAL_RIVAL_EVENT = 61,
     VAR_DAYS_SINCE_MARY_FINAL_RIVAL_EVENT = 62,
@@ -8280,31 +8501,31 @@ typedef enum MaryVarId
     VAR_MARY_AND_GRAY_BOOK_AND_HEALTH_EVENT_STATE = 260,
     VAR_MARY_MARRIED_LIFE_AND_WRITING_EVENT_STATE = 261,
     VAR_FARM_INTRODUCTION_AND_SHIPPING_TUTORIAL_STATE = 262,
-    VAR_HARVEST_GODDESS_ITEM_REQUEST_EVENT_STATE = 263,
-    VAR_HARVEST_GODDESS_REQUESTED_ITEM_INDEX = 264,
-    VAR_HARVEST_GODDESS_ITEM_REQUEST_CHOICE = 265,
-    VAR_THOMAS_REQUEST_ITEM_DELIVERY_STATE = 266,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_EVENT_STATE = 263,
+    VAR_THOMAS_RANDOM_ITEM_REQUESTED_ITEM_INDEX = 264,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_CHOICE = 265,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_STATE = 266,
     VAR_HARRIS_AJA_LETTER_ADVICE_EVENT_STATE = 267,
     VAR_HARRIS_AJA_LETTER_ADVICE_CHOICE = 268,
     VAR_DAYS_SINCE_HARRIS_AJA_LETTER_ADVICE = 269,
-    VAR_HARRIS_AJA_LETTER_ADVICE_FOLLOWUP_STATE = 270,
+    VAR_HARRIS_AJA_LETTER_REJECTION_FOLLOWUP_STATE = 270,
     VAR_ELLEN_WHITE_FLOWER_LEGEND_EVENT_STATE = 271,
     VAR_ELLEN_WHITE_FLOWER_DISCOVERY_EVENT_STATE = 272,
-    VAR_ELLEN_GRANDFATHER_LETTER_EVENT_STATE = 273,
+    VAR_ELLEN_GRANDFATHERS_HIDDEN_LETTER_EVENT_STATE = 273,
     VAR_ELLEN_KNITS_STOCKING_EVENT_STATE = 274,
-    VAR_ELLI_PLAYS_WITH_STU_EVENT_STATE = 277,
-    VAR_WON_DISCOVERS_JEFFS_PAINTING_TALENT_EVENT_STATE = 278,
-    VAR_SASHA_TEACHES_JEFF_TO_REFUSE_STORE_CREDIT_EVENT_STATE = 279,
-    VAR_MANNA_DISCUSSING_AJAS_DEPARTURE_EVENT_STATE = 280,
+    VAR_ELLI_AND_STU_PLAY_TOGETHER_EVENT_STATE = 277,
+    VAR_WON_OFFERS_TO_BUY_JEFFS_PAINTING_EVENT_STATE = 278,
+    VAR_JEFF_AND_SASHA_STORE_CREDIT_LESSON_EVENT_STATE = 279,
+    VAR_MANNA_AJAS_DEPARTURE_ADVICE_FROM_FRIENDS_EVENT_STATE = 280,
     VAR_LILLIA_AND_SASHA_REMINISCE_ABOUT_JEFFS_MARRIAGE_EVENT_STATE = 281,
     VAR_KAREN_AND_DUKE_DRINKING_CONTEST_EVENT_STATE = 282,
-    VAR_WON_MEETS_KAREN_EVENT_STATE = 283,
-    VAR_DOCTOR_DISCUSSING_HIS_FAMILY_PROFESSION_EVENT_STATE = 284,
+    VAR_WON_AND_KAREN_FIRST_MEETING_AT_ZACKS_HOUSE_EVENT_STATE = 283,
+    VAR_DOCTOR_REFLECTS_ON_PARENTS_AND_MEDICAL_CALLING_EVENT_STATE = 284,
     VAR_JEFF_BLOOD_TYPE_CORRECTION_EVENT_STATE = 285,
-    VAR_ELLI_NURSING_CAREER_ADVICE_EVENT_STATE = 286,
+    VAR_ELLI_STUDIES_MEDICINE_FOR_ELLENS_LEGS_EVENT_STATE = 286,
     VAR_ELLI_TREATS_STUS_COLD_EVENT_STATE = 287,
-    VAR_CARTER_MYSTERIOUS_VOICE_EVENT_STATE = 288,
-    VAR_CARTER_OPENS_CHURCH_BACK_DOOR_EVENT_STATE = 289,
+    VAR_CARTER_CONFESSIONAL_DREAM_PREDICTS_GOOD_FORTUNE_EVENT_STATE = 288,
+    VAR_CARTER_CHURCH_BACK_DOOR_MUSHROOM_SECRET_EVENT_STATE = 289,
     VAR_PLAYER_SNEAKS_PAST_SLEEPING_CARTER_EVENT_STATE = 290,
     VAR_CLIFF_COLLAPSES_IN_SNOW_EVENT_STATE = 291,
     VAR_CLIFF_COLLAPSE_FOLLOWUP_EVENT_STATE = 292,
@@ -8325,7 +8546,7 @@ typedef enum MaryVarId
     VAR_GOTZ_AND_HARRIS_PATROL_DISCUSSION_EVENT_STATE = 307,
     VAR_ZACK_VISITS_SICK_LILLIA_EVENT_STATE = 308,
     VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE = 309,
-    VAR_ZACK_FISHING_ROD_FOLLOWUP_EVENT_STATE = 310,
+    VAR_ZACK_CONGRATULATES_CATCHING_EVERY_FISH_EVENT_STATE = 310,
     VAR_WON_INTRODUCTION_EVENT_STATE = 311,
     VAR_WON_APPLE_CHALLENGE_EVENT_STATE = 312,
     VAR_WON_VASE_PURCHASE_EVENT_STATE = 313,
@@ -8529,6 +8750,7 @@ typedef enum MaryVarId
     VAR_JEWEL_OF_TRUTH_FROM_STREET_LAMP_COLLECTED = 533,
     VAR_JEWEL_OF_TRUTH_FROM_WATER_TANK_COLLECTED = 534,
     VAR_GAMECUBE_LINK_AWL_PLAYER_PROFILE_LEVEL = 535,
+    VAR_GAMECUBE_LINK_AWL_CHILD_PROFILE_LEVEL = 536,
     VAR_GAMECUBE_LINK_AWL_TAKAKURA_PROFILE_LEVEL = 537,
     VAR_GAMECUBE_LINK_AWL_ROMANA_PROFILE_LEVEL = 538,
     VAR_GAMECUBE_LINK_AWL_LUMINA_PROFILE_LEVEL = 539,
@@ -8624,16 +8846,15 @@ typedef enum MaryVarId
     VAR_UNKNOWN_SLOT_449 = 449,
     VAR_NEW_YEAR_SUNRISE_SCENE_WRITE_MARKER = 466,
     VAR_GAMECUBE_LINK_UPDATE_IN_PROGRESS = 507,
-    VAR_UNKNOWN_SLOT_536 = 536,
 #elif defined(MARY_MFOMT)
-    VAR_DAYS_SINCE_RICK_FINAL_LOVE_EVENT = 54,
-    VAR_DAYS_SINCE_KAI_FINAL_LOVE_EVENT = 55,
-    VAR_DAYS_SINCE_GRAY_FINAL_LOVE_EVENT = 56,
-    VAR_DAYS_SINCE_DOCTOR_FINAL_LOVE_EVENT = 57,
-    VAR_DAYS_SINCE_CLIFF_FINAL_LOVE_EVENT = 58,
-    VAR_DAYS_SINCE_KAPPA_FINAL_LOVE_EVENT = 59,
-    VAR_DAYS_SINCE_WON_FINAL_LOVE_EVENT = 60,
-    VAR_DAYS_SINCE_GOURMET_FINAL_LOVE_EVENT = 61,
+    VAR_BUGGED_RICK_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 54,
+    VAR_BUGGED_KAI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 55,
+    VAR_BUGGED_GRAY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 56,
+    VAR_BUGGED_DOCTOR_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 57,
+    VAR_BUGGED_CLIFF_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 58,
+    VAR_BUGGED_KAPPA_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 59,
+    VAR_BUGGED_WON_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 60,
+    VAR_BUGGED_GOURMET_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER = 61,
     VAR_DAYS_SINCE_RICK_FINAL_RIVAL_EVENT = 62,
     VAR_DAYS_SINCE_KAI_FINAL_RIVAL_EVENT = 63,
     VAR_DAYS_SINCE_GRAY_FINAL_RIVAL_EVENT = 64,
@@ -8658,7 +8879,7 @@ typedef enum MaryVarId
     VAR_KAI_PURPLE_HEART_EVENT_STATE = 83,
     VAR_KAI_PURPLE_HEART_EVENT_CHOICE = 84,
     VAR_KAI_BLUE_HEART_EVENT_STATE = 85,
-    VAR_UNKNOWN_SLOT_086 = 86,
+    VAR_STU_AND_MAY_SCHEDULES_DISABLED = 86,
     VAR_KAI_YELLOW_HEART_EVENT_STATE = 87,
     VAR_KAI_YELLOW_HEART_EVENT_CHOICE = 88,
     VAR_KAI_PROPOSAL_EVENT_STATE = 89,
@@ -8838,31 +9059,31 @@ typedef enum MaryVarId
     VAR_MARY_AND_GRAY_BOOK_AND_HEALTH_EVENT_STATE = 268,
     VAR_MARY_MARRIED_LIFE_AND_WRITING_EVENT_STATE = 269,
     VAR_FARM_INTRODUCTION_AND_SHIPPING_TUTORIAL_STATE = 270,
-    VAR_HARVEST_GODDESS_ITEM_REQUEST_EVENT_STATE = 271,
-    VAR_HARVEST_GODDESS_REQUESTED_ITEM_INDEX = 272,
-    VAR_HARVEST_GODDESS_ITEM_REQUEST_CHOICE = 273,
-    VAR_THOMAS_REQUEST_ITEM_DELIVERY_STATE = 274,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_EVENT_STATE = 271,
+    VAR_THOMAS_RANDOM_ITEM_REQUESTED_ITEM_INDEX = 272,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_CHOICE = 273,
+    VAR_THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_STATE = 274,
     VAR_HARRIS_AJA_LETTER_ADVICE_EVENT_STATE = 275,
     VAR_HARRIS_AJA_LETTER_ADVICE_CHOICE = 276,
     VAR_DAYS_SINCE_HARRIS_AJA_LETTER_ADVICE = 277,
-    VAR_HARRIS_AJA_LETTER_ADVICE_FOLLOWUP_STATE = 278,
+    VAR_HARRIS_AJA_LETTER_REJECTION_FOLLOWUP_STATE = 278,
     VAR_ELLEN_WHITE_FLOWER_LEGEND_EVENT_STATE = 279,
     VAR_ELLEN_WHITE_FLOWER_DISCOVERY_EVENT_STATE = 280,
-    VAR_ELLEN_GRANDFATHER_LETTER_EVENT_STATE = 281,
+    VAR_ELLEN_GRANDFATHERS_HIDDEN_LETTER_EVENT_STATE = 281,
     VAR_ELLEN_KNITS_STOCKING_EVENT_STATE = 282,
-    VAR_ELLI_PLAYS_WITH_STU_EVENT_STATE = 285,
-    VAR_WON_DISCOVERS_JEFFS_PAINTING_TALENT_EVENT_STATE = 286,
-    VAR_SASHA_TEACHES_JEFF_TO_REFUSE_STORE_CREDIT_EVENT_STATE = 287,
-    VAR_MANNA_DISCUSSING_AJAS_DEPARTURE_EVENT_STATE = 288,
+    VAR_ELLI_AND_STU_PLAY_TOGETHER_EVENT_STATE = 285,
+    VAR_WON_OFFERS_TO_BUY_JEFFS_PAINTING_EVENT_STATE = 286,
+    VAR_JEFF_AND_SASHA_STORE_CREDIT_LESSON_EVENT_STATE = 287,
+    VAR_MANNA_AJAS_DEPARTURE_ADVICE_FROM_FRIENDS_EVENT_STATE = 288,
     VAR_LILLIA_AND_SASHA_REMINISCE_ABOUT_JEFFS_MARRIAGE_EVENT_STATE = 289,
     VAR_KAREN_AND_DUKE_DRINKING_CONTEST_EVENT_STATE = 290,
-    VAR_WON_MEETS_KAREN_EVENT_STATE = 291,
-    VAR_DOCTOR_DISCUSSING_HIS_FAMILY_PROFESSION_EVENT_STATE = 292,
+    VAR_WON_AND_KAREN_FIRST_MEETING_AT_ZACKS_HOUSE_EVENT_STATE = 291,
+    VAR_DOCTOR_REFLECTS_ON_PARENTS_AND_MEDICAL_CALLING_EVENT_STATE = 292,
     VAR_JEFF_BLOOD_TYPE_CORRECTION_EVENT_STATE = 293,
-    VAR_ELLI_NURSING_CAREER_ADVICE_EVENT_STATE = 294,
+    VAR_ELLI_STUDIES_MEDICINE_FOR_ELLENS_LEGS_EVENT_STATE = 294,
     VAR_ELLI_TREATS_STUS_COLD_EVENT_STATE = 295,
-    VAR_CARTER_MYSTERIOUS_VOICE_EVENT_STATE = 296,
-    VAR_CARTER_OPENS_CHURCH_BACK_DOOR_EVENT_STATE = 297,
+    VAR_CARTER_CONFESSIONAL_DREAM_PREDICTS_GOOD_FORTUNE_EVENT_STATE = 296,
+    VAR_CARTER_CHURCH_BACK_DOOR_MUSHROOM_SECRET_EVENT_STATE = 297,
     VAR_PLAYER_SNEAKS_PAST_SLEEPING_CARTER_EVENT_STATE = 298,
     VAR_CLIFF_COLLAPSES_IN_SNOW_EVENT_STATE = 299,
     VAR_CLIFF_COLLAPSE_FOLLOWUP_EVENT_STATE = 300,
@@ -8883,7 +9104,7 @@ typedef enum MaryVarId
     VAR_GOTZ_AND_HARRIS_PATROL_DISCUSSION_EVENT_STATE = 315,
     VAR_ZACK_VISITS_SICK_LILLIA_EVENT_STATE = 316,
     VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE = 317,
-    VAR_ZACK_FISHING_ROD_FOLLOWUP_EVENT_STATE = 318,
+    VAR_ZACK_CONGRATULATES_CATCHING_EVERY_FISH_EVENT_STATE = 318,
     VAR_WON_INTRODUCTION_EVENT_STATE = 319,
     VAR_WON_APPLE_CHALLENGE_EVENT_STATE = 320,
     VAR_WON_VASE_PURCHASE_EVENT_STATE = 321,
@@ -9126,6 +9347,7 @@ typedef enum MaryVarId
     VAR_JEWEL_OF_TRUTH_FROM_STREET_LAMP_COLLECTED = 625,
     VAR_JEWEL_OF_TRUTH_FROM_WATER_TANK_COLLECTED = 626,
     VAR_GAMECUBE_LINK_AWL_PLAYER_PROFILE_LEVEL = 627,
+    VAR_GAMECUBE_LINK_AWL_CHILD_PROFILE_LEVEL = 628,
     VAR_GAMECUBE_LINK_AWL_TAKAKURA_PROFILE_LEVEL = 629,
     VAR_GAMECUBE_LINK_AWL_ROMANA_PROFILE_LEVEL = 630,
     VAR_GAMECUBE_LINK_AWL_LUMINA_PROFILE_LEVEL = 631,
@@ -9199,7 +9421,7 @@ typedef enum MaryVarId
     VAR_ELLI_COOKING_REQUEST_STATE = 700,
     VAR_KAREN_COOKING_REQUEST_STATE = 701,
     VAR_MARY_COOKING_REQUEST_STATE = 702,
-    VAR_WON_APPLE_CLEANUP_EVENT_COMPLETED = 703,
+    VAR_WON_PURPLE_HEART_APPLE_MIXUP_EVENT_COMPLETED = 703,
     VAR_WON_APPLE_SHUFFLE_GAME_INTRODUCED = 704,
     VAR_WON_ITEM_SELLING_SERVICE_UNLOCKED = 706,
     VAR_HUNDRED_QUESTION_QUIZ_SCORE_REWARD_RECEIVED = 707,
@@ -9229,6 +9451,19 @@ typedef enum MaryVarId
      *
      * 尚未独立证实运行时语义的物理变量槽。显式保留这些编号，确保原生取值域
      * 不会因空缺或“事件脚本中未出现”而被压缩。 */
+    /* MFoMT slot 53 reads and writes the complete roster-tail byte at save
+     * offset 0x2160 in both regions. VarSet normalizes an explicit input to
+     * 0 or 1, but roster initialization clears the byte and the verified
+     * whole-roster copy preserves all eight source bits without normalization.
+     * No vanilla script or independent native business consumer identifies
+     * the field. It must therefore remain an untyped unknown byte rather than
+     * being inferred as MaryBool from the setter alone.
+     *
+     * 两个地区版的 MFoMT 槽 53 都完整读写存档偏移 0x2160 的 roster 尾部字节。
+     * VarSet 会把显式输入归一化为 0 或 1，但 roster 初始化直接清零该字节，已验证的
+     * roster 整体复制则不做归一化并保留来源字节的全部八位。原版脚本及独立原生业务
+     * 消费者都未揭示字段身份，因此它必须保持无类型未知字节，不能只根据 setter
+     * 推断为 MaryBool。 */
     VAR_UNKNOWN_SLOT_053 = 53,
     VAR_UNKNOWN_SLOT_232 = 232,
     VAR_UNKNOWN_SLOT_233 = 233,
@@ -9295,20 +9530,63 @@ typedef enum MaryVarId
     VAR_WINTER_THANKSGIVING_GIFT_GIVEN_TO_GOURMET = 499,
     VAR_STARRY_NIGHT_INVITATION_MAIL_DELIVERY_EVENT_STATE = 500,
     VAR_NEW_YEAR_SUNRISE_SCENE_WRITE_MARKER = 527,
-    VAR_UNKNOWN_SLOT_584 = 584,
-    VAR_UNKNOWN_SLOT_585 = 585,
-    VAR_UNKNOWN_SLOT_586 = 586,
-    VAR_UNKNOWN_SLOT_587 = 587,
-    VAR_UNKNOWN_SLOT_588 = 588,
-    VAR_UNKNOWN_SLOT_589 = 589,
-    VAR_UNKNOWN_SLOT_590 = 590,
-    VAR_UNKNOWN_SLOT_591 = 591,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_61 = 584,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_62 = 585,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_63 = 586,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_64 = 587,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_65 = 588,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_66 = 589,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_67 = 590,
+    VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_68 = 591,
     VAR_GAMECUBE_LINK_UPDATE_IN_PROGRESS = 593,
-    VAR_UNKNOWN_SLOT_628 = 628,
     VAR_UNKNOWN_SLOT_697 = 697,
     VAR_UNKNOWN_SLOT_705 = 705,
 #endif
 } MaryVarId;
+
+#if defined(MARY_FOMT)
+mary_const_alias(VAR_DAYS_SINCE_KAREN_FINAL_LOVE_EVENT, VAR_BUGGED_KAREN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_POPURI_FINAL_LOVE_EVENT, VAR_BUGGED_POPURI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_MARY_FINAL_LOVE_EVENT, VAR_BUGGED_MARY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_ELLI_FINAL_LOVE_EVENT, VAR_BUGGED_ELLI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_ANN_FINAL_LOVE_EVENT, VAR_BUGGED_ANN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_HARVEST_GODDESS_FINAL_LOVE_EVENT, VAR_BUGGED_HARVEST_GODDESS_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+#elif defined(MARY_MFOMT)
+mary_const_alias(VAR_UNKNOWN_SLOT_086, VAR_STU_AND_MAY_SCHEDULES_DISABLED);
+mary_const_alias(VAR_UNKNOWN_SLOT_584, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_61);
+mary_const_alias(VAR_UNKNOWN_SLOT_585, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_62);
+mary_const_alias(VAR_UNKNOWN_SLOT_586, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_63);
+mary_const_alias(VAR_UNKNOWN_SLOT_587, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_64);
+mary_const_alias(VAR_UNKNOWN_SLOT_588, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_65);
+mary_const_alias(VAR_UNKNOWN_SLOT_589, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_66);
+mary_const_alias(VAR_UNKNOWN_SLOT_590, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_67);
+mary_const_alias(VAR_UNKNOWN_SLOT_591, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_68);
+mary_const_alias(VAR_DAYS_SINCE_RICK_FINAL_LOVE_EVENT, VAR_BUGGED_RICK_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_KAI_FINAL_LOVE_EVENT, VAR_BUGGED_KAI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_GRAY_FINAL_LOVE_EVENT, VAR_BUGGED_GRAY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_DOCTOR_FINAL_LOVE_EVENT, VAR_BUGGED_DOCTOR_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_CLIFF_FINAL_LOVE_EVENT, VAR_BUGGED_CLIFF_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_KAPPA_FINAL_LOVE_EVENT, VAR_BUGGED_KAPPA_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_WON_FINAL_LOVE_EVENT, VAR_BUGGED_WON_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+mary_const_alias(VAR_DAYS_SINCE_GOURMET_FINAL_LOVE_EVENT, VAR_BUGGED_GOURMET_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
+#endif
+
+/* Tool selected while the MFoMT protagonist repeatedly attacks Thomas during
+ * the opening farm-offer scene. This is not MaryToolKind: its one-based values
+ * are a private dialogue-state domain used to select Thomas's matching reply,
+ * and the menu order places the hoe before the sickle.
+ *
+ * MFoMT 开场农场转让事件中，主角反复攻击 Thomas 时所选的工具。它不是
+ * MaryToolKind：这里从 1 开始的数值是脚本私有的对话状态域，用于选择 Thomas
+ * 对应的制止台词，而且菜单顺序是锄头先于镰刀。 */
+typedef enum MaryMFoMTOpeningAttackTool
+{
+    MFOMT_OPENING_ATTACK_TOOL_HOE = 1,
+    MFOMT_OPENING_ATTACK_TOOL_SICKLE = 2,
+    MFOMT_OPENING_ATTACK_TOOL_AXE = 3,
+    MFOMT_OPENING_ATTACK_TOOL_HAMMER = 4,
+    MFOMT_OPENING_ATTACK_TOOL_WATERING_CAN = 5,
+} MaryMFoMTOpeningAttackTool;
 
 /* MFoMT's five girls' cooking requests share one state encoding. Zero means
  * that no dish has been selected. Values 1 and 2 are deliberately named as
@@ -9343,6 +9621,72 @@ typedef enum MaryGirlsCookingRequestResponse
     GIRLS_COOKING_REQUEST_RESPONSE_DECLINED = 2,
 } MaryGirlsCookingRequestResponse;
 
+/* Popuri's recipe indices in MFoMT's five-girl cooking request. Her order
+ * script derives one index from its saved recipe seed and the current minute.
+ *
+ * MFoMT 五位女孩料理委托中 Popuri 的配方索引。她的点餐脚本根据已保存的
+ * 配方种子与当前分钟计算出其中一个索引。 */
+typedef enum MaryPopuriCookingRequestDish
+{
+    POPURI_COOKING_REQUEST_DISH_JAPANESE_OMELET = 0,
+    POPURI_COOKING_REQUEST_DISH_OMELET = 1,
+    POPURI_COOKING_REQUEST_DISH_OMELET_RICE = 2,
+    POPURI_COOKING_REQUEST_DISH_BOILED_EGG = 3,
+    POPURI_COOKING_REQUEST_DISH_EGG_BOWL = 4,
+} MaryPopuriCookingRequestDish;
+
+/* Karen's separate recipe-index domain. Its numeric values must not be
+ * interpreted through another girl's dish list.
+ *
+ * Karen 的独立配方索引域；其中的数字不能按照其他女孩的料理列表解释。 */
+typedef enum MaryKarenCookingRequestDish
+{
+    KAREN_COOKING_REQUEST_DISH_FRENCH_FRIES = 0,
+    KAREN_COOKING_REQUEST_DISH_POPCORN = 1,
+    KAREN_COOKING_REQUEST_DISH_PIZZA = 2,
+    KAREN_COOKING_REQUEST_DISH_SASHIMI = 3,
+    KAREN_COOKING_REQUEST_DISH_TEMPURA = 4,
+} MaryKarenCookingRequestDish;
+
+/* Ann's separate recipe-index domain. The selected index is compared with the
+ * food held by the player before her request is accepted.
+ *
+ * Ann 的独立配方索引域；接受她的委托前，所选索引会与玩家手持料理核对。 */
+typedef enum MaryAnnCookingRequestDish
+{
+    ANN_COOKING_REQUEST_DISH_CHEESE_FONDUE = 0,
+    ANN_COOKING_REQUEST_DISH_TRUFFLE_RICE = 1,
+    ANN_COOKING_REQUEST_DISH_CAKE = 2,
+    ANN_COOKING_REQUEST_DISH_PANCAKES = 3,
+    ANN_COOKING_REQUEST_DISH_STEW = 4,
+} MaryAnnCookingRequestDish;
+
+/* Mary's separate recipe-index domain. These five values describe only Mary's
+ * requested dishes in this event.
+ *
+ * Mary 的独立配方索引域；这五个值只描述本事件中 Mary 请求的料理。 */
+typedef enum MaryMaryCookingRequestDish
+{
+    MARY_COOKING_REQUEST_DISH_VEGGIE_JUICE = 0,
+    MARY_COOKING_REQUEST_DISH_RELAX_TEA = 1,
+    MARY_COOKING_REQUEST_DISH_RAISIN_BREAD = 2,
+    MARY_COOKING_REQUEST_DISH_CHOCOLATE_CAKE = 3,
+    MARY_COOKING_REQUEST_DISH_VEGGIE_LATTE = 4,
+} MaryMaryCookingRequestDish;
+
+/* Elli's separate recipe-index domain. Sharing the numeric range zero through
+ * four with the other girls does not make their dish meanings interchangeable.
+ *
+ * Elli 的独立配方索引域。虽然同样使用 0 至 4，但不能与其他女孩的料理含义互换。 */
+typedef enum MaryElliCookingRequestDish
+{
+    ELLI_COOKING_REQUEST_DISH_HOT_MILK = 0,
+    ELLI_COOKING_REQUEST_DISH_MOON_DUMPLINGS = 1,
+    ELLI_COOKING_REQUEST_DISH_STRAWBERRY_MILK = 2,
+    ELLI_COOKING_REQUEST_DISH_SALAD = 3,
+    ELLI_COOKING_REQUEST_DISH_SANDWICH = 4,
+} MaryElliCookingRequestDish;
+
 /* Source of the Moon Dumplings given to the selected partner in MFoMT's Moon
  * Viewing event. Zero means that no gift can be made; one makes the script lift
  * and consume a matching rucksack entry, while two consumes the matching food
@@ -9376,6 +9720,44 @@ typedef enum MaryWonLotteryResult
     WON_LOTTERY_RESULT_SEQUENTIAL_DIGITS = 4,
     WON_LOTTERY_RESULT_THREE_MATCHING_DIGITS = 5,
 } MaryWonLotteryResult;
+
+/* Three drawing stages used by MFoMT's Won lottery animation. Each pass locks
+ * one more digit: all digits spin first, then only the last two, and finally
+ * only the third digit before the prize result is evaluated.
+ *
+ * MFoMT Won 抽奖动画使用的三个抽取阶段。每轮会多锁定一位数字：先三位全部
+ * 滚动，随后只滚动后两位，最后只滚动第三位，然后计算奖项。 */
+typedef enum MaryWonLotteryDrawStage
+{
+    WON_LOTTERY_DRAW_STAGE_ALL_DIGITS_SPINNING = 0,
+    WON_LOTTERY_DRAW_STAGE_FIRST_DIGIT_LOCKED = 1,
+    WON_LOTTERY_DRAW_STAGE_FIRST_TWO_DIGITS_LOCKED = 2,
+} MaryWonLotteryDrawStage;
+
+/* Seasonal and weekday bonus schedules applied by MFoMT's Won item-selling
+ * service. Values 1-4 identify the item's native season and increase its offer
+ * outside that season. Values 10-16 identify one weekday that receives a five
+ * percent bonus. Zero means that neither schedule applies and is intentionally
+ * left as the local variable's default rather than a switch branch.
+ *
+ * MFoMT Won 物品出售服务采用的季节及星期加价计划。1-4 表示商品所属季节，并在
+ * 非该季节出售时提高报价；10-16 表示获得 5% 加价的星期。0 表示不采用任何计划，
+ * 有意作为局部变量默认值存在，而不是显式 switch 分支。 */
+typedef enum MaryWonSellingPriceSchedule
+{
+    WON_SELLING_PRICE_SCHEDULE_NONE = 0,
+    WON_SELLING_PRICE_SCHEDULE_SPRING_PRODUCT = 1,
+    WON_SELLING_PRICE_SCHEDULE_SUMMER_PRODUCT = 2,
+    WON_SELLING_PRICE_SCHEDULE_FALL_PRODUCT = 3,
+    WON_SELLING_PRICE_SCHEDULE_WINTER_PRODUCT = 4,
+    WON_SELLING_PRICE_SCHEDULE_SUNDAY_PRODUCT = 10,
+    WON_SELLING_PRICE_SCHEDULE_MONDAY_PRODUCT = 11,
+    WON_SELLING_PRICE_SCHEDULE_TUESDAY_PRODUCT = 12,
+    WON_SELLING_PRICE_SCHEDULE_WEDNESDAY_PRODUCT = 13,
+    WON_SELLING_PRICE_SCHEDULE_THURSDAY_PRODUCT = 14,
+    WON_SELLING_PRICE_SCHEDULE_FRIDAY_PRODUCT = 15,
+    WON_SELLING_PRICE_SCHEDULE_SATURDAY_PRODUCT = 16,
+} MaryWonSellingPriceSchedule;
 
 /* Shared round-result encoding used by both Harvest Goddess television games.
  * In Rock-Paper-Scissors, zero is a player win, one a draw, and two a loss. In
@@ -9419,6 +9801,22 @@ typedef enum MaryAppleShufflePosition
     APPLE_SHUFFLE_POSITION_CENTER = 2,
     APPLE_SHUFFLE_POSITION_RIGHT = 3,
 } MaryAppleShufflePosition;
+
+/* One of the six position transformations randomly applied during each round
+ * of Won's apple shuffle. The values cover the identity, all three pairwise
+ * swaps, and both three-position rotations.
+ *
+ * Won 苹果洗牌每回合随机采用的六种位置变换。取值完整覆盖保持原位、三种两两
+ * 交换以及两个方向的三位置轮转。 */
+typedef enum MaryAppleShuffleTransformation
+{
+    APPLE_SHUFFLE_TRANSFORMATION_KEEP_POSITIONS = 0,
+    APPLE_SHUFFLE_TRANSFORMATION_SWAP_CENTER_RIGHT = 1,
+    APPLE_SHUFFLE_TRANSFORMATION_SWAP_LEFT_CENTER = 2,
+    APPLE_SHUFFLE_TRANSFORMATION_ROTATE_RIGHT = 3,
+    APPLE_SHUFFLE_TRANSFORMATION_ROTATE_LEFT = 4,
+    APPLE_SHUFFLE_TRANSFORMATION_SWAP_LEFT_RIGHT = 5,
+} MaryAppleShuffleTransformation;
 
 /* Six examination results computed by the clinic script from the player's
  * stamina percentage and fatigue. Results 0-2 cover stamina at or above 50
@@ -9502,12 +9900,12 @@ typedef enum MaryTVShoppingDeliveryState
  * 物品时写入 1；任何错误物品都会恢复为 0；只有接受正确委托物品后才写入 2。
  * FoMT 使用槽 266，MFoMT 使用槽 274；MFoMT-US/JP 的 Ghidra VarGet 分发表
  * 又分别确认槽 274 指向相同的物理字段。 */
-typedef enum MaryThomasRequestDeliveryState
+typedef enum MaryThomasRandomItemRequestDeliveryState
 {
-    THOMAS_REQUEST_DELIVERY_IDLE = 0,
-    THOMAS_REQUEST_DELIVERY_CHECKING_ITEM = 1,
-    THOMAS_REQUEST_DELIVERY_COMPLETED = 2,
-} MaryThomasRequestDeliveryState;
+    THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_IDLE = 0,
+    THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_CHECKING_ITEM = 1,
+    THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_COMPLETED = 2,
+} MaryThomasRandomItemRequestDeliveryState;
 
 /* Thomas chooses one of five mineral gifts for the Winter 25 stocking event.
  * Zero is the cleared/inactive value; the native selector returns 1-5 and the
@@ -9870,25 +10268,52 @@ typedef enum MaryCliffWineryEmploymentStatus
     CLIFF_WINERY_PERMANENT_EMPLOYEE = 2,
 } MaryCliffWineryEmploymentStatus;
 
-/* Requested-item indices for Thomas's Harvest Goddess wager errand. All four
- * targets select the same ten items in the same order and later dispatch item
- * validation and reminder dialogue through this stored index.
+/* Requested-item indices for Thomas's wager errand with the mayor of the
+ * neighboring town. All four targets select the same ten items in the same
+ * order and later dispatch item validation and reminder dialogue through this
+ * stored index.
  *
- * Thomas 与女神打赌后委托玩家寻找物品时使用的索引。四个目标版本以相同顺序
- * 选择同一组十件物品，之后据此分派物品验证和提醒对话。 */
-typedef enum MaryHarvestGoddessRequestedItem
+ * Thomas 与邻镇镇长打赌后委托玩家寻找物品时使用的索引。四个目标版本以相同
+ * 顺序选择同一组十件物品，之后据此分派物品验证和提醒对话。 */
+typedef enum MaryThomasRandomItemRequestItem
 {
-    HARVEST_GODDESS_REQUESTED_ITEM_DIAMOND = 0,
-    HARVEST_GODDESS_REQUESTED_ITEM_BRACELET = 1,
-    HARVEST_GODDESS_REQUESTED_ITEM_GREEN_PEPPER = 2,
-    HARVEST_GODDESS_REQUESTED_ITEM_GOLDEN_EGG = 3,
-    HARVEST_GODDESS_REQUESTED_ITEM_BLACK_GRASS = 4,
-    HARVEST_GODDESS_REQUESTED_ITEM_WHITE_GRASS = 5,
-    HARVEST_GODDESS_REQUESTED_ITEM_TRUFFLE = 6,
-    HARVEST_GODDESS_REQUESTED_ITEM_MOON_STONE = 7,
-    HARVEST_GODDESS_REQUESTED_ITEM_AEPFE_APPLE = 8,
-    HARVEST_GODDESS_REQUESTED_ITEM_RICE_CAKE = 9,
-} MaryHarvestGoddessRequestedItem;
+    THOMAS_RANDOM_ITEM_REQUEST_DIAMOND = 0,
+    THOMAS_RANDOM_ITEM_REQUEST_BRACELET = 1,
+    THOMAS_RANDOM_ITEM_REQUEST_GREEN_PEPPER = 2,
+    THOMAS_RANDOM_ITEM_REQUEST_GOLDEN_EGG = 3,
+    THOMAS_RANDOM_ITEM_REQUEST_BLACK_GRASS = 4,
+    THOMAS_RANDOM_ITEM_REQUEST_WHITE_GRASS = 5,
+    THOMAS_RANDOM_ITEM_REQUEST_TRUFFLE = 6,
+    THOMAS_RANDOM_ITEM_REQUEST_MOON_STONE = 7,
+    THOMAS_RANDOM_ITEM_REQUEST_AEPFE_APPLE = 8,
+    THOMAS_RANDOM_ITEM_REQUEST_RICE_CAKE = 9,
+} MaryThomasRandomItemRequestItem;
+
+/* Classification produced while Thomas checks the player's held item against
+ * his random request. Zero is an unrelated item, one is an exact match, and
+ * the remaining values identify deliberately handled near-misses that select
+ * a more specific rejection dialogue. The four script sets use the same
+ * physical values, including the non-sequential mushroom value 12.
+ *
+ * Thomas 核对玩家手持物与随机委托时产生的分类。0 表示无关物品，1 表示完全
+ * 匹配，其余值表示会触发专用拒绝对话的易混淆物品。四套脚本使用相同物理值，
+ * 其中蘑菇类别特意使用不连续的数值 12。 */
+typedef enum MaryThomasRandomItemDeliveryMatchResult
+{
+    THOMAS_RANDOM_ITEM_DELIVERY_UNRELATED_ITEM = 0,
+    THOMAS_RANDOM_ITEM_DELIVERY_EXACT_MATCH = 1,
+    THOMAS_RANDOM_ITEM_DELIVERY_PINK_DIAMOND = 2,
+    THOMAS_RANDOM_ITEM_DELIVERY_OTHER_JEWELRY = 3,
+    THOMAS_RANDOM_ITEM_DELIVERY_NON_GOLDEN_EGG = 4,
+    THOMAS_RANDOM_ITEM_DELIVERY_EGG_DISH = 5,
+    THOMAS_RANDOM_ITEM_DELIVERY_WRONG_GRASS = 6,
+    THOMAS_RANDOM_ITEM_DELIVERY_TRUFFLE_RICE = 7,
+    THOMAS_RANDOM_ITEM_DELIVERY_REGULAR_APPLE = 8,
+    THOMAS_RANDOM_ITEM_DELIVERY_OTHER_SPECIAL_APPLE = 9,
+    THOMAS_RANDOM_ITEM_DELIVERY_COOKED_APPLE = 10,
+    THOMAS_RANDOM_ITEM_DELIVERY_ROASTED_RICE_CAKE = 11,
+    THOMAS_RANDOM_ITEM_DELIVERY_MUSHROOM = 12,
+} MaryThomasRandomItemDeliveryMatchResult;
 
 /* Alternating phases of the town's Golden Lumber anger sequence. The event
  * dispatcher enters phase 1, the first dialogue sequence advances it to 2,
@@ -9965,15 +10390,16 @@ typedef enum MaryHarvestFestivalSessionPhase
     HARVEST_FESTIVAL_SESSION_JUDGING_STARTED = 1,
 } MaryHarvestFestivalSessionPhase;
 
-/* Ordered accept/decline result of the Harvest Goddess item request. The two
+/* Ordered accept/decline result of Thomas's random-item request. The two
  * values follow the physical dialogue-choice order in both game families.
  *
- * 女神物品请求的有序接受／拒绝结果；两个值遵循男女两版的物理对话选择顺序。 */
-typedef enum MaryHarvestGoddessItemRequestChoice
+ * Thomas 随机物品委托的有序接受／拒绝结果；两个值遵循男女两版的物理对话
+ * 选择顺序。 */
+typedef enum MaryThomasRandomItemRequestChoice
 {
-    HARVEST_GODDESS_ITEM_REQUEST_ACCEPTED = 0,
-    HARVEST_GODDESS_ITEM_REQUEST_DECLINED = 1,
-} MaryHarvestGoddessItemRequestChoice;
+    THOMAS_RANDOM_ITEM_REQUEST_ACCEPTED = 0,
+    THOMAS_RANDOM_ITEM_REQUEST_DECLINED = 1,
+} MaryThomasRandomItemRequestChoice;
 
 /* Ordered advice choices in Basil's letter event, confirmed by the paired
  * dialogue branches in both regions of the applicable game.
@@ -10005,6 +10431,25 @@ typedef enum MaryHarrisAjaLetterAdviceChoice
     HARRIS_AJA_LETTER_ADVICE_TELL_HER_FEELINGS = 0,
     HARRIS_AJA_LETTER_ADVICE_THINK_FOR_YOURSELF = 1,
 } MaryHarrisAjaLetterAdviceChoice;
+
+/* Ordered advice selected after Zack finds the shipping bin empty. The
+ * complete eight-value cycle is written and dispatched directly by the same
+ * script in all four original targets, then wraps from fishing back to
+ * chickens.
+ *
+ * Zack 发现出货箱为空后依次给出的建议。四套原版脚本都直接写入并分派同一套
+ * 八值完整循环，钓鱼建议之后会回到养鸡建议。 */
+typedef enum MaryZackEmptyShippingBinAdvice
+{
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_RAISE_CHICKENS_FOR_EGGS = 0,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_RAISE_COWS_FOR_MILK = 1,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_RAISE_SHEEP_FOR_WOOL = 2,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_MINE_ORE = 3,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_WINTER_LAKE_MINE_GEMS = 4,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_FORAGE_MOUNTAINS_AND_FORESTS = 5,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_GROW_CROPS = 6,
+    ZACK_EMPTY_SHIPPING_BIN_ADVICE_CATCH_FISH = 7,
+} MaryZackEmptyShippingBinAdvice;
 
 /* Persistent marker written only when the player names the hidden marriage
  * candidate in the Harvest Goddess's ten-offering matchmaking question. The
@@ -10234,13 +10679,34 @@ typedef enum MaryWeather
  * 此类型的值来自 mary_scripts.mary.h；有序脚本表为当前 ROM 目标提供实际符号。 */
 typedef int MaryScriptId;
 
-/* A door index is local to the currently loaded map. The same numeric index
- * selects different doors on different maps, so this is intentionally an
- * opaque integer domain rather than a misleading global DOOR_* enum.
+/* A door slot is local to the currently loaded map. The same slot selects a
+ * different door on another map, so these names deliberately identify only
+ * the physical local index and never claim a global location. All four retail
+ * script sets use the complete observed domain 0 through 13. The native open
+ * and close dispatchers do not validate the index; values outside this proven
+ * script domain remain unsupported even though the VM operand is an integer.
  *
- * 门编号只在当前加载的地图内有效；同一数字在不同地图会选择不同的门。因此
- * 这里有意使用不透明整数域，而不建立会造成误导的全局 DOOR_* 枚举。 */
-typedef int MaryDoorIndex;
+ * 门槽只在当前加载的地图内有效，同一槽位在另一地图会选择不同的门。因此这些
+ * 名称只表示物理局部索引，不声称对应某个全局地点。四套原版脚本合计使用了已观察
+ * 到的完整范围 0～13。原生开门／关门分派器不会检查索引；虽然 VM 操作数是整数，
+ * 但现有证据不支持使用该范围之外的值。 */
+typedef enum MaryDoorIndex
+{
+    DOOR_SLOT_0 = 0,
+    DOOR_SLOT_1 = 1,
+    DOOR_SLOT_2 = 2,
+    DOOR_SLOT_3 = 3,
+    DOOR_SLOT_4 = 4,
+    DOOR_SLOT_5 = 5,
+    DOOR_SLOT_6 = 6,
+    DOOR_SLOT_7 = 7,
+    DOOR_SLOT_8 = 8,
+    DOOR_SLOT_9 = 9,
+    DOOR_SLOT_10 = 10,
+    DOOR_SLOT_11 = 11,
+    DOOR_SLOT_12 = 12,
+    DOOR_SLOT_13 = 13,
+} MaryDoorIndex;
 
 /* Event-local handle used to create and later remove one temporary scene
  * icon. Slot meaning belongs to the current script, not to a global icon.
@@ -10289,6 +10755,8 @@ typedef enum MaryEventIconSlot
  * 0x089E02B0, respectively. Thus this is OBJ priority, not a map-layer ID.
  * Lower values have higher display priority relative to backgrounds; equal
  * priorities still depend on sprite ordering, so do not call 0 "always front".
+ * The semantic names expose this four-level hardware order; the former
+ * numbered spellings remain source-compatibility aliases.
  * Hardware bit interpretation: https://gbadev.net/tonc/regobj.html#attribute-2
  *
  * 临时事件图标的完整两位存储域。四版原生创建入口的 Headless 反汇编均确认：
@@ -10305,14 +10773,20 @@ typedef enum MaryEventIconSlot
  * 其余三版对应调用片段仅 BL 重定位不同；位于 ROM 0x0877F65C、0x089D90C8、
  * 0x089E02B0 的 0x238 字节底层绘制函数完全一致。因此这是 OBJ 显示优先级，
  * 不是地图层 ID。数值越小，相对背景的优先级越高；同级精灵还受排列顺序影响，
- * 不应把 0 称为“永远在最前”。硬件位定义见上面的 Tonc 文档链接。 */
+ * 不应把 0 称为“永远在最前”。语义名表达四级硬件顺序，旧编号写法保留为兼容
+ * 别名。硬件位定义见上面的 Tonc 文档链接。 */
 typedef enum MaryEventIconLayer
 {
-    EVENT_ICON_LAYER_0 = 0,
-    EVENT_ICON_LAYER_1 = 1,
-    EVENT_ICON_LAYER_2 = 2,
-    EVENT_ICON_LAYER_3 = 3,
+    EVENT_ICON_LAYER_HIGHEST_PRIORITY = 0,
+    EVENT_ICON_LAYER_HIGH_PRIORITY = 1,
+    EVENT_ICON_LAYER_LOW_PRIORITY = 2,
+    EVENT_ICON_LAYER_LOWEST_PRIORITY = 3,
 } MaryEventIconLayer;
+
+mary_const_alias(EVENT_ICON_LAYER_0, EVENT_ICON_LAYER_HIGHEST_PRIORITY);
+mary_const_alias(EVENT_ICON_LAYER_1, EVENT_ICON_LAYER_HIGH_PRIORITY);
+mary_const_alias(EVENT_ICON_LAYER_2, EVENT_ICON_LAYER_LOW_PRIORITY);
+mary_const_alias(EVENT_ICON_LAYER_3, EVENT_ICON_LAYER_LOWEST_PRIORITY);
 
 /* Engine icon ID accepted by CreateEventIcon and returned by GetFoodIconId,
  * GetArticleIconId, or GetToolIconId. Keeping one opaque type connects these
@@ -10330,14 +10804,18 @@ typedef int MaryEventIconId;
  * sites: entity 0x2B is the farm dog, entities 0x2E through 0x35 are the eight
  * coop chicken slots, and the unique entity 0x4A path carries the basket.
  * Kind 5 stores the actor-graphic ID installed by BeginHoldingActorGraphic.
- * The corresponding MFoMT-US/JP native handlers preserve the same six values.
+ * GetPlayerHeldItemKind returns the separate -1 sentinel when no object is
+ * held. The corresponding MFoMT-US/JP native handlers preserve the same six
+ * object values and the same sentinel.
  *
  * 已由 FoMT HeldItem 实现及实体拾取调用链确认：实体 0x2B 为农场狗，
  * 0x2E～0x35 为鸡舍的八个鸡槽，唯一的 0x4A 路径为篮子。类别 5
- * 保存 BeginHoldingActorGraphic 安装的角色图形 ID。MFoMT-US/JP 的对应
- * 原生 handler 保持相同的六个值。 */
+ * 保存 BeginHoldingActorGraphic 安装的角色图形 ID。GetPlayerHeldItemKind 在
+ * 未手持对象时返回独立的 -1 哨兵。MFoMT-US/JP 的对应原生 handler 保持相同
+ * 六种对象值及同一哨兵。 */
 typedef enum MaryHeldItemKind
 {
+    HELD_ITEM_KIND_NONE = -1,
     HELD_ITEM_KIND_FOOD = 0,
     HELD_ITEM_KIND_ARTICLE = 1,
     HELD_ITEM_KIND_DOG = 2,
@@ -10346,10 +10824,93 @@ typedef enum MaryHeldItemKind
     HELD_ITEM_KIND_ACTOR_GRAPHIC = 5,
 } MaryHeldItemKind;
 
-#if defined(MARY_MFOMT)
-/* Female-protagonist outfit colors. MFoMT-US and MFoMT-JP use the same order.
+/* Complete interaction-category domain built by each Harvest Sprite dialogue
+ * script after inspecting the object held by the player. Values 1 through 5
+ * are the five gift-preference bands and directly select both the response
+ * text and the base friendship change. Value 6 is the no-applicable-gift
+ * sentinel and continues into ordinary dialogue. Values 7 and 8 distinguish
+ * a young animal from an adult animal; 9 through 11 group accessories,
+ * cosmetics, and perfume. Value 12 is the tea-party invitation and enters the
+ * separate season, location, time, and all-sprites-present validation path.
+ * The seven sprite scripts in both FoMT and MFoMT use this same physical
+ * domain; individual items assigned to preference bands differ by sprite.
  *
- * 女主角服装颜色。MFoMT-US 与 MFoMT-JP 使用相同顺序。 */
+ * 各小矮人对话脚本在检查玩家手持物后构造的完整交互类别域。值 1～5 是五档
+ * 礼物偏好，会直接选择回应文本和基础友好度变化；值 6 表示没有可处理的礼物，
+ * 随后进入普通对话。值 7、8 分别表示幼年与成年动物；9～11 分别归类饰品、
+ * 化妆品和香水；值 12 表示茶会邀请函，并进入独立的季节、地点、时间及七名
+ * 小矮人是否全部在场的检查流程。FoMT 与 MFoMT 的七个小矮人脚本共用同一
+ * 物理取值域，但每名小矮人划入各偏好档的具体物品不同。 */
+typedef enum MaryHarvestSpriteInteractionCategory
+{
+    HARVEST_SPRITE_INTERACTION_FAVORITE_GIFT = 1,
+    HARVEST_SPRITE_INTERACTION_LIKED_GIFT = 2,
+    HARVEST_SPRITE_INTERACTION_NEUTRAL_GIFT = 3,
+    HARVEST_SPRITE_INTERACTION_DISLIKED_GIFT = 4,
+    HARVEST_SPRITE_INTERACTION_HATED_GIFT = 5,
+    HARVEST_SPRITE_INTERACTION_NO_APPLICABLE_GIFT = 6,
+    HARVEST_SPRITE_INTERACTION_YOUNG_ANIMAL = 7,
+    HARVEST_SPRITE_INTERACTION_ADULT_ANIMAL = 8,
+    HARVEST_SPRITE_INTERACTION_ACCESSORY = 9,
+    HARVEST_SPRITE_INTERACTION_COSMETIC = 10,
+    HARVEST_SPRITE_INTERACTION_PERFUME = 11,
+    HARVEST_SPRITE_INTERACTION_TEA_PARTY_INVITATION = 12,
+} MaryHarvestSpriteInteractionCategory;
+
+/* Complete held-item interaction category used by the ordinary NPC dialogue
+ * and gift-response scripts. Each script constructs this value from the
+ * concrete food, article, animal, and current event state, then consumes it
+ * in response selection, friendship/love adjustment, and item-consumption
+ * branches. Category 0 is the additional highest preference band used by
+ * marriage candidates. Categories 1-5 are the common gift bands; 6 bypasses
+ * gift handling; 7 and 8 select favorable and unfavorable animal reactions.
+ * Categories 9-11 are the shared accessory, cosmetic, and perfume groups.
+ * Category 12 is present in the contiguous physical value domain but is never
+ * produced or consumed by any of the four complete retail script sets, so it
+ * remains explicitly unknown instead of borrowing a neighboring meaning.
+ * Category 13 is reserved for a character-specific event item (for example
+ * Cliff's photograph or Ellen's stocking-event yarn), so its name remains
+ * intentionally generic. Category 14 is selected only by the Spring or
+ * Winter Thanksgiving gift-exchange paths. The physical domain is shared by
+ * FoMT and MFoMT, while individual item classification remains script- and
+ * target-specific.
+ *
+ * 普通 NPC 对话及礼物回应脚本使用的完整手持物交互类别。每个脚本根据具体食品、
+ * 物品、动物及当前事件状态构造该值，再用它选择回应、调整友好度／爱情度并判断
+ * 是否消耗手持物。类别 0 是婚恋候选额外使用的最高偏好档；1～5 是通用五档
+ * 礼物偏好；6 跳过礼物处理；7、8 分别选择正面和负面的动物回应；9～11 分别
+ * 表示饰品、化妆品和香水。类别 12 位于连续物理取值域中，但四套完整零售脚本
+ * 均未产生或消费该值，因此显式保留为未知项，不套用相邻类别的含义。类别 13
+ * 专用于人物各自的事件物品（例如 Cliff 的
+ * 照片或 Ellen 织袜事件所需的毛线），因此有意保留通用名称；类别 14 只由春季
+ * 或冬季感恩节礼物交换路径设置。FoMT 与 MFoMT 共用该物理域，但具体物品归类
+ * 仍由各脚本及目标版本独立决定。 */
+typedef enum MaryNpcHeldItemInteractionCategory
+{
+    NPC_INTERACTION_SPECIAL_FAVORITE_GIFT = 0,
+    NPC_INTERACTION_FAVORITE_GIFT = 1,
+    NPC_INTERACTION_LIKED_GIFT = 2,
+    NPC_INTERACTION_NEUTRAL_GIFT = 3,
+    NPC_INTERACTION_DISLIKED_GIFT = 4,
+    NPC_INTERACTION_HATED_GIFT = 5,
+    NPC_INTERACTION_NO_APPLICABLE_GIFT = 6,
+    NPC_INTERACTION_FAVORABLE_ANIMAL_RESPONSE = 7,
+    NPC_INTERACTION_UNFAVORABLE_ANIMAL_RESPONSE = 8,
+    NPC_INTERACTION_ACCESSORY = 9,
+    NPC_INTERACTION_COSMETIC = 10,
+    NPC_INTERACTION_PERFUME = 11,
+    NPC_INTERACTION_UNKNOWN_12 = 12,
+    NPC_INTERACTION_CHARACTER_EVENT_ITEM = 13,
+    NPC_INTERACTION_THANKSGIVING_GIFT = 14,
+} MaryNpcHeldItemInteractionCategory;
+
+#if defined(MARY_MFOMT)
+/* Complete female-protagonist outfit-color domain. MFoMT-US and MFoMT-JP use
+ * the same six-value order. The native getter extracts the saved state's low
+ * three bits; the setter accepts only 0 through 5 and ignores 6 and 7.
+ *
+ * 完整的女主角服装颜色域。MFoMT-US 与 MFoMT-JP 使用相同的六值顺序。原生
+ * getter 提取存档状态的低三位；setter 只接受 0 到 5，并忽略 6 和 7。 */
 typedef enum MaryOutfitColor
 {
     OUTFIT_COLOR_BLUE = 0,
@@ -10641,7 +11202,7 @@ typedef enum MaryFoodId
     FOOD_FRIED_NOODLES = 0x86,
     FOOD_BUCKWHEAT_NOODLES = 0x87,
     FOOD_NOODLES_W_TEMPURA = 0x88,
-    FOOD_FRIED_NOODLES_2 = 0x89,
+    FOOD_FRIED_BUCKWHEAT_NOODLES = 0x89,
     FOOD_BUCKWHEAT_CHIPS = 0x8A,
     FOOD_COOKIES = 0x8B,
     FOOD_CHOCOLATE_COOKIES = 0x8C,
@@ -10677,6 +11238,18 @@ typedef enum MaryFoodId
     FOOD_POTATO_PANCAKES_OR_CROQUETTE = 0xAA,
     FOOD_NONE = 0xAB,
 } MaryFoodId;
+
+/* FoMT-US and MFoMT-US display 0x86 and 0x89 with the same official localized
+ * name, "Fried Noodles", and even reuse the same name/description pointers.
+ * The JP tables distinguish 焼きうどん at 0x86 from 焼きそば at 0x89; the
+ * physical recipe identity therefore uses the descriptive English symbol
+ * FRIED_BUCKWHEAT_NOODLES. The old numeric-suffix spelling remains compatible.
+ *
+ * FoMT-US 与 MFoMT-US 把 0x86、0x89 都显示为官方本地化名称“Fried Noodles”，
+ * 甚至复用同一组名称／说明指针。日版表则明确区分 0x86 的“焼きうどん”和
+ * 0x89 的“焼きそば”，因此物理菜谱身份使用描述性的英文符号
+ * FRIED_BUCKWHEAT_NOODLES；旧数字后缀写法继续作为兼容别名。 */
+mary_const_alias(FOOD_FRIED_NOODLES_2, FOOD_FRIED_BUCKWHEAT_NOODLES);
 
 /*
  * Ordered IDs used by the supermarket's staple-product quantity purchase
@@ -10760,6 +11333,19 @@ typedef enum MaryArticleId
     ARTICLE_WOOL_M = 0x06,
     ARTICLE_WOOL_L = 0x07,
     ARTICLE_WOOL_G = 0x08,
+    /*
+     * Wool P and Wool X are distinct physical article IDs in all four targets.
+     * FoMT-US alone reuses Wool P's display-name and description pointers for
+     * Wool X, even though its icon and shipping value remain those of Wool X.
+     * MFoMT-US and both JP targets keep independent Wool X text. The symbolic
+     * ID therefore follows the article identity rather than that FoMT-US data
+     * error.
+     *
+     * 羊毛 P 与羊毛 X 在四个目标中都是不同的物理物品 ID。只有 FoMT-US
+     * 为羊毛 X 错误复用了羊毛 P 的显示名与说明指针，但其图标和出货价格仍然
+     * 属于羊毛 X；MFoMT-US 与两个日版均保留独立的羊毛 X 文本。因此符号 ID
+     * 按物品的真实身份命名，而不沿用 FoMT-US 的数据错误。
+     */
     ARTICLE_WOOL_P = 0x09,
     ARTICLE_WOOL_X = 0x0A,
     ARTICLE_YARN_S = 0x0B,
@@ -12281,6 +12867,7 @@ mary_var_type(VAR_HORSE_GROWTH_STAGE, MaryPetGrowthStage);
 mary_var_type(VAR_MOON_VIEWING_PARTNER_INDEX, MaryMoonViewingPartner);
 mary_var_type(VAR_FIREWORKS_FESTIVAL_PARTNER, MaryFireworksFestivalPartner);
 mary_var_type(VAR_THOMAS_STOCKING_GIFT_SELECTION, MaryThomasStockingGift);
+mary_var_type(VAR_ZACK_EMPTY_SHIPPING_BIN_ADVICE_CYCLE, MaryZackEmptyShippingBinAdvice);
 
 /* Proven two-state fields shared by all four targets. Each field is only
  * written or tested as 0/1, and its native/script lifecycle identifies those
@@ -12306,6 +12893,7 @@ mary_var_type(VAR_GAMECUBE_LINK_TEN_THOUSAND_FISH_CAUGHT_MILESTONE_RECORDED, Mar
 mary_var_type(VAR_GAMECUBE_LINK_UPDATE_IN_PROGRESS, MaryBool);
 mary_var_type(VAR_GAMECUBE_LINK_VACATION_VILLA_MILESTONE_RECORDED, MaryBool);
 mary_var_type(VAR_GAMECUBE_LINK_AWL_PLAYER_PROFILE_LEVEL, MaryAwlProfileLevel);
+mary_var_type(VAR_GAMECUBE_LINK_AWL_CHILD_PROFILE_LEVEL, MaryAwlProfileLevel);
 mary_var_type(VAR_GAMECUBE_LINK_AWL_TAKAKURA_PROFILE_LEVEL, MaryAwlProfileLevel);
 mary_var_type(VAR_GAMECUBE_LINK_AWL_ROMANA_PROFILE_LEVEL, MaryAwlProfileLevel);
 mary_var_type(VAR_GAMECUBE_LINK_AWL_LUMINA_PROFILE_LEVEL, MaryAwlProfileLevel);
@@ -12346,26 +12934,39 @@ mary_var_type(VAR_GOTZ_WORK_SUSPENDED, MaryBool);
 mary_var_type(VAR_HARVEST_FESTIVAL_CONTRIBUTED_INGREDIENT_ACCEPTED, MaryBool);
 #if defined(MARY_FOMT)
 /* FoMT native accessors store slot 275 as bit 7 of farm-save byte +0x217C and
- * slot 276 as the adjacent two-bit event lifecycle field at +0x217D. Ellen's
+ * slot 276 as the adjacent two-bit scalar field at +0x217D. Ellen's
  * gift script requires 275 to be clear before yarn may route to the
  * stocking-knitting response, in addition to checking the separately
  * identified stocking-event state. This is not FarmHouse::has_stocking:
  * AddStocking accesses the FarmHouse object at farm +0x1F4 and changes its
  * packed member near +0x1F7, physically separate from +0x217C. No vanilla
  * script writes 275, so this proves a boolean prerequisite but not whether it
- * belongs to the stocking event or to another mutually exclusive event. Slot
- * 276 uses the standard not-started/in-progress/completed values; its owning
- * event is likewise unproven. The physical names therefore remain.
+ * belongs to the stocking event or to another mutually exclusive event. No
+ * vanilla script writes slot 276 or identifies the meaning of its values, so
+ * its two-bit width must not be treated as proof of an event lifecycle. Both
+ * physical names therefore remain, and slot 276 has no Mary-C value type.
  *
  * FoMT 原生访问器把槽 275 存在农场存档 +0x217C 的 bit 7，把槽 276 存在相邻
- * +0x217D 的两比特事件生命周期字段。Ellen 的送礼脚本除了检查已经明确命名的
+ * +0x217D 的两比特标量字段。Ellen 的送礼脚本除了检查已经明确命名的
  * 织袜子事件状态外，还要求 275 为零，毛线才能进入织袜子响应。它并不是
  * FarmHouse::has_stocking：AddStocking 访问的是 farm +0x1F4 的 FarmHouse 对象，
  * 改写其约 +0x1F7 的打包成员，与 +0x217C 物理分离。FoMT-US/JP 原版脚本均不写入 275，
  * 因此只能证明它是布尔前置条件，不能证明它属于织袜子事件还是另一个互斥事件。
- * 276 使用标准的未开始／进行中／已完成值，其所属事件同样未证实，故继续保留
- * 物理槽名称。 */
+ * 原版脚本不写入槽 276，也不能说明各数值的含义，因此两位宽度不能作为事件
+ * 生命周期的证据。两项均继续保留物理槽名称，且槽 276 不绑定 Mary-C 值类型。 */
 mary_var_type(VAR_UNKNOWN_SLOT_275, MaryBool);
+/* FoMT slot 343 is exactly save byte 0x218E bit 5 in both regional ROMs.
+ * Its getter extracts one bit and its setter masks the input with 1 while
+ * preserving every other bit. The only non-accessor native user of the same
+ * byte reads bits 3-4 instead, and no vanilla script identifies the owner of
+ * bit 5. The value domain is therefore boolean, while the semantic name must
+ * remain unknown.
+ *
+ * FoMT 槽 343 在两个地区版 ROM 中都精确对应存档字节 0x218E 的 bit 5。
+ * getter 只提取一位，setter 将输入与 1 相与并保留其余全部位。同一字节唯一的
+ * 非通用原生访问读取的是 bits 3-4，原版脚本也没有揭示 bit 5 的归属。因此其
+ * 取值域可确定为布尔，但语义名称仍必须保持未知。 */
+mary_var_type(VAR_UNKNOWN_SLOT_343, MaryBool);
 /* Slot 423 is written only by the FoMT daily-reset script, which clears it
  * between the Harvest Festival session field and the Moon Viewing event
  * field. No script-side producer or consumer identifies its ownership. The
@@ -12381,48 +12982,67 @@ mary_var_type(VAR_UNKNOWN_SLOT_423, MaryBool);
  * one bit and the writer masks its input with 1. Ellen's yarn-gift branch
  * uses it as the same clear/non-clear prerequisite seen at FoMT slot 275.
  * No vanilla script writes it. Slot 284 is the adjacent, independently proven
- * two-bit event lifecycle field. These are the verified MFoMT counterparts of
- * FoMT slots 275/276, but their event identities remain unknown.
+ * two-bit scalar field, but no producer or value semantics are known. These
+ * are the verified MFoMT counterparts of FoMT slots 275/276, but their event
+ * identities remain unknown; slot 284 deliberately has no Mary-C value type.
  *
  * 两个 MFoMT 地区版均将槽 283 存在字节 0x2195 的位 5：读取提取单个位，写入
  * 先与 1 相与。Ellen 的毛线送礼分支将其用作与 FoMT 槽 275 相同的清零／非清零
- * 前置条件。原版脚本没有写入它。槽 284
- * 才是相邻且已独立证实的两比特事件生命周期字段。这是 FoMT 槽 275/276 的已验证
- * MFoMT 对应布局，但事件身份仍然未知。 */
+ * 前置条件。原版脚本没有写入它。槽 284 是相邻且已独立证实的两比特标量字段，
+ * 但尚无生产者或数值语义证据。这是 FoMT 槽 275/276 的已验证 MFoMT 对应布局，
+ * 但事件身份仍然未知；槽 284 有意不绑定 Mary-C 值类型。 */
 mary_var_type(VAR_UNKNOWN_SLOT_283, MaryBool);
 /* MFoMT slots 86, 94, 96, and 115 are single-bit fields in both regional
- * ROMs. No vanilla event script reads or writes them, so their ownership is
- * deliberately left unknown while their proven boolean value domain remains
- * available to raw-slot users.
+ * ROMs. No vanilla event script reads or writes them. Slot 86 is read by two
+ * native schedule selectors; when set, each selector returns the null schedule
+ * at index zero. Their route-location sets match the complete Stu and May
+ * dialogue location dispatches, while the native schedule manager places them
+ * in roster-order objects 16 and 5 respectively. This independently proves the
+ * conservative behavioral name VAR_STU_AND_MAY_SCHEDULES_DISABLED in both
+ * regions. Its producer and story purpose remain unknown; the name deliberately
+ * does not assign it to a guessed event. Slots 94, 96, and 115 remain unknown.
  *
- * MFoMT 的槽 86、94、96、115 在两个地区版 ROM 中均为单比特字段。原版事件
- * 脚本没有读写它们，因此有意保留未知归属，但仍向直接使用物理槽的代码提供已经
- * 证实的布尔取值域。 */
-mary_var_type(VAR_UNKNOWN_SLOT_086, MaryBool);
+ * MFoMT 的槽 86、94、96、115 在两个地区版 ROM 中均为单比特字段。原版事件脚本
+ * 没有读写它们。槽 86 会被两个原生日程选择器读取；设为 1 时，两个选择器都返回
+ * 索引 0 的空日程。两组路径地点分别与 Stu、May 的完整对话地点分派逐项吻合，
+ * 原生日程管理器也分别把它们放入 roster 顺序中的第 16、5 个对象。这些相互独立的
+ * 证据足以在两个地区采用保守行为名 VAR_STU_AND_MAY_SCHEDULES_DISABLED。其生产者和
+ * 剧情目的仍未知，名称有意不把它归入猜测的事件；槽 94、96、115 继续保持未知。 */
+mary_var_type(VAR_STU_AND_MAY_SCHEDULES_DISABLED, MaryBool);
 mary_var_type(VAR_UNKNOWN_SLOT_094, MaryBool);
 mary_var_type(VAR_UNKNOWN_SLOT_096, MaryBool);
 mary_var_type(VAR_UNKNOWN_SLOT_115, MaryBool);
-/* MFoMT slot 351 is a single-bit field in both regional ROMs. It has no
- * vanilla event-script consumer, so only its physical boolean domain is
- * asserted here.
+/* MFoMT slots 351 and 352 occupy save byte 0x21A7 bit 3 and bits 4-5 in both
+ * regional ROMs. The only direct native reference to the same byte outside
+ * the variable accessor cluster extracts bits 1-2 instead; that is the
+ * independently named slot 350 shooting-star wish selector. Neither unknown
+ * slot has a vanilla event-script consumer. Slot 351 has an exact boolean
+ * domain; slot 352 deliberately remains an untyped two-bit value.
  *
- * MFoMT 槽 351 在两个地区版 ROM 中均为单比特字段。原版事件脚本没有消费者，
- * 因此这里只声明其物理布尔域，不推测事件归属。 */
+ * MFoMT 槽 351、352 在两个地区版 ROM 中分别占用存档字节 0x21A7 的位 3 和
+ * 位 4-5。变量访问器代码簇之外唯一直接引用同一字节的原生代码实际提取位 1-2；
+ * 那是已独立命名的槽 350 流星愿望选择值。两个未知槽均没有原版事件脚本消费者；
+ * 槽 351 具有精确布尔域，槽 352 则有意保持为无类型的两比特值。 */
 mary_var_type(VAR_UNKNOWN_SLOT_351, MaryBool);
-/* MFoMT slots 584 through 591 are eight independently addressed single-bit
- * fields across save bytes 0x21E5 and 0x21E6 in both regions. Their native
- * ownership is still unknown, but their boolean domains are exact.
+/* MFoMT slots 584 through 591 are the reserved tail of the GameCube-link
+ * dialogue-pending range. The link-update script maps received milestone IDs
+ * 39 through 60 one-to-one onto pending variables 562 through 583; the next
+ * eight boolean slots therefore preserve the unused ID positions 61 through
+ * 68 before Van's album notification at 592. No retail script reads or writes
+ * these reserved positions, so no dialogue meaning is assigned to them.
  *
- * MFoMT 槽 584 至 591 在两个地区版中均为分布于存档字节 0x21E5、0x21E6
- * 的八个独立单比特字段。其原生归属仍未知，但布尔取值域已经精确确认。 */
-mary_var_type(VAR_UNKNOWN_SLOT_584, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_585, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_586, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_587, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_588, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_589, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_590, MaryBool);
-mary_var_type(VAR_UNKNOWN_SLOT_591, MaryBool);
+ * MFoMT 槽 584 至 591 是 GameCube 联动对话待显示区的保留尾段。联动更新脚本
+ * 将收到的 milestone ID 39 至 60 一一映射到待显示变量 562 至 583；随后八个
+ * 布尔槽因此保留未使用的 ID 位置 61 至 68，592 才是 Van 唱片通知。原版脚本
+ * 不读写这些保留位置，故不为其虚构具体对话含义。 */
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_61, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_62, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_63, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_64, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_65, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_66, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_67, MaryBool);
+mary_var_type(VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_68, MaryBool);
 /* Slot 467 is the MFoMT daily-reset counterpart at the same relative festival
  * boundary. Neither regional script set exposes another read or write. Its
  * boolean domain is proven, but its event ownership is not.
@@ -12430,6 +13050,21 @@ mary_var_type(VAR_UNKNOWN_SLOT_591, MaryBool);
  * 槽 467 是 MFoMT 每日重置表中位于相同节日边界的对应槽。两个地区的脚本均未
  * 暴露其他读写点；其布尔取值域已经证实，但所属事件仍未证实。 */
 mary_var_type(VAR_UNKNOWN_SLOT_467, MaryBool);
+/* MFoMT slots 482, 484, 486, 488, and 490 are five independent two-bit
+ * fields in both regional ROMs. Their getters extract exactly two bits and
+ * their setters encode the low two input bits while preserving the surrounding
+ * packed byte; the interleaved odd slots 483, 485, 487, 489,
+ * and 491 are separate one-bit Winter Thanksgiving gift markers. No vanilla
+ * event script reads or writes the five even slots, so neither their value
+ * meanings nor their owning systems are established. They deliberately have
+ * no Mary-C value type: a two-bit width alone does not prove the generic
+ * event-lifecycle domain.
+ *
+ * MFoMT 槽 482、484、486、488、490 在两个地区版中均为五个相互独立的两比特
+ * 字段。getter 精确提取两位，setter 编码输入的低两位并保留打包字节中的周围位；交错的奇数槽
+ * 483、485、487、489、491 则是独立的冬季感恩节已送礼单比特标记。原版事件脚本
+ * 均不读写五个偶数槽，其取值含义和所属系统都尚未证实。因此有意不为它们绑定
+ * Mary-C 值类型：仅有两比特物理宽度不能证明它们属于通用事件生命周期域。 */
 /* Both regions store slots 697 and 705 as single bits. Their event ownership
  * remains unknown; boolean typing does not assign an event meaning.
  *
@@ -12544,24 +13179,24 @@ mary_var_type(VAR_BARLEY_HORSE_YEAR_EVALUATION_EVENT_STATE, MaryEventLifecycleSt
 mary_var_type(VAR_BARLEY_REPLACEMENT_FOAL_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_BASIL_LETTER_ADVICE_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_BASIL_PUBLISHING_AWARD_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_CARTER_MYSTERIOUS_VOICE_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_CARTER_OPENS_CHURCH_BACK_DOOR_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_CARTER_CONFESSIONAL_DREAM_PREDICTS_GOOD_FORTUNE_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_CARTER_CHURCH_BACK_DOOR_MUSHROOM_SECRET_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_CLIFF_COLLAPSES_IN_SNOW_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_CLIFF_COLLAPSE_FOLLOWUP_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_CLIFF_LEAVES_MINERAL_TOWN_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_CLIFF_PERMANENT_WINERY_JOB_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_COLLECT_POWER_BERRY_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_DOCTOR_DISCUSSING_HIS_FAMILY_PROFESSION_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_DOCTOR_REFLECTS_ON_PARENTS_AND_MEDICAL_CALLING_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_DOUG_AND_DUKE_ARGUMENT_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_DUKE_AND_MANNA_MISSING_JUICE_ARGUMENT_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_DUKE_GRAPE_HARVEST_INVITATION_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_ELLEN_GRANDFATHER_LETTER_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_ELLEN_GRANDFATHERS_HIDDEN_LETTER_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLEN_KNITS_STOCKING_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLEN_WHITE_FLOWER_DISCOVERY_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLEN_WHITE_FLOWER_LEGEND_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLI_DOCTOR_WEDDING_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_ELLI_NURSING_CAREER_ADVICE_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_ELLI_PLAYS_WITH_STU_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_ELLI_STUDIES_MEDICINE_FOR_ELLENS_LEGS_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_ELLI_AND_STU_PLAY_TOGETHER_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLI_TREATS_STUS_COLD_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_FESTIVAL_DAY_ANNOUNCEMENT_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_GOTZ_AND_HARRIS_PATROL_DISCUSSION_EVENT_STATE, MaryEventLifecycleState);
@@ -12570,7 +13205,7 @@ mary_var_type(VAR_GOTZ_REGAINS_MOTIVATION_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_GRAY_AND_KAI_FRIENDSHIP_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARRIS_AJA_LETTER_ADVICE_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_GODDESS_FIRST_OFFERING_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_HARVEST_GODDESS_ITEM_REQUEST_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_THOMAS_RANDOM_ITEM_REQUEST_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_GODDESS_TEN_OFFERINGS_MATCHMAKING_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_SPRITE_TEA_PARTY_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_JEFF_BLOOD_TYPE_CORRECTION_EVENT_STATE, MaryEventLifecycleState);
@@ -12582,7 +13217,7 @@ mary_var_type(VAR_KAREN_AND_DUKE_DRINKING_CONTEST_EVENT_STATE, MaryEventLifecycl
 mary_var_type(VAR_KAREN_COMFORTS_LONELY_RICK_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_LILLIA_AND_SASHA_REMINISCE_ABOUT_JEFFS_MARRIAGE_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_LILLIA_READS_RODS_LETTER_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_MANNA_DISCUSSING_AJAS_DEPARTURE_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_MANNA_AJAS_DEPARTURE_ADVICE_FROM_FRIENDS_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_MANNA_FLATTERS_JEFF_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_MARY_AND_GRAY_BOOK_AND_HEALTH_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_MARY_GRAY_WEDDING_EVENT_STATE, MaryEventLifecycleState);
@@ -12603,18 +13238,18 @@ mary_var_type(VAR_RICK_AND_POPURI_RUSH_TO_SICK_LILLIA_EVENT_STATE, MaryEventLife
 mary_var_type(VAR_RICK_CONFRONTS_KAI_ABOUT_POPURI_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_RICK_KAREN_WEDDING_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_RICK_KAREN_WEDDING_POPURI_INTRO_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_SASHA_TEACHES_JEFF_TO_REFUSE_STORE_CREDIT_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_JEFF_AND_SASHA_STORE_CREDIT_LESSON_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_SHOOTING_STAR_WISH_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_STARRY_NIGHT_FARMHOUSE_SPOUSE_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_THOMAS_STOCKING_DELIVERY_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_VAN_INTRODUCTION_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_WINTER_THANKSGIVING_FARMHOUSE_SPOUSE_GIFT_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_WON_APPLE_CHALLENGE_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_WON_DISCOVERS_JEFFS_PAINTING_TALENT_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_WON_OFFERS_TO_BUY_JEFFS_PAINTING_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_WON_INTRODUCTION_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_WON_MEETS_KAREN_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_WON_AND_KAREN_FIRST_MEETING_AT_ZACKS_HOUSE_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_WON_VASE_PURCHASE_EVENT_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_ZACK_FISHING_ROD_FOLLOWUP_EVENT_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_ZACK_CONGRATULATES_CATCHING_EVERY_FISH_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ZACK_VISITS_SICK_LILLIA_EVENT_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_PLAYER_BIRTHDAY_SEASON, MarySeason);
@@ -12626,7 +13261,7 @@ mary_var_type(VAR_KAPPA_JEWEL_EXCHANGE_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_GODDESS_CHOSEN_AS_FAVORITE_VALUE, MaryHiddenMarriageCandidatePreference);
 mary_var_type(VAR_HAS_BATHROOM, MaryBool);
 mary_var_type(VAR_CLIFF_WINERY_EMPLOYMENT_STATUS, MaryCliffWineryEmploymentStatus);
-mary_var_type(VAR_HARVEST_GODDESS_REQUESTED_ITEM_INDEX, MaryHarvestGoddessRequestedItem);
+mary_var_type(VAR_THOMAS_RANDOM_ITEM_REQUESTED_ITEM_INDEX, MaryThomasRandomItemRequestItem);
 mary_var_type(VAR_GOLDEN_LUMBER_ANGER_DIALOGUE_VARIANT_STATE, MaryGoldenLumberAngerDialoguePhase);
 mary_var_type(VAR_STARRY_NIGHT_FESTIVAL_HOST_INDEX, MaryStarryNightFestivalHost);
 mary_var_type(VAR_CHICKEN_FESTIVAL_RESULT, MaryFestivalContestResult);
@@ -12634,7 +13269,7 @@ mary_var_type(VAR_FRISBEE_TOURNAMENT_RESULT, MaryFestivalContestResult);
 mary_var_type(VAR_SHEEP_FESTIVAL_RESULT, MaryFestivalContestResult);
 mary_var_type(VAR_HARVEST_FESTIVAL_SESSION_PHASE, MaryHarvestFestivalSessionPhase);
 mary_var_type(VAR_COOKING_FESTIVAL_PLAYER_DISH_RATING, MaryCookingFestivalDishRating);
-mary_var_type(VAR_HARVEST_GODDESS_ITEM_REQUEST_CHOICE, MaryHarvestGoddessItemRequestChoice);
+mary_var_type(VAR_THOMAS_RANDOM_ITEM_REQUEST_CHOICE, MaryThomasRandomItemRequestChoice);
 mary_var_type(VAR_BASIL_LETTER_ADVICE_CHOICE, MaryBasilLetterAdviceChoice);
 mary_var_type(VAR_DOUG_AND_DUKE_ARGUMENT_CHOICE, MaryDougDukeArgumentChoice);
 mary_var_type(VAR_HARRIS_AJA_LETTER_ADVICE_CHOICE, MaryHarrisAjaLetterAdviceChoice);
@@ -12660,7 +13295,7 @@ mary_var_type(VAR_ELLI_DOCTOR_RIVAL_EVENT_3_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_ELLI_DOCTOR_RIVAL_EVENT_4_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_FARM_INTRODUCTION_AND_SHIPPING_TUTORIAL_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_GOLDEN_LUMBER_ANGER_EVENT_TODAY_STATE, MaryEventLifecycleState);
-mary_var_type(VAR_HARRIS_AJA_LETTER_ADVICE_FOLLOWUP_STATE, MaryEventLifecycleState);
+mary_var_type(VAR_HARRIS_AJA_LETTER_REJECTION_FOLLOWUP_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_GODDESS_JEWEL_EXCHANGE_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_HARVEST_GODDESS_TEN_OFFERINGS_POWER_BERRY_STATE, MaryEventLifecycleState);
 mary_var_type(VAR_JEWELS_OF_TRUTH_EXCHANGE_RETRY_STATE, MaryEventLifecycleState);
@@ -13044,7 +13679,7 @@ mary_var_type(VAR_WINTER_THANKSGIVING_GIFT_GIVEN_TO_POPURI, MaryBool);
 mary_var_type(VAR_WINTER_THANKSGIVING_GIFT_GIVEN_TO_RICK, MaryBool);
 mary_var_type(VAR_WINTER_THANKSGIVING_GIFT_GIVEN_TO_WON, MaryBool);
 mary_var_type(VAR_WINTER_THANKSGIVING_RING_OBTAINED, MaryBool);
-mary_var_type(VAR_WON_APPLE_CLEANUP_EVENT_COMPLETED, MaryBool);
+mary_var_type(VAR_WON_PURPLE_HEART_APPLE_MIXUP_EVENT_COMPLETED, MaryBool);
 mary_var_type(VAR_WON_ITEM_SELLING_SERVICE_UNLOCKED, MaryBool);
 #endif
 
@@ -13094,7 +13729,7 @@ mary_var_type(VAR_TV_SHOPPING_SEASONING_SET_DELIVERY_STATE, MaryTVShoppingDelive
 mary_var_type(VAR_TV_SHOPPING_POWER_BERRY_DELIVERY_STATE, MaryTVShoppingDeliveryState);
 mary_var_type(VAR_TV_SHOPPING_MIRROR_DELIVERY_STATE, MaryTVShoppingDeliveryState);
 mary_var_type(VAR_TV_SHOPPING_CLOCK_DELIVERY_STATE, MaryTVShoppingDeliveryState);
-mary_var_type(VAR_THOMAS_REQUEST_ITEM_DELIVERY_STATE, MaryThomasRequestDeliveryState);
+mary_var_type(VAR_THOMAS_RANDOM_ITEM_REQUEST_DELIVERY_STATE, MaryThomasRandomItemRequestDeliveryState);
 
 mary_var_type(VAR_HORSE_RACE_INVITATION_EVENT_STATE, MaryFestivalInvitationState);
 mary_var_type(VAR_COOKING_FESTIVAL_INVITATION_EVENT_STATE, MaryFestivalInvitationState);
@@ -13157,15 +13792,16 @@ mary_callable_return_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_SHEEP, MaryS
 mary_callable_return_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_CHICKEN, MaryChickenGrowthStage);
 mary_callable_return_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_DOG, MaryPetGrowthStage);
 
-/* GetPresentedItemId is a category-local ID captured together with
- * GetPresentedItemKind. Inside a branch proven to be FOOD or ARTICLE, its
- * saved result uses the corresponding complete ID domain. Other held kinds
- * deliberately remain integer-valued because they do not share either item
- * table.
+/* GetPresentedItemId reads the player actor's captured presentation-ID cache.
+ * The native producer writes that cache only for FOOD and ARTICLE; inside a
+ * branch proven to be either kind, the saved result uses the corresponding
+ * complete ID domain. Other presented kinds deliberately remain integer-valued:
+ * their HeldItem storage is not proof that this separate cache contains an ID.
  *
- * GetPresentedItemId 是与 GetPresentedItemKind 同时取得的类别内 ID。在已经
- * 证实为 FOOD 或 ARTICLE 的分支中，其保存结果分别使用对应的完整 ID 域。
- * 其他手持类别不属于这两张物品表，故意继续保持整数。 */
+ * GetPresentedItemId 读取玩家角色捕获的“提交物品 ID”缓存。原生生产者只在
+ * FOOD 与 ARTICLE 流程中写入该缓存；在已证实为这两类之一的分支中，其保存
+ * 结果分别使用对应的完整 ID 域。其他提交类别故意保持整数：HeldItem 自身的
+ * 存储布局不能证明这项独立缓存中也保存了相应 ID。 */
 mary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_FOOD, MaryFoodId);
 mary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_ARTICLE, MaryArticleId);
 
@@ -13203,9 +13839,35 @@ mary_callable_parameter_type_when(SetAnimalTalkedTo, 0, ANIMAL_KIND_CHICKEN, 1, 
 mary_callable_parameter_type_when(AddAnimalAffection, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(IsAnimalUnhappy, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(IsAnimalSick, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
+mary_callable_parameter_type_when(IsAnimalPregnant, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
+mary_callable_parameter_type_when(GetAnimalHealthyPregnancyDays, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(GetAnimalAge, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(GetAnimalAffection, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
 mary_callable_parameter_type_when(SetContestAnimal, 0, ANIMAL_KIND_CHICKEN, 1, MaryChickenSlotIndex);
+mary_callable_parameter_type_when(DoesAnimalExist, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(DoesAnimalExist, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(HasAnimalBeenTalkedTo, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(HasAnimalBeenTalkedTo, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(SetAnimalTalkedTo, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(SetAnimalTalkedTo, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalName, 1, ANIMAL_KIND_HORSE, 2, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalName, 1, ANIMAL_KIND_DOG, 2, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(AddAnimalAffection, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(AddAnimalAffection, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalUnhappy, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalUnhappy, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalSick, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalSick, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalPregnant, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(IsAnimalPregnant, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalHealthyPregnancyDays, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalHealthyPregnancyDays, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalAge, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalAge, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalAffection, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalAffection, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_HORSE, 1, MaryIgnoredPetIndexArgument);
+mary_callable_parameter_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_DOG, 1, MaryIgnoredPetIndexArgument);
 mary_callable_return_type_when(GetContestAnimalIndex, 0, ANIMAL_KIND_CHICKEN, MaryChickenSlotIndex);
 mary_callable_return_type_when(SelectFestivalAnimal, 0, FESTIVAL_ANIMAL_CHICKEN, MaryChickenSlotIndex);

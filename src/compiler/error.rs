@@ -24,6 +24,9 @@ pub enum CompileError {
     #[error("Failed to evaluate constant expression")]
     FailedConstantEvaluation,
 
+    #[error("Integer {0} does not fit the VM's 32-bit value field")]
+    IntegerOutOfRange(crate::ir::IntValue),
+
     #[error("Expected constant integer but got string instead")]
     ExpectedConstantIntGotStr,
 
@@ -78,8 +81,7 @@ pub enum ScriptError {
     #[error("Compile errors while compiling {0}: {1}")]
     CompileErrors(String, CompileErrors),
 
-    // TODO: this should be better!!!
-    #[error("Lexer Error")]
+    #[error("Lexer error at {0:?}")]
     LexError(lexgen_util::Loc),
 
     #[error("Syntax error")]

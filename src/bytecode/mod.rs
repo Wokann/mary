@@ -87,7 +87,7 @@ mod decoder;
 mod encoder;
 
 pub use decoder::{decode_script, decode_script_with_backing, DecodeError};
-pub use encoder::encode_script;
+pub use encoder::{encode_script, try_encode_script, EncodeError};
 
 #[cfg(test)]
 mod tests {

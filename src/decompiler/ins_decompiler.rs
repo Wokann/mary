@@ -114,9 +114,11 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         /* we expect the following sequence:
          * expr | BRANCH(k) PUSH[0] JMP(l) LABEL(k) PUSH[1] LABEL(l) */
 
-        // check for expression
+        // CMP consumes two expressions.  Checking only the stack top here
+        // lets malformed IR reach pop_binop_params() and panic on the missing
+        // left operand.
         match self.back() {
-            [.., check_expr] if self.is_expr(check_expr) => {}
+            [.., check_lhs, check_rhs] if self.is_expr(check_lhs) && self.is_expr(check_rhs) => {}
 
             _ => {
                 return Err(DecompileError::CouldntReduce);
@@ -1283,7 +1285,11 @@ pub(crate) fn decompile_instructions<'a>(
                     DecompileToken::AssignExpr(var_id, op, expr) => (var_id, op, expr),
                     _ => unreachable!(),
                 };
-                let var_name = ins_decompiler.variables[&var_id].clone();
+                let var_name = ins_decompiler
+                    .variables
+                    .get(&var_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("var_{}", var_id.0));
                 stmts.insert(0, Stmt::AssignNoDisc(op, var_name, expr));
                 result_state.stack.push(DecompileToken::Stmts(stmts));
             }

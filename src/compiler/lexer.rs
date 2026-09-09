@@ -9,14 +9,6 @@ use super::parser::Token;
 
 use lexgen::lexer;
 
-fn parse_dec(digits: &str) -> IntValue {
-    IntValue::from_str_radix(digits, 10).unwrap()
-}
-
-fn parse_hex(digits: &str) -> IntValue {
-    IntValue::from_str_radix(digits, 16).unwrap()
-}
-
 #[derive(Debug, Default)]
 pub struct LexerState {
     /// buffer for building string literals
@@ -79,6 +71,8 @@ impl LexerState {
 
 lexer! {
     pub Lexer(LexerState) -> Token;
+
+    type Error = ();
 
     let dec_digit = ['0'-'9'];
     let hex_digit = $dec_digit | ['a'-'f' 'A'-'F'];
@@ -157,8 +151,18 @@ lexer! {
 
         /* integer literals */
 
-        $dec_digit + => |lexer| lexer.return_(Token::Integer(parse_dec(lexer.match_()))),
-        "0x" $hex_digit + => |lexer| lexer.return_(Token::Integer(parse_hex(&lexer.match_()[2..]))),
+        $dec_digit + =? |lexer| {
+            match IntValue::from_str_radix(lexer.match_(), 10) {
+                Ok(value) => lexer.return_(Ok(Token::Integer(value))),
+                Err(_) => lexer.return_(Err(())),
+            }
+        },
+        "0x" $hex_digit + =? |lexer| {
+            match IntValue::from_str_radix(&lexer.match_()[2..], 16) {
+                Ok(value) => lexer.return_(Ok(Token::Integer(value))),
+                Err(_) => lexer.return_(Err(())),
+            }
+        },
 
         /* string literals */
 
@@ -197,8 +201,6 @@ lexer! {
             let str_bytes = mem::take(&mut lexer.state().string_buf);
             lexer.switch_and_return(LexerRule::Init, Token::StringLit(str_bytes))
         },
-
-        // TODO: change those a bit to make writing scripts easier
 
         "\\\\" => |lexer| {
             lexer.state().push_text("\\");
@@ -251,7 +253,4 @@ lexer! {
             lexer.continue_()
         },
     }
-
-    // TODO: comments
-    // TODO: locations
 }

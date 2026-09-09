@@ -28,6 +28,9 @@ pub enum DecompileError {
 
     #[error("Explicit local type references unknown local '{0}'")]
     UnknownLocalTypeHint(String),
+
+    #[error("Residual low-level control flow could not be represented as high-level source")]
+    ResidualLowLevelControlFlow,
 }
 
 #[derive(Debug)]

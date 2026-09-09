@@ -336,4 +336,65 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn invalid_token_returns_a_located_lexer_error() {
+        let err = match parse_string("script 0 TEST { @ }") {
+            Ok(_) => panic!("@ must not be accepted"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, ScriptError::LexError(_)));
+        assert!(err.to_string().starts_with("Lexer error at Loc"));
+    }
+
+    #[test]
+    fn overflowing_integer_literals_return_lexer_errors_instead_of_panicking() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        for literal in ["9223372036854775808", "0x8000000000000000"] {
+            let source = format!("script 0 TEST {{ var_0 = {literal}; }}");
+            let result = catch_unwind(AssertUnwindSafe(|| parse_string(&source)));
+            assert!(
+                result.is_ok(),
+                "overflowing literal {literal} must not panic"
+            );
+            assert!(
+                matches!(result.unwrap(), Err(ScriptError::LexError(_))),
+                "overflowing literal {literal} must return a located lexer error"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_constant_arithmetic_and_vm_values_return_errors() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        for source in [
+            "const BAD = 1 / 0",
+            "const BAD = 9223372036854775807 + 1",
+            "script 0 TEST { var var_0 var_0 = 4294967296 }",
+            "script 0 TEST { var var_0 var_0 = -2147483649 }",
+            "script 0 TEST { switch 0 { case 4294967296: exit } }",
+        ] {
+            let result = catch_unwind(AssertUnwindSafe(|| parse_string(source)));
+            assert!(
+                result.is_ok(),
+                "invalid numeric source must not panic: {source}"
+            );
+            assert!(
+                result.unwrap().is_err(),
+                "invalid numeric source must fail: {source}"
+            );
+        }
+
+        for source in [
+            "script 0 TEST { var var_0 var_0 = 4294967295 }",
+            "script 0 TEST { var var_0 var_0 = -2147483648 }",
+        ] {
+            assert!(
+                parse_string(source).is_ok(),
+                "valid VM boundary rejected: {source}"
+            );
+        }
+    }
 }

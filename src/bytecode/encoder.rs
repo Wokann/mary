@@ -1,7 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+use thiserror::Error;
 
 use super::opcodes::*;
-use crate::ir::{CaseEnum, Ins, IntValue, Script, StrValue};
+use crate::ir::{is_encodable_int, CaseEnum, Ins, IntValue, Script, StrValue};
 
 trait EncoderHelper {
     fn push_u8(&mut self, val: u8);
@@ -58,6 +60,115 @@ fn write_push(vec: &mut Vec<u8>, val: IntValue) {
 
 struct JumpTables(Vec<Vec<(CaseEnum, usize)>>);
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum EncodeError {
+    #[error("duplicate jump label {0}")]
+    DuplicateLabel(usize),
+
+    #[error("jump target label {0} is not defined")]
+    MissingLabel(usize),
+
+    #[error("duplicate switch table {0}")]
+    DuplicateSwitch(usize),
+
+    #[error("switch table {0} has more than one default case")]
+    DuplicateDefault(usize),
+
+    #[error("switch table {switch_id} repeats case value {value}")]
+    DuplicateCaseValue { switch_id: usize, value: IntValue },
+
+    #[error("case refers to switch table {0}, but that switch is not defined")]
+    MissingSwitch(usize),
+
+    #[error("{kind} ID {id} does not fit the bytecode's 32-bit field")]
+    IdOutOfRange { kind: &'static str, id: usize },
+
+    #[error("{kind} value {value} does not fit the bytecode's 32-bit field")]
+    ValueOutOfRange { kind: &'static str, value: IntValue },
+}
+
+fn validate_control_flow(instructions: &[Ins]) -> Result<(), EncodeError> {
+    let mut labels = BTreeMap::new();
+    let mut jumps = Vec::new();
+    let mut switches = BTreeMap::new();
+    let mut cases = Vec::new();
+    let mut case_values = BTreeMap::<usize, BTreeSet<CaseEnum>>::new();
+
+    for ins in instructions {
+        match ins {
+            Ins::PushInt(value) if !is_encodable_int(*value) => {
+                return Err(EncodeError::ValueOutOfRange {
+                    kind: "integer",
+                    value: *value,
+                });
+            }
+            Ins::Case(_, CaseEnum::Val(value)) if !is_encodable_int(*value) => {
+                return Err(EncodeError::ValueOutOfRange {
+                    kind: "case",
+                    value: *value,
+                });
+            }
+            Ins::PushVar(id) | Ins::PopVar(id) if u32::try_from(id.0).is_err() => {
+                return Err(EncodeError::IdOutOfRange {
+                    kind: "variable",
+                    id: id.0,
+                });
+            }
+            Ins::Call(id) if u32::try_from(id.0).is_err() => {
+                return Err(EncodeError::IdOutOfRange {
+                    kind: "callable",
+                    id: id.0,
+                });
+            }
+            Ins::Switch(id) | Ins::Case(id, _) if u32::try_from(id.0).is_err() => {
+                return Err(EncodeError::IdOutOfRange {
+                    kind: "switch",
+                    id: id.0,
+                });
+            }
+            Ins::Label(id) => {
+                if labels.insert(id.0, ()).is_some() {
+                    return Err(EncodeError::DuplicateLabel(id.0));
+                }
+            }
+            Ins::Jmp(id)
+            | Ins::Blt(id)
+            | Ins::Ble(id)
+            | Ins::Beq(id)
+            | Ins::Bne(id)
+            | Ins::Bge(id)
+            | Ins::Bgt(id) => jumps.push(id.0),
+            Ins::Switch(id) => {
+                if switches.insert(id.0, ()).is_some() {
+                    return Err(EncodeError::DuplicateSwitch(id.0));
+                }
+            }
+            Ins::Case(id, case) => {
+                cases.push(id.0);
+                if !case_values.entry(id.0).or_default().insert(*case) {
+                    return match case {
+                        CaseEnum::Default => Err(EncodeError::DuplicateDefault(id.0)),
+                        CaseEnum::Val(value) => Err(EncodeError::DuplicateCaseValue {
+                            switch_id: id.0,
+                            value: *value,
+                        }),
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(id) = jumps.into_iter().find(|id| !labels.contains_key(id)) {
+        return Err(EncodeError::MissingLabel(id));
+    }
+    if let Some(id) = cases.into_iter().find(|id| !switches.contains_key(id)) {
+        return Err(EncodeError::MissingSwitch(id));
+    }
+
+    Ok(())
+}
+
 fn encode_instructions(vec: &mut Vec<u8>, instructions: &[Ins]) -> JumpTables {
     let mut label_map = BTreeMap::new();
     let mut jump_map = BTreeMap::new();
@@ -79,8 +190,6 @@ fn encode_instructions(vec: &mut Vec<u8>, instructions: &[Ins]) -> JumpTables {
         },
         Vec::default,
     );
-
-    // TODO: this should raise (internal) errors when jumps can't be generated
 
     // placeholder for code size
     vec.push_u32(0);
@@ -283,7 +392,9 @@ fn encode_str(vec: &mut Vec<u8>, str_tab: &[StrValue]) {
     }
 }
 
-pub fn encode_script(script: &Script) -> Vec<u8> {
+pub fn try_encode_script(script: &Script) -> Result<Vec<u8>, EncodeError> {
+    validate_control_flow(&script.instructions)?;
+
     let mut vec = Vec::new();
 
     // "RIFF" magic
@@ -337,7 +448,11 @@ pub fn encode_script(script: &Script) -> Vec<u8> {
     let len = vec.len();
     SlicePatch(&mut vec[4..]).push_u32(len as u32);
 
-    vec
+    Ok(vec)
+}
+
+pub fn encode_script(script: &Script) -> Vec<u8> {
+    try_encode_script(script).expect("invalid internal script control flow")
 }
 
 #[cfg(test)]
@@ -440,5 +555,85 @@ mod tests {
 
         // STR body
         assert_eq!((&mut &data[36..40]).read_u32().unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_control_flow_is_reported_before_encoding() {
+        use crate::ir::{JumpId, SwitchId};
+
+        let script = |instructions| Script {
+            instructions,
+            strings: vec![],
+        };
+
+        assert_eq!(
+            try_encode_script(&script(vec![Ins::Jmp(JumpId(7))])),
+            Err(EncodeError::MissingLabel(7))
+        );
+        assert_eq!(
+            try_encode_script(&script(vec![Ins::Label(JumpId(3)), Ins::Label(JumpId(3)),])),
+            Err(EncodeError::DuplicateLabel(3))
+        );
+        assert_eq!(
+            try_encode_script(&script(vec![
+                Ins::Switch(SwitchId(2)),
+                Ins::Switch(SwitchId(2)),
+            ])),
+            Err(EncodeError::DuplicateSwitch(2))
+        );
+        assert_eq!(
+            try_encode_script(&script(vec![Ins::Case(SwitchId(5), CaseEnum::Default),])),
+            Err(EncodeError::MissingSwitch(5))
+        );
+        assert_eq!(
+            try_encode_script(&script(vec![
+                Ins::Switch(SwitchId(0)),
+                Ins::Case(SwitchId(0), CaseEnum::Val(9)),
+                Ins::Case(SwitchId(0), CaseEnum::Val(9)),
+            ])),
+            Err(EncodeError::DuplicateCaseValue {
+                switch_id: 0,
+                value: 9,
+            })
+        );
+        assert_eq!(
+            try_encode_script(&script(vec![
+                Ins::Switch(SwitchId(0)),
+                Ins::Case(SwitchId(0), CaseEnum::Default),
+                Ins::Case(SwitchId(0), CaseEnum::Default),
+            ])),
+            Err(EncodeError::DuplicateDefault(0))
+        );
+
+        if usize::BITS > 32 {
+            let id = u32::MAX as usize + 1;
+            assert_eq!(
+                try_encode_script(&script(vec![Ins::Call(crate::ir::CallId(id))])),
+                Err(EncodeError::IdOutOfRange {
+                    kind: "callable",
+                    id,
+                })
+            );
+        }
+
+        for (ins, kind, value) in [
+            (Ins::PushInt(4_294_967_296), "integer", 4_294_967_296),
+            (Ins::PushInt(-2_147_483_649), "integer", -2_147_483_649),
+            (
+                Ins::Case(SwitchId(0), CaseEnum::Val(4_294_967_296)),
+                "case",
+                4_294_967_296,
+            ),
+        ] {
+            let instructions = if matches!(ins, Ins::Case(_, _)) {
+                vec![Ins::Switch(SwitchId(0)), ins]
+            } else {
+                vec![ins]
+            };
+            assert_eq!(
+                try_encode_script(&script(instructions)),
+                Err(EncodeError::ValueOutOfRange { kind, value })
+            );
+        }
     }
 }

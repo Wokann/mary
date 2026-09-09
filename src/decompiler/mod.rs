@@ -10,16 +10,39 @@ use ins_decompiler::decompile_instructions;
 use state::DecompileState;
 use state::DecompileToken;
 
-use crate::{ast::Stmt, const_scope::ConstScope, ir::Script};
+use crate::{
+    ast::{Stmt, SwitchCase},
+    const_scope::ConstScope,
+    ir::Script,
+};
+
+fn contains_low_level_node(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(|stmt| {
+        matches!(stmt, Stmt::Ir(_) | Stmt::JumpNext)
+            || match stmt {
+                Stmt::If(_, body) | Stmt::DoWhile(_, body) => contains_low_level_node(body),
+                Stmt::IfElse(_, then_body, else_body) => {
+                    contains_low_level_node(then_body) || contains_low_level_node(else_body)
+                }
+                Stmt::For(parts) => contains_low_level_node(&parts.3),
+                Stmt::Switch(_, cases, _, _) => cases.iter().any(|case| match case {
+                    SwitchCase::Case(_, body)
+                    | SwitchCase::Fallthrough(_, body)
+                    | SwitchCase::Default(body)
+                    | SwitchCase::DefaultFallthrough(body)
+                    | SwitchCase::ImplicitDefault(body)
+                    | SwitchCase::DeadJump(body) => contains_low_level_node(body),
+                }),
+                _ => false,
+            }
+    })
+}
 
 pub fn decompile_script<'a>(
     script: &'a Script,
     const_scope: &ConstScope,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
-    match decompile_script_structured(script, const_scope) {
-        Ok(stmts) => Ok(stmts),
-        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
-    }
+    decompile_script_structured(script, const_scope)
 }
 
 pub fn decompile_script_named<'a>(
@@ -27,16 +50,13 @@ pub fn decompile_script_named<'a>(
     const_scope: &ConstScope,
     script_name: &str,
 ) -> Result<Vec<Stmt>, DecompileErrorExtra<'a>> {
-    match decompile_script_structured_inner(
+    decompile_script_structured_inner(
         script,
         const_scope,
         Some(script_name),
         None,
         &HashMap::new(),
-    ) {
-        Ok(stmts) => Ok(stmts),
-        Err(_) => Ok(vec![Stmt::Ir(crate::low_level::script_to_items(script))]),
-    }
+    )
 }
 
 pub fn decompile_script_with_text_names<'a>(
@@ -70,8 +90,8 @@ pub fn decompile_script_with_metadata<'a>(
     )
 }
 
-/// Decompile without the lossless instruction-level fallback.  This is useful
-/// for measuring and improving actual high-level structuring coverage.
+/// Strictly decompile to high-level statements. Residual low-level nodes are
+/// errors, which makes this suitable for measuring real structuring coverage.
 pub fn decompile_script_structured<'a>(
     script: &'a Script,
     const_scope: &ConstScope,
@@ -96,6 +116,13 @@ fn decompile_script_structured_inner<'a>(
 
     let mut stmts = decompile_instructions(&script.instructions, &known_callables)?;
 
+    if contains_low_level_node(&stmts) {
+        return Err(DecompileErrorExtra(
+            DecompileError::ResidualLowLevelControlFlow,
+            DecompileState::new(&[]),
+        ));
+    }
+
     if let Err(err) = decorator::decorate_stmts_with_strings(
         &mut stmts,
         &script.strings,
@@ -118,6 +145,159 @@ mod tests {
     use crate::ir::{CallId, Ins, JumpId, ValueType, VarId};
 
     use super::*;
+
+    #[test]
+    fn short_malformed_ir_never_panics_the_structured_decompiler() {
+        use crate::ir::{CaseEnum, SwitchId};
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let alphabet = [
+            Ins::PushInt(0),
+            Ins::Assign,
+            Ins::Add,
+            Ins::Neg,
+            Ins::Cmp,
+            Ins::Dupe,
+            Ins::Discard,
+            Ins::Jmp(JumpId(0)),
+            Ins::Beq(JumpId(0)),
+            Ins::Label(JumpId(0)),
+            Ins::Switch(SwitchId(0)),
+            Ins::Case(SwitchId(0), CaseEnum::Default),
+            Ins::Exit,
+        ];
+        let scope = ConstScope::new();
+
+        for len in 0..=5usize {
+            let combinations = alphabet.len().pow(len as u32);
+            for mut encoded in 0..combinations {
+                let mut instructions = Vec::with_capacity(len);
+                for _ in 0..len {
+                    instructions.push(alphabet[encoded % alphabet.len()]);
+                    encoded /= alphabet.len();
+                }
+                let script = Script::new(instructions.clone(), vec![]);
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    let _ = decompile_script_structured(&script, &scope);
+                }));
+                assert!(
+                    result.is_ok(),
+                    "structured decompiler panicked for {instructions:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn comparison_with_only_one_operand_returns_an_error_instead_of_panicking() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let script = Script::new(
+            vec![
+                Ins::PushInt(1),
+                Ins::Cmp,
+                Ins::Beq(JumpId(0)),
+                Ins::PushInt(0),
+                Ins::Jmp(JumpId(1)),
+                Ins::Label(JumpId(0)),
+                Ins::PushInt(1),
+                Ins::Label(JumpId(1)),
+            ],
+            vec![],
+        );
+        let scope = ConstScope::new();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            decompile_script_structured(&script, &scope)
+        }));
+
+        assert!(result.is_ok(), "malformed comparison must not panic");
+        assert!(result.unwrap().is_err(), "malformed comparison must fail");
+    }
+
+    #[test]
+    fn sampled_long_malformed_ir_never_panics_the_structured_decompiler() {
+        use crate::ir::{CaseEnum, SwitchId};
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+
+        let alphabet = [
+            Ins::PushInt(0),
+            Ins::PushInt(1),
+            Ins::PushVar(VarId(0)),
+            Ins::PopVar(VarId(0)),
+            Ins::Assign,
+            Ins::AssignAdd,
+            Ins::Add,
+            Ins::Sub,
+            Ins::Mul,
+            Ins::Div,
+            Ins::Mod,
+            Ins::Neg,
+            Ins::LogicalAnd,
+            Ins::LogicalOr,
+            Ins::LogicalNot,
+            Ins::Cmp,
+            Ins::Dupe,
+            Ins::Inc,
+            Ins::Dec,
+            Ins::Discard,
+            Ins::Jmp(JumpId(0)),
+            Ins::Beq(JumpId(0)),
+            Ins::Bne(JumpId(0)),
+            Ins::Blt(JumpId(0)),
+            Ins::Label(JumpId(0)),
+            Ins::Switch(SwitchId(0)),
+            Ins::Case(SwitchId(0), CaseEnum::Val(0)),
+            Ins::Case(SwitchId(0), CaseEnum::Default),
+            Ins::Call(CallId(2)),
+            Ins::Exit,
+        ];
+        let mut seed = 0xD1B5_4A32_D192_ED03_u64;
+        let mut scope = ConstScope::new();
+        scope.add_func(
+            "SampledFunction".into(),
+            CallId(2),
+            vec![ValueType::Integer, ValueType::Integer, ValueType::Integer],
+        );
+
+        for sample in 0..100_000 {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let len = (seed as usize % 20) + 1;
+            let mut instructions = Vec::with_capacity(len);
+            for _ in 0..len {
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                instructions.push(alphabet[seed as usize % alphabet.len()]);
+            }
+            let script = Script::new(instructions.clone(), vec![]);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let _ = decompile_script_structured(&script, &scope);
+            }));
+            assert!(
+                result.is_ok(),
+                "structured decompiler panicked for sample {sample}: {instructions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_decompiler_entries_reject_unstructured_ir_instead_of_hiding_it() {
+        let script = Script::new(vec![Ins::Add], vec![]);
+        let scope = ConstScope::new();
+
+        assert!(decompile_script_named(&script, &scope, "BrokenScript").is_err());
+        assert!(decompile_script(&script, &scope).is_err());
+    }
+
+    #[test]
+    fn structured_entry_rejects_residual_jump_next() {
+        let script = Script::new(vec![Ins::Jmp(JumpId(0)), Ins::Label(JumpId(0))], vec![]);
+        let scope = ConstScope::new();
+
+        let error = decompile_script_structured(&script, &scope).unwrap_err();
+        assert!(matches!(
+            DecompileError::from(error),
+            DecompileError::ResidualLowLevelControlFlow
+        ));
+    }
 
     #[test]
     fn test_decompile() {

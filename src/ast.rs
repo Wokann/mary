@@ -100,8 +100,8 @@ pub enum Stmt {
     For(Box<(Expr, Stmt, Stmt, Vec<Stmt>)>),
     DoWhile(Expr, Vec<Stmt>),
     Switch(Expr, Vec<SwitchCase>, SwitchId, SwitchLayout),
-    /// Complete decoded VM instructions and string table. This is the honest
-    /// fallback when control flow cannot yet be raised to structured source.
+    /// Explicit low-level VM instructions and string table used by the legacy
+    /// IR parser/compiler. Strict decompilation never creates this as fallback.
     Ir(Vec<IrItem>),
     JumpNext,
     Break,
@@ -209,24 +209,34 @@ impl ConstVal {
         None
     }
 
+    fn checked_binop<F>(lhs: Option<ConstVal>, rhs: Option<ConstVal>, f: F) -> Option<ConstVal>
+    where
+        F: Fn(IntValue, IntValue) -> Option<IntValue>,
+    {
+        match (lhs, rhs) {
+            (Some(Self::Int(lhs)), Some(Self::Int(rhs))) => f(lhs, rhs).map(Self::Int),
+            _ => None,
+        }
+    }
+
     fn add(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
-        Self::binop(lhs, rhs, |a, b| a + b)
+        Self::checked_binop(lhs, rhs, i64::checked_add)
     }
 
     fn sub(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
-        Self::binop(lhs, rhs, |a, b| a - b)
+        Self::checked_binop(lhs, rhs, i64::checked_sub)
     }
 
     fn mul(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
-        Self::binop(lhs, rhs, |a, b| a * b)
+        Self::checked_binop(lhs, rhs, i64::checked_mul)
     }
 
     fn div(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
-        Self::binop(lhs, rhs, |a, b| a / b)
+        Self::checked_binop(lhs, rhs, i64::checked_div)
     }
 
     fn rem(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
-        Self::binop(lhs, rhs, |a, b| a % b)
+        Self::checked_binop(lhs, rhs, i64::checked_rem)
     }
 
     fn or(lhs: Option<ConstVal>, rhs: Option<ConstVal>) -> Option<ConstVal> {
@@ -239,7 +249,7 @@ impl ConstVal {
 
     fn neg(inner: Option<ConstVal>) -> Option<ConstVal> {
         if let Some(Self::Int(i)) = inner {
-            Some(Self::Int(-i))
+            i.checked_neg().map(Self::Int)
         } else {
             None
         }

@@ -384,4 +384,19 @@ mod tests {
             encode_script(&parsed.scripts[0].2)
         );
     }
+
+    #[test]
+    fn low_level_nodes_are_rejected_even_when_nested() {
+        let nested_jump = vec![Stmt::If(Expr::Int(1), vec![Stmt::JumpNext])];
+        assert_eq!(
+            format_named_script("NestedJump", &nested_jump),
+            Err(PrettyCError::JumpNext)
+        );
+
+        let nested_ir = vec![Stmt::If(Expr::Int(1), vec![Stmt::Ir(Vec::new())])];
+        assert_eq!(
+            format_named_script("NestedIr", &nested_ir),
+            Err(PrettyCError::LowLevelIr)
+        );
+    }
 }

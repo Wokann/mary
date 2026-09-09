@@ -1,6 +1,10 @@
 pub type IntValue = i64;
 pub type StrValue = Vec<u8>;
 
+pub fn is_encodable_int(value: IntValue) -> bool {
+    (i64::from(i32::MIN)..=i64::from(u32::MAX)).contains(&value)
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct JumpId(pub usize);
 

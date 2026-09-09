@@ -4,7 +4,7 @@
 
 Mary-C 是 Mary 虚拟栈脚本的 C 形前端。能与 C 保持相同语义的部分使用标准 C 写法；虚拟机独有且会影响栈或字节布局的行为使用 `mary_` 前缀。`.mary.c`、`.mary.h` 可以获得常见编辑器的 C 高亮，但不是 ISO C，必须由 `mary` 编译。
 
-“成功反编译”必须满足 ROM 字节码转换成 `.mary.c` 后能够重新解析、编译并逐字节还原原 RIFF。打印器遇到低级 `ir` 或未高级化的 `jump next` 会报错，不会伪装成高级语言成功。
+“成功反编译”必须满足 ROM 字节码转换成 `.mary.c` 后能够重新解析、编译并逐字节还原原 RIFF。批量、具名、单脚本及公共默认入口都使用严格结构化反编译；遇到低级 `ir`、未高级化的 `jump next` 或无法唯一恢复的控制流时会报错，不会静默降级并伪装成高级语言成功。`--print-ir` 只会把底层指令作为明确的审计注释附加到成功输出，不参与回编，也不替代高级化。
 
 ## 文件与唯一数据来源
 
@@ -71,7 +71,7 @@ void TalkMessage(const char *message);
 
 `void` 原型是无返回值过程，`int` 原型是有返回值函数；参数支持 `int`、`const char *` 及固定 ID 类型。`NULL` 明确保留 VM 内部、不可调用或无法作为独立脚本接口公开的槽位，不能删除。具名的 `NoOp*` 与 `NULL` 不同：它们是原版脚本实际调用、且经四套 ROM 原生处理函数确认不产生效果的零操作；声明仍保留原字节码压入的参数数量，才能严格逐字节往返。比如教程中的 `NoOpTutorialFieldTile(...)` 看似携带坐标和对象参数，但原生入口直接返回，不能再伪装成“设置农田格”的高级功能。
 
-物理 callable 表也会保留原生别名。`FadeInScreenAlias(...)` 与 `FadeInScreen(...)` 的处理函数体和参数域相同，但各自占用真实的 `Call(id)` 槽；反编译时保留别名才能使源代码重新编译到原来的 ID。ROM 的脚本调用 callable 已根据源码中的 `ScriptEngine::LoadById` 路径确认为 `CallScript(MaryScriptId script_id)`。
+物理 callable 表会保留原生变体。例如 `FadeInScreenWithoutSceneHook(...)` 与 `FadeInScreen(...)` 使用相同的渐变参数域和核心过渡流程，但前者跳过后者在过渡前执行的当前场景虚函数；两者各自占用真实的 `Call(id)` 槽，不能错误合并为别名。ROM 的脚本调用 callable 已根据源码中的 `ScriptEngine::LoadById` 路径确认为 `CallScript(MaryScriptId script_id)`。
 
 固定 ID 使用带显式边界的 C 风格枚举：
 
@@ -139,6 +139,8 @@ mary_text_table
 
 表内声明顺序直接决定 text ID，不需要在表头重复列出名称。同一符号被多次使用仍只有一个 text ID。内容相同但需要两个物理 ID 时，应保留两个不同名称的声明；编译器不会擅自合并。旧的“表中名称列表、表外字符串声明”格式仅保留读取兼容，新反编译固定输出表内声明。
 
+文本参数必须引用当前脚本中已经声明的 `gText_*` 符号；不存在的名称会在编译期报错。原版四个 ROM 的运行时 `GetString` 都有 `id <= string_count` 的越界判断错误，但 Mary-C 不开放这个不安全的额外索引：合法 ID 始终是 `0` 至 `string_count - 1`。
+
 未提供符号时，反编译器在内存中生成 `gText_脚本名_文本ID`。这些默认名只写入 `.mary.c`，不会反写进 `.mary.h`。
 
 ## 反编译符号库
@@ -189,7 +191,7 @@ Mary-C 只接受能够确定映射到 Mary 虚拟栈的语法。当前支持：
 | 类别 | 支持内容 |
 | --- | --- |
 | 类型 | 局部 `int`、`const int`、文本 `const char []`、callable 参数中的 `const char *`，以及头文件中用于 callable/常量传播的命名 ID 类型 |
-| 字面量 | 十进制/十六进制整数、由 charmap 编码的字符串、用于保留原字节的 `\xNN` |
+| 字面量 | 十进制/十六进制整数（可编码范围 `-2147483648` 至 `0xFFFFFFFF`）、由 charmap 编码的字符串、用于保留原字节的 `\xNN` |
 | 表达式 | `+ - * / %`、一元 `-`/`!`、`== != < <= > >=`、非短路 `&& ||`、括号和嵌套 callable 调用 |
 | 修改 | `= += -= *= /= %=`，以及前置/后置 `++`、`--` |
 | 语句 | 局部声明、调用、赋值、`if/else if/else`、`for`、`do/while`、`switch`、`return;` |
@@ -206,6 +208,11 @@ return;
 ```
 
 `return;` 对应 VM 的脚本退出，而不是从普通 C 函数返回。case 末尾没有 `break;` 时保留 C 的贯穿语义。当前前端只接受直接所属于 `switch` 的标准 `break;`；普通循环 break 尚未建模，因此会明确报错，但这不是 VM 跳转能力的限制。
+
+局部 `int` 遵循块作用域：内层允许声明同名变量并遮蔽外层变量，离开该块后恢复
+外层绑定。编译器会为仍同时存活的祖先／子块变量分配不同 VM 槽；只有生命周期
+不重叠的兄弟块临时量才可能复用槽位。该规则同样适用于 `if`、`for`、`do/while`
+和 `switch` 内的嵌套块。
 
 命名 ID 类型是 Mary-C 读取头文件时使用的静态语义标注，例如 `MaryCharacterId`；当前脚本局部声明仍写作 `int character`，不能写成 `MaryCharacterId character`。反编译器会根据 callable 参数、返回值和数据流选择相应枚举符号，但 VM 中的物理值仍是整数。
 
@@ -506,6 +513,11 @@ SetHeldTool(mary_negated_int(TOOL_NOT_PRESENT));
 
 `mary_negated_int` 只接受一个可在编译期求值的整数常量。两种写法的高级数值都为 `-1`，但普通形式直接压入 `-1`，专用形式压入 `1` 后执行 `Neg`。该语法仅用于逐字节还原，不应作为普通算术或类型转换使用。
 
+VM 的立即数和 `case` 值是 32 位物理字段。Mary-C 接受完整的有符号／无符号位模式
+表示范围，即 `-2147483648` 至 `4294967295`（`0xFFFFFFFF`）；超出范围的值会报错，
+不会静默截取低 32 位。整数文本本身超过 `i64`、常量运算溢出、除以零或取模零同样会
+返回编译诊断，不会导致编译器崩溃。
+
 ### `X(...)` 与 `Y(...)`
 
 `MaryMapId` 选择具体地图；`X(...)`、`Y(...)` 标记该地图自身局部像素空间中的坐标轴，不表示把所有地图拼接起来的世界坐标：
@@ -715,6 +727,19 @@ mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodie
 ```
 
 输出目录按物理槽位完整生成，空指针也有明确占位文件；同时复制常量/callable 头并生成目标脚本表。
+
+四个 `MARY_FOMT_US`／`MARY_FOMT_JP`／`MARY_MFOMT_US`／`MARY_MFOMT_JP` 宏是主目标，
+每次必须且只能选择一个。额外布局宏可以与主目标叠加，但不能替代主目标。例如，本仓库
+已审计的 FoMT-JP 改版删除了 Manna 脚本 1021 中原版未引用的第 58 个空尾文本槽；解包
+该布局时使用：
+
+```console
+mary decompile MODIFIED_ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP -D MARY_FOMT_CN --charmap MODIFIED_CHARMAP -o OUTPUT
+```
+
+`MARY_FOMT_CN` 只选择这一项已验证的 STR 布局差异；callable、常量、脚本指针表及其他
+文本槽仍由 `MARY_FOMT_JP` 决定。不要把它用于任意改版，也不要用它绕过一般的文本数量
+错位错误。
 
 ### 按脚本 ID 反编译
 

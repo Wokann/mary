@@ -4,7 +4,7 @@
 
 Mary-C is the C-shaped frontend for Mary's stack VM. Constructs with genuine C semantics use standard C spelling; VM-only behavior that affects the stack or byte layout uses an explicit `mary_` prefix. `.mary.c` and `.mary.h` receive normal C highlighting, but they are not ISO C and must be compiled by `mary`.
 
-A successful decompilation means ROM bytecode can be printed as Mary-C, parsed again, and rebuilt to the exact original RIFF bytes. The printer rejects residual low-level `ir` and `jump next` instead of presenting them as high-level success.
+A successful decompilation means ROM bytecode can be printed as Mary-C, parsed again, and rebuilt to the exact original RIFF bytes. Batch, named, single-script, and public default entry points all require strict structural recovery; residual low-level `ir`, `jump next`, and control flow that cannot be recovered uniquely are errors rather than silent fallback. `--print-ir` only appends explicitly marked low-level audit comments to otherwise successful output; those comments are not recompiled and never substitute for high-level recovery.
 
 ## Files and sources of truth
 
@@ -62,7 +62,7 @@ void TalkMessage(const char *message);
 
 `void` declares a procedure and `int` a value-returning function. Parameters may be `int`, `const char *`, or a fixed-ID type. `NULL` preserves a VM-internal, unavailable, or otherwise non-exportable slot and must not be removed. A named `NoOp*` is different from `NULL`: retail scripts really call that slot, but the native handlers in all four ROMs have been verified to produce no effect. Its declaration retains the exact number of operands pushed by the original bytecode so strict byte-for-byte round trips remain possible. For example, `NoOpTutorialFieldTile(...)` carries coordinate- and object-shaped operands, yet its native entry returns immediately; it must not be presented as a fake high-level field-update operation.
 
-The physical callable table also preserves native aliases. `FadeInScreenAlias(...)` has the same handler body and parameter domains as `FadeInScreen(...)`, but each occupies a real `Call(id)` slot; retaining the alias lets decompiled source compile back to the original ID. The ROM script-launching callable has been verified through the source-level `ScriptEngine::LoadById` path and is declared as `CallScript(MaryScriptId script_id)`.
+The physical callable table also preserves native variants. `FadeInScreenWithoutSceneHook(...)` uses the same fade domains and core inward-transition path as `FadeInScreen(...)`, but skips the active-scene virtual hook executed by the latter before the transition. Each occupies a real `Call(id)` slot and must not be collapsed into an alias. The ROM script-launching callable has been verified through the source-level `ScriptEngine::LoadById` path and is declared as `CallScript(MaryScriptId script_id)`.
 
 Fixed-ID domains use C-shaped enums with explicit brace boundaries:
 
@@ -125,6 +125,8 @@ mary_text_table
 
 Declaration order inside the table directly determines text IDs, so names are not repeated in a separate slot list. Reusing one symbol reuses one ID. Equal bytes in two physical slots remain two declarations with different names; the compiler never merges them automatically. The former name-list-plus-external-declaration form remains readable for compatibility, but new decompilation always emits declarations inside the table. Without symbol metadata, names are generated in memory as `gText_<script>_<text-id>` and appear only in `.mary.c`.
 
+Text arguments must reference a `gText_*` symbol declared by the current script; an absent name is a compile-time error. The original `GetString` implementation in all four ROMs has an `id <= string_count` bounds bug, but Mary-C does not expose that unsafe extra index: valid IDs are always `0` through `string_count - 1`.
+
 ## Decompiler symbol database
 
 `mary_scripts_text.mary.sym` is an ordered decompiler symbol table. After target preprocessing, outer positions become script IDs and inner positions become text IDs:
@@ -165,7 +167,7 @@ Mary-C accepts only syntax with a defined mapping to the Mary stack VM:
 | Category | Supported forms |
 | --- | --- |
 | Types | local `int`, `const int`, text `const char []`, callable `const char *` parameters, and named ID types used by headers for callable/constant propagation |
-| Literals | decimal/hexadecimal integers, charmap-encoded strings, and `\xNN` for retained bytes |
+| Literals | decimal/hexadecimal integers (encodable range `-2147483648` through `0xFFFFFFFF`), charmap-encoded strings, and `\xNN` for retained bytes |
 | Expressions | `+ - * / %`, unary `-`/`!`, comparisons, eager `&& ||`, parentheses, and nested callable calls |
 | Mutation | `= += -= *= /= %=`, plus prefix/postfix `++` and `--` |
 | Statements | declarations, calls, assignments, `if`/`else`, `for`, `do`/`while`, `switch`, and `return;` |
@@ -180,6 +182,12 @@ return;
 ```
 
 `return;` exits the current VM script; it is not a return from an ordinary C function. Omitting `break;` preserves C fallthrough. Standard `break;` is currently accepted only when it directly belongs to a switch.
+
+Local `int` declarations have block scope. An inner block may shadow an outer
+name, and leaving that block restores the outer binding. Variables whose
+lifetimes overlap in ancestor and child blocks receive distinct VM slots; only
+temporaries in nonoverlapping sibling blocks may reuse a slot. This applies to
+nested blocks inside `if`, `for`, `do`/`while`, and `switch` constructs.
 
 A named ID type such as `MaryCharacterId` is a static semantic annotation read from Mary-C headers. Script locals are still declared as `int character`, not `MaryCharacterId character`. The decompiler selects enum symbols from callable parameters, return types, and propagated data flow, while the physical VM value remains an integer.
 
@@ -460,6 +468,13 @@ have the high-level value `-1`; the ordinary form directly pushes `-1`, while
 the explicit form pushes `1` and executes `Neg`. It exists only for byte-exact
 reconstruction and is not general arithmetic or a cast.
 
+VM immediates and `case` values occupy physical 32-bit fields. Mary-C accepts
+the complete signed/unsigned bit-pattern range, from `-2147483648` through
+`4294967295` (`0xFFFFFFFF`). Values outside that range are diagnosed instead
+of being silently truncated to their low 32 bits. Integer text beyond `i64`,
+constant-expression overflow, division by zero, and remainder by zero likewise
+produce compilation diagnostics rather than crashing the compiler.
+
 ### `X(...)` and `Y(...)`
 
 `MaryMapId` selects a map. `X(...)` and `Y(...)` mark axes in that map's local
@@ -628,6 +643,22 @@ mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodie
 ```
 
 The output preserves physical slot order and emits an explicit placeholder file for a null pointer. It also copies the constants/callable headers and generates the target script table.
+
+The four macros `MARY_FOMT_US`, `MARY_FOMT_JP`, `MARY_MFOMT_US`, and
+`MARY_MFOMT_JP` are primary targets; exactly one must be selected. An audited
+layout macro may accompany, but never replace, that primary target. For
+example, the FoMT-JP modification audited in this repository removes the
+unused 58th trailing text slot from Manna script 1021. Decompile that layout
+with:
+
+```console
+mary decompile MODIFIED_ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP -D MARY_FOMT_CN --charmap MODIFIED_CHARMAP -o OUTPUT
+```
+
+`MARY_FOMT_CN` selects only this verified STR-layout difference. The callable,
+constant, script-pointer-table, and all other text-slot layouts still come
+from `MARY_FOMT_JP`. Do not apply this macro to arbitrary modified ROMs or use
+it to suppress an ordinary text-count mismatch.
 
 ### Decompile one script ID
 
