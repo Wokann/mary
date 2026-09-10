@@ -12,7 +12,7 @@ A successful decompilation means ROM bytecode can be printed as Mary-C, parsed a
 fomt_callables.mary.h / mfomt_callables.mary.h
                                per-game ordered native-callable IDs and prototypes
 fomt_constants.mary.h / mfomt_constants.mary.h
-                               per-game US/JP fixed constants and parameter types
+                               per-game fixed constants and parameter types
 fomt_scripts_text.mary.sym / mfomt_scripts_text.mary.sym
                                per-game decompiler-only script/text symbols
 fomt_scripts.mary.h / mfomt_scripts.mary.h
@@ -32,7 +32,9 @@ Every `.mary.c` explicitly selects exactly one target:
 #include "fomt_scripts.mary.h"
 ```
 
-Targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. FoMT source uses the `fomt_*` files and MFoMT source uses `mfomt_*`. The parser derives `REGION_US` or `REGION_JP` from the selected formal target. Cross-game layouts are separated by file, so the tables contain no repeated target validation, derived-family boilerplate, or interleaved family conditionals.
+Targets, in canonical order, are `MARY_FOMT_JP`, `MARY_FOMT_US`, `MARY_FOMT_EU`, `MARY_FOMT_DE`, `MARY_MFOMT_JP`, and `MARY_MFOMT_US`. FoMT source uses the `fomt_*` files and MFoMT source uses `mfomt_*`. The parser derives `REGION_JP`, `REGION_US`, `REGION_EU`, or `REGION_DE` from the selected formal target. Cross-game layouts are separated by file, so the tables contain no repeated target validation, derived-family boilerplate, or interleaved family conditionals.
+
+Pointer-table modes (`--all` and `--script-id`) verify that this target agrees with the ROM header title and game code. Arbitrary `--offset` input has no such requirement.
 
 The corresponding callable, constants, and `.mary.sym` files test region macros only where localization data actually differs, for example:
 
@@ -684,8 +686,9 @@ mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodie
 
 The output preserves physical slot order and emits an explicit placeholder file for a null pointer. It also copies the constants/callable headers and generates the target script table.
 
-The four macros `MARY_FOMT_US`, `MARY_FOMT_JP`, `MARY_MFOMT_US`, and
-`MARY_MFOMT_JP` are the supported targets; exactly one must be selected.
+The six macros `MARY_FOMT_JP`, `MARY_FOMT_US`, `MARY_FOMT_EU`,
+`MARY_FOMT_DE`, `MARY_MFOMT_JP`, and `MARY_MFOMT_US` are the supported
+targets; exactly one must be selected.
 
 ### Decompile one script ID
 
@@ -728,6 +731,6 @@ The source `#define` selects the target, and both quoted includes resolve relati
 
 ## Verification
 
-`tests/mary_c_vanilla.rs` performs a charmap-aware ROM → Mary-C text → RIFF byte-exact round trip. FoMT US/JP each preserve 1,329 physical slots (1,328 non-null RIFFs), while MFoMT US/JP each preserve 1,416 physical slots (1,415 non-null RIFFs). Every non-null script must match byte for byte, and every null slot must remain in place.
+`tests/mary_c_vanilla.rs` performs a charmap-aware ROM → Mary-C text → RIFF byte-exact round trip. FoMT JP/US/EU/DE each preserve 1,329 physical slots (1,328 non-null RIFFs), while MFoMT JP/US each preserve 1,416 physical slots (1,415 non-null RIFFs). Every non-null script must match byte for byte, and every null slot must remain in place.
 
-`tests/mary_c_stress.rs` covers unfamiliar nested switch/if/do-while combinations, compact and fallthrough switches, nested calls, retained stack results, and invalid-input diagnostics. The 100% claim applies to those four verified vanilla corpora, not arbitrary C programs.
+`tests/mary_c_stress.rs` covers unfamiliar nested switch/if/do-while combinations, compact and fallthrough switches, nested calls, retained stack results, and invalid-input diagnostics. The 100% claim applies to those six verified vanilla corpora, not arbitrary C programs.

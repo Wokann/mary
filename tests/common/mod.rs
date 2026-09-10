@@ -29,8 +29,12 @@ pub fn contains_stmt(stmts: &[Stmt], predicate: &impl Fn(&Stmt) -> bool) -> bool
 }
 
 fn joined(fomt: &str, mfomt: &str) -> String {
+    // Keep source-text assertions independent of the checkout's native line
+    // endings. The Mary preprocessor accepts either spelling.
+    let fomt = fomt.replace("\r\n", "\n");
+    let mfomt = mfomt.replace("\r\n", "\n");
     format!(
-        "#if defined(MARY_FOMT_US) || defined(MARY_FOMT_JP)\n{fomt}\n#elif defined(MARY_MFOMT_US) || defined(MARY_MFOMT_JP)\n{mfomt}\n#endif\n"
+        "#if defined(MARY_FOMT_JP) || defined(MARY_FOMT_US) || defined(MARY_FOMT_EU) || defined(MARY_FOMT_DE)\n{fomt}\n#elif defined(MARY_MFOMT_JP) || defined(MARY_MFOMT_US)\n{mfomt}\n#endif\n"
     )
 }
 

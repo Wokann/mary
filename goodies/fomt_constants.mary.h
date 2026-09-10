@@ -1,8 +1,9 @@
 /* Fixed numeric ID domains used by Mary-C callable prototypes.
  *
- * Select MARY_FOMT_US or MARY_FOMT_JP before including this header.
+ * Select exactly one of MARY_FOMT_JP, MARY_FOMT_US, MARY_FOMT_EU, or
+ * MARY_FOMT_DE before including this header.
  * This table contains FoMT constants only; its internal conditions describe
- * localization differences between the US and JP releases.
+ * verified localization differences among the JP, US, EU, and DE releases.
  *
  * Symbolic and numeric forms are byte-identical; these definitions improve
  * readability and never introduce hidden conversion semantics.
@@ -18,8 +19,9 @@
  *
  * Mary-C callable 原型使用的固定数字 ID 域。
  *
- * 引用本文件前必须选择 MARY_FOMT_US 或 MARY_FOMT_JP。本表只维护 FoMT
- * 常量；内部条件仅表达美版与日版本地化差异。
+ * 引用本文件前必须且只能选择 MARY_FOMT_JP、MARY_FOMT_US、MARY_FOMT_EU
+ * 或 MARY_FOMT_DE 之一。本表只维护 FoMT 常量；内部条件仅表达日、美、欧、
+ * 德版本之间经过验证的本地化差异。
  *
  * 符号形式与数字形式编译出的字节完全一致；这些定义只提高可读性，不引入
  * 隐藏转换语义。
@@ -28,7 +30,7 @@
  *
  * 人物、地点、物品、农具、动物、节日及其他游戏概念的符号名，以 GBA 英文版
  * 官方术语为准。日文罗马音只作为“JP 独有且没有官方英文对应名”的明确后备，
- * 后续复刻版采用的新名称不会覆盖本项目四套 ROM 的 GBA 版术语。
+ * 后续复刻版采用的新名称不会覆盖本项目所支持 GBA ROM 的术语。
  */
 
 /* Complete physical actor-animation ID domain. The contiguous animation

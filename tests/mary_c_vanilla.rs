@@ -26,6 +26,9 @@ struct RomCase {
     slots: usize,
 }
 
+// This legacy native-analysis matrix is positional: thousands of assertions
+// zip it with address arrays in the historical US-family/JP-family order.
+// User-facing target lists and independent ROM suites use canonical order.
 const CASES: &[RomCase] = &[
     RomCase {
         name: "fomt-us",
@@ -52,6 +55,28 @@ const CASES: &[RomCase] = &[
         slots: 1416,
     },
 ];
+
+const FOMT_LOCALIZATION_CASES: &[RomCase] = &[
+    RomCase {
+        name: "fomt-eu",
+        rom: "rom/fomteu.gba",
+        target: "MARY_FOMT_EU",
+        slots: 1329,
+    },
+    RomCase {
+        name: "fomt-de",
+        rom: "rom/fomtde.gba",
+        target: "MARY_FOMT_DE",
+        slots: 1329,
+    },
+];
+
+fn charmap_for_target(target: &str) -> Charmap {
+    let options = Options::default().define(target).unwrap();
+    let source = fs::read_to_string("charmap.txt").unwrap();
+    let active_source = mary::charmap::preprocess_conditionals(&source, &options).unwrap();
+    Charmap::parse(&active_source).unwrap()
+}
 
 fn local_rom_path(path: &str) -> PathBuf {
     let repository_path = Path::new(path);
@@ -1349,7 +1374,7 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
     let script_table = symbols.script_table()?;
     let mut decompile_scope = callables.scope.clone();
     script_table.add_constants(&mut decompile_scope);
-    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt")?)?;
+    let charmap = charmap_for_target(case.target);
     assert_eq!(script_table.slots().len(), entries.len());
     for entry in &entries {
         assert_eq!(
@@ -1420,10 +1445,14 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
                 case.name
             );
         }
-        assert!(symbols
-            .names(id, decoded.strings.len())
-            .iter()
-            .all(Option::is_some));
+        assert!(
+            symbols
+                .names(id, decoded.strings.len())
+                .iter()
+                .all(Option::is_some),
+            "{} script {id} has an unnamed STR slot",
+            case.name
+        );
         assert_eq!(
             symbols.text_count(id),
             decoded.strings.len(),
@@ -4053,7 +4082,7 @@ fn native_food_bonus_addition_saturates_signed_bytes_in_four_targets() {
 fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
     let mut reference = None;
     let vanilla_us = fs::read(local_rom_path(CASES[0].rom)).unwrap();
-    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt").unwrap()).unwrap();
+    let charmap = charmap_for_target("MARY_FOMT_US");
     let thresholds = [
         100, 80, 50, 30, 80, 60, 30, 10, 80, 50, 20, 10, 100, 70, 40, 20, 80, 60, 30, 20,
     ];
@@ -4172,7 +4201,7 @@ fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
 
 #[test]
 fn native_wool_p_and_x_article_records_preserve_target_specific_text_pointers() {
-    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt").unwrap()).unwrap();
+    let charmap = charmap_for_target("MARY_FOMT_US");
 
     for (case, (table, expected_icons)) in CASES.iter().zip([
         (0xEFED4usize, [487u16, 489u16]),
@@ -18509,6 +18538,14 @@ fn native_can_discard_held_article_checks_presence_kind_and_article_policy() {
 #[test]
 fn all_four_roms_mary_c_round_trip() -> Result<(), Box<dyn std::error::Error>> {
     for case in CASES {
+        verify(case)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn fomt_eu_and_de_mary_c_round_trip() -> Result<(), Box<dyn std::error::Error>> {
+    for case in FOMT_LOCALIZATION_CASES {
         verify(case)?;
     }
     Ok(())

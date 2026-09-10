@@ -22485,7 +22485,7 @@ fn manna_dialogue_roles_preserve_multistep_stories_and_mfomt_cliff_family_branch
             "Winery1FMorningFriendship0To100FirstConversation",
             "Winery1FEveningFriendshipAbove100RodAbsenceStory",
             "RoseSquareGossipFirstConversationPart1",
-            "RoseSquareGossipFirstConversationPart7",
+            "RoseSquareGossipRepeatConversation",
             "SupermarketDukeCreditGossipFirstConversation",
             "InnCliffEmploymentFirstConversation",
             "ChurchCliffConversation",

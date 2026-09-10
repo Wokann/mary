@@ -22,10 +22,12 @@ impl ScriptTableEntry<'_> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FomtVariant {
-    FomtUs,
-    MfomtUs,
     FomtJp,
+    FomtUs,
+    FomtEu,
+    FomtDe,
     MfomtJp,
+    MfomtUs,
 }
 
 fn read_u32(from: &[u8]) -> usize {
@@ -36,14 +38,13 @@ fn read_u32(from: &[u8]) -> usize {
 }
 
 pub fn identify_rom(rom: &[u8]) -> Option<FomtVariant> {
-    match rom.get(0xA0..0xAC)? {
-        b"HARVESTMOGBA" => Some(FomtVariant::FomtUs),
-        b"HM MFOM USA\0" => Some(FomtVariant::MfomtUs),
-        b"BOKUMONOGBA\0" => match rom.get(0xAC..0xB0)? {
-            b"A4NJ" => Some(FomtVariant::FomtJp),
-            b"BFGJ" => Some(FomtVariant::MfomtJp),
-            _ => None,
-        },
+    match (rom.get(0xA0..0xAC)?, rom.get(0xAC..0xB0)?) {
+        (b"BOKUMONOGBA\0", b"A4NJ") => Some(FomtVariant::FomtJp),
+        (b"HARVESTMOGBA", b"A4NE") => Some(FomtVariant::FomtUs),
+        (b"HARVESTMOGBA", b"A4NP") => Some(FomtVariant::FomtEu),
+        (b"HARVESTMOGER", b"A4ND") => Some(FomtVariant::FomtDe),
+        (b"BOKUMONOGBA\0", b"BFGJ") => Some(FomtVariant::MfomtJp),
+        (b"HM MFOM USA\0", b"BFGE") => Some(FomtVariant::MfomtUs),
         _ => None,
     }
 }
@@ -57,10 +58,12 @@ pub fn get_script_table(rom: &[u8]) -> io::Result<Vec<ScriptTableEntry<'_>>> {
     })?;
 
     let (addr, table_slot_count) = match variant {
-        FomtVariant::FomtUs => (0x080F89D4, 1329),
-        FomtVariant::MfomtUs => (0x081014BC, 1416),
         FomtVariant::FomtJp => (0x080F8230, 1329),
+        FomtVariant::FomtUs => (0x080F89D4, 1329),
+        FomtVariant::FomtEu => (0x080F8A20, 1329),
+        FomtVariant::FomtDe => (0x080F8EBC, 1329),
         FomtVariant::MfomtJp => (0x0810145C, 1416),
+        FomtVariant::MfomtUs => (0x081014BC, 1416),
     };
 
     let mut result = vec![];
@@ -127,5 +130,46 @@ mod tests {
             get_script_table(&[]).unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn supported_headers_identify_all_six_targets_in_canonical_order() {
+        for (title, code, expected) in [
+            (
+                b"BOKUMONOGBA\0".as_slice(),
+                b"A4NJ".as_slice(),
+                FomtVariant::FomtJp,
+            ),
+            (
+                b"HARVESTMOGBA".as_slice(),
+                b"A4NE".as_slice(),
+                FomtVariant::FomtUs,
+            ),
+            (
+                b"HARVESTMOGBA".as_slice(),
+                b"A4NP".as_slice(),
+                FomtVariant::FomtEu,
+            ),
+            (
+                b"HARVESTMOGER".as_slice(),
+                b"A4ND".as_slice(),
+                FomtVariant::FomtDe,
+            ),
+            (
+                b"BOKUMONOGBA\0".as_slice(),
+                b"BFGJ".as_slice(),
+                FomtVariant::MfomtJp,
+            ),
+            (
+                b"HM MFOM USA\0".as_slice(),
+                b"BFGE".as_slice(),
+                FomtVariant::MfomtUs,
+            ),
+        ] {
+            let mut header = vec![0; 0xB0];
+            header[0xA0..0xAC].copy_from_slice(title);
+            header[0xAC..0xB0].copy_from_slice(code);
+            assert_eq!(identify_rom(&header), Some(expected));
+        }
     }
 }

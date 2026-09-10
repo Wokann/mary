@@ -1,4 +1,5 @@
-// FoMT-only decompiler symbols. Post-preprocess positions are IDs; only US/JP differs here.
+// FoMT-only decompiler symbols. Post-preprocess positions are IDs; verified
+// localization differences use REGION_JP, REGION_US, REGION_EU, or REGION_DE.
 
 mary_script_symbols
 {
@@ -390,7 +391,7 @@ mary_script_symbols
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesRunawayChickenHome,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_QuestionsChickenDislike,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_QuestionsFarmVisit,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesChickensHomeAfterDislikedChoice,
         #endif
     },
@@ -419,6 +420,9 @@ mary_script_symbols
         gText_LoveEvent_Popuri_03_BlueHeart_Carter_LeavesForWork,
         gText_LoveEvent_Popuri_03_BlueHeart_May_DisappointedCarterLeaves,
         gText_LoveEvent_Popuri_03_BlueHeart_Stu_SuggestsAnotherGame,
+        #if defined(REGION_DE)
+            gText_LoveEvent_Popuri_03_BlueHeart_May_DisappointedByChangingGame,
+        #endif
         gText_LoveEvent_Popuri_03_BlueHeart_Carter_UnsureHowToHelp,
         gText_LoveEvent_Popuri_03_BlueHeart_Carter_AsksPlayerForHelp,
         gText_LoveEvent_Popuri_03_BlueHeart_Popuri_ExplainsChildrenNeedFatherRole,
@@ -547,9 +551,13 @@ mary_script_symbols
         gText_LoveEvent_Popuri_Nickname_ChoiceAllowPoultryFarmWork,
         gText_LoveEvent_Popuri_Nickname_ChoiceDeclinePoultryFarmWork,
         gText_LoveEvent_Popuri_Nickname_PopuriThanksPlayerForPermission,
-        gText_LoveEvent_Popuri_Nickname_AnticipatesNewLifeAfterContinuingPoultryFarmWork,
+        #if defined(REGION_DE)
+            gText_LoveEvent_Popuri_Nickname_AnticipatesNewLifeAfterWorkDecision,
+        #else
+            gText_LoveEvent_Popuri_Nickname_AnticipatesNewLifeAfterContinuingPoultryFarmWork,
+        #endif
         gText_LoveEvent_Popuri_Nickname_PopuriAcceptsFarmhouseWork,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_LoveEvent_Popuri_Nickname_AnticipatesNewLifeAfterChoosingFarmhouseWork,
         #endif
     },
@@ -958,14 +966,20 @@ mary_script_symbols
         gText_LoveEvent_Elli_03_BlueHeart_EllenEncouragesElli,
         gText_LoveEvent_Elli_03_BlueHeart_ElliAcceptsEllensEncouragement,
         gText_LoveEvent_Elli_03_BlueHeart_EllenExplainsStuRanAwayAfterDinner,
-        gText_LoveEvent_Elli_03_BlueHeart_ElliWorriesInSilence,
+        #if defined(REGION_DE)
+            gText_LoveEvent_Elli_03_BlueHeart_ElliWorriesBeforeAndAfterSearch,
+        #else
+            gText_LoveEvent_Elli_03_BlueHeart_ElliWorriesInSilence,
+        #endif
         gText_LoveEvent_Elli_03_BlueHeart_EllenRegretsUnableToSearch,
         gText_LoveEvent_Elli_03_BlueHeart_EllenAsksPlayerToFindStu,
         gText_LoveEvent_Elli_03_BlueHeart_ChoiceRefuseToFindStu,
         gText_LoveEvent_Elli_03_BlueHeart_ChoiceAgreeToFindStu,
         gText_LoveEvent_Elli_03_BlueHeart_ElliAcceptsPlayersRefusal,
         gText_LoveEvent_Elli_03_BlueHeart_EllenReassuresElliAboutStu,
-        gText_LoveEvent_Elli_03_BlueHeart_ElliRemainsWorried,
+        #if !defined(REGION_DE)
+            gText_LoveEvent_Elli_03_BlueHeart_ElliRemainsWorried,
+        #endif
         gText_LoveEvent_Elli_03_BlueHeart_StuReturnsAndApologizesToElli,
         gText_LoveEvent_Elli_03_BlueHeart_ElliForgivesStu,
         gText_LoveEvent_Elli_03_BlueHeart_EllenTellsStuElliForgivesHim,
@@ -974,7 +988,7 @@ mary_script_symbols
         gText_LoveEvent_Elli_03_BlueHeart_StuGreetsPlayerWhenFound,
         gText_LoveEvent_Elli_03_BlueHeart_StuRegretsHurtingElli,
         gText_LoveEvent_Elli_03_BlueHeart_StuApologizesAfterReturning,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_LoveEvent_Elli_03_BlueHeart_ElliForgivesStuAfterSearch,
         #endif
         gText_LoveEvent_Elli_03_BlueHeart_EllenThanksPlayerAfterStusReturn,
@@ -1319,7 +1333,7 @@ mary_script_symbols
         gText_NPCEvent_PoultryFarmFamily_BlocksUpstairsAccess_RickAsksWhereYouAreGoing,
         gText_NPCEvent_PoultryFarmFamily_BlocksUpstairsAccess_LilliaSaysUpstairsIsNotCleaned,
         gText_NPCEvent_PoultryFarmFamily_BlocksUpstairsAccess_RickSaysUpstairsIsNotTidied,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_PoultryFarmFamily_BlocksUpstairsAccess_Shared_RickLilliaAndPopuriSayDoNotGoUpstairs,
         #elif defined(REGION_JP)
             gText_NPCEvent_PoultryFarmFamily_BlocksUpstairsAccess_RickSaysDoNotGoUpstairs,
@@ -2022,8 +2036,10 @@ mary_script_symbols
             gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeSpacedZeroPaddedMinutes,
             gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeSpacedMinutes,
         #endif
-        gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeZeroPaddedMinutes,
-        gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeMinutes,
+        #if !defined(REGION_DE)
+            gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeZeroPaddedMinutes,
+            gText_SystemMenu_ClockCalendarDisplay_AfternoonTimeMinutes,
+        #endif
     },
 
     // Script ID: 0226
@@ -2314,9 +2330,9 @@ mary_script_symbols
     // Script ID: 0272
     EventScript_NPCEvent_AnnAndDoug_BlockInnUpstairsAccess
     {
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_NPCEvent_AnnAndDoug_BlockInnUpstairsAccess_Shared_AnnAndDougSayUpstairsIsNotCleaned,
-        #elif defined(REGION_JP)
+        #elif defined(REGION_JP) || defined(REGION_DE)
             gText_NPCEvent_AnnAndDoug_BlockInnUpstairsAccess_AnnSaysUpstairsIsNotCleaned,
             gText_NPCEvent_AnnAndDoug_BlockInnUpstairsAccess_DougSaysUpstairsIsNotCleaned,
         #endif
@@ -2678,17 +2694,27 @@ mary_script_symbols
     // Script ID: 0318
     EventScript_SystemMenu_RecipeBook
     {
-        gText_SystemMenu_RecipeBook_KitchenRequired,
-        gText_SystemMenu_RecipeBook_MenuPage1SixChoiceLayout,
-        gText_SystemMenu_RecipeBook_Exit,
-        #if defined(REGION_US)
-            gText_SystemMenu_RecipeBook_MenuPage1FourOrFiveChoiceLayout,
-            gText_SystemMenu_RecipeBook_MenuPage2FourOrFiveChoiceLayout,
-            gText_SystemMenu_RecipeBook_MenuPage3FiveChoiceLayout,
+        #if defined(REGION_DE)
+            gText_SystemMenu_RecipeBook_ChoiceGetKitchen,
+            gText_SystemMenu_RecipeBook_ChoiceRecipeBook1,
+            gText_SystemMenu_RecipeBook_Exit,
+            gText_SystemMenu_RecipeBook_ChoiceKitchen,
+            gText_SystemMenu_RecipeBook_ChoiceRecipeBook2,
+            gText_SystemMenu_RecipeBook_ChoiceRecipeBook3,
+            gText_SystemMenu_RecipeBook_ChoiceRecipeBook4,
+        #else
+            gText_SystemMenu_RecipeBook_KitchenRequired,
+            gText_SystemMenu_RecipeBook_MenuPage1SixChoiceLayout,
+            gText_SystemMenu_RecipeBook_Exit,
+            #if defined(REGION_US) || defined(REGION_EU)
+                gText_SystemMenu_RecipeBook_MenuPage1FourOrFiveChoiceLayout,
+                gText_SystemMenu_RecipeBook_MenuPage2FourOrFiveChoiceLayout,
+                gText_SystemMenu_RecipeBook_MenuPage3FiveChoiceLayout,
+            #endif
+            gText_SystemMenu_RecipeBook_MenuPage2SixChoiceLayout,
+            gText_SystemMenu_RecipeBook_MenuPage3SixChoiceLayout,
+            gText_SystemMenu_RecipeBook_MenuPage4,
         #endif
-        gText_SystemMenu_RecipeBook_MenuPage2SixChoiceLayout,
-        gText_SystemMenu_RecipeBook_MenuPage3SixChoiceLayout,
-        gText_SystemMenu_RecipeBook_MenuPage4,
     },
 
     // Script ID: 0319
@@ -2828,6 +2854,9 @@ mary_script_symbols
     {
         gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_NickNameWhereAreYouGoing,
         gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_PlayerWhereAreYouGoing,
+        #if defined(REGION_DE)
+            gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_ChildNickNameWhereAreYouGoing,
+        #endif
         gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_YouCantTakeYourEyesOff,
         gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_ChoiceTakeBath,
         gText_LocationInteraction_FarmhouseBathroomUseAndFamilyExitChoice_Yes,
@@ -2849,13 +2878,13 @@ mary_script_symbols
         mary_local_type(var_0, MaryBool),
         gText_NPCEvent_Spouse_BedtimeDialogue_SorryIDontFeelLikeTalking,
         gText_NPCEvent_Spouse_BedtimeDialogue_PleaseLeaveMeAlone,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Spouse_BedtimeDialogue_Shared_Karen30000To39999_Ann40000To49999_PopuriAtLeast60000_FirstConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Spouse_BedtimeDialogue_Karen30000To39999_FirstConversation,
         #endif
         gText_NPCEvent_Spouse_BedtimeDialogue_IAlwaysWantToGoPlay,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Spouse_BedtimeDialogue_Shared_KarenAndElli40000To49999_FirstConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Spouse_BedtimeDialogue_Shared_Karen40000To49999_Mary30000To39999_FirstConversation,
@@ -2891,7 +2920,7 @@ mary_script_symbols
         gText_NPCEvent_Spouse_BedtimeDialogue_BoyTheDaysSureGoQuickly,
         gText_NPCEvent_Spouse_BedtimeDialogue_DontYouThinkYoureALittle,
         gText_NPCEvent_Spouse_BedtimeDialogue_IKnowYouNeedToWork,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Spouse_BedtimeDialogue_Mary30000To49999_FirstConversation,
             gText_NPCEvent_Spouse_BedtimeDialogue_IllGoToBedLaterIm,
         #elif defined(REGION_JP)
@@ -2958,8 +2987,10 @@ mary_script_symbols
             gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeSpacedZeroPaddedMinutes,
             gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeSpacedMinutes,
         #endif
-        gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeZeroPaddedMinutes,
-        gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeMinutes,
+        #if !defined(REGION_DE)
+            gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeZeroPaddedMinutes,
+            gText_SystemMenu_CalendarDateAndTimeDisplay_AfternoonTimeMinutes,
+        #endif
     },
 
     // Script ID: 0348
@@ -2984,7 +3015,7 @@ mary_script_symbols
         gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_HighFatigueFoodRecoveryAdvice,
         gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_MidnightNoEventBedtimeAdvice,
         gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_PredawnSleepAdvice,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_LateNightBedtimeAdvice,
         #endif
         gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_NightTimeLabel,
@@ -3052,7 +3083,7 @@ mary_script_symbols
         gText_TV_ChannelDispatcher_StormCommonSignalInterferenceB,
         gText_TV_ChannelDispatcher_LateNightGoldenLumberSignalInterference,
         gText_TV_ChannelDispatcher_LateNightRareSignalInterference,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_ChannelDispatcher_Shared_LateNightCommonSignalInterferenceAAndB,
         #elif defined(REGION_JP)
             gText_TV_ChannelDispatcher_LateNightCommonSignalInterferenceA,
@@ -3363,7 +3394,7 @@ mary_script_symbols
         gText_SystemMenu_FestivalCalendar_FallHorseRaceListing,
         gText_SystemMenu_FestivalCalendar_SheepFestivalListing,
         gText_SystemMenu_FestivalCalendar_YearEndEventsFallPreview,
-        #if defined(REGION_JP)
+        #if defined(REGION_JP) || defined(REGION_DE)
             gText_SystemMenu_FestivalCalendar_YearEndEventsEarlyWinter,
         #endif
         gText_SystemMenu_FestivalCalendar_YearEndAndNewYearEventsLateWinter,
@@ -3383,14 +3414,23 @@ mary_script_symbols
         gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_GreatLetsStartThen,
         gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_SoYoureNotReadyAfterAll,
         gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_BettingScreenSelectButtonInstructions,
-        gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_SoYoureGoingToExchangeYour,
-        gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_YouCantDoItWhileHolding,
-        gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_YouWantToExchangeYourMedal,
-        gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_MenuExchangeMedalsForPrizes,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_HorseRaceMedalExchangePrompt,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_HorseRaceExchangeBlockedWhileHoldingItem,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_MenuExchangeMedalsForPrizes,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_AnimalContestMedalExchangePrompt,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_AnimalContestExchangeBlockedWhileHoldingItem,
             gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_Shared_CowAndSheepContestJudgingStartPrompt,
-        #elif defined(REGION_JP)
-            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_CowContestJudgingStartPrompt,
+        #else
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_SoYoureGoingToExchangeYour,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_YouCantDoItWhileHolding,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_YouWantToExchangeYourMedal,
+            gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_MenuExchangeMedalsForPrizes,
+            #if defined(REGION_US) || defined(REGION_EU)
+                gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_Shared_CowAndSheepContestJudgingStartPrompt,
+            #elif defined(REGION_JP)
+                gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_CowContestJudgingStartPrompt,
+            #endif
         #endif
         gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_LetsStart,
         gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_NotYet,
@@ -3413,7 +3453,7 @@ mary_script_symbols
     {
         gText_FestivalEvent_NewYearCelebration_StartChoice_RiceCakeFestivalStartPrompt,
         gText_FestivalEvent_NewYearCelebration_StartChoice_HoldingItemCannotParticipateInRiceCakeFestival,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_NewYearCelebration_StartChoice_ChoiceStartRiceCakeFestival,
             gText_FestivalEvent_NewYearCelebration_StartChoice_ChoiceWaitBeforeRiceCakeFestival,
         #elif defined(REGION_JP)
@@ -3424,7 +3464,7 @@ mary_script_symbols
         gText_FestivalEvent_NewYearCelebration_StartChoice_ThomasWaitsToStartRiceCakeFestival,
         gText_FestivalEvent_NewYearCelebration_StartChoice_NewYearsEveNoodleFestivalStartPrompt,
         gText_FestivalEvent_NewYearCelebration_StartChoice_HoldingItemCannotEatAtNoodleFestival,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_NewYearCelebration_StartChoice_ChoiceStartNoodleFestivalMeal,
             gText_FestivalEvent_NewYearCelebration_StartChoice_ChoiceWaitBeforeNoodleFestivalMeal,
         #endif
@@ -3611,8 +3651,10 @@ mary_script_symbols
             gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeSpacedZeroPaddedMinutes,
             gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeSpacedMinutes,
         #endif
-        gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeZeroPaddedMinutes,
-        gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeMinutes,
+        #if !defined(REGION_DE)
+            gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeZeroPaddedMinutes,
+            gText_LocationInteraction_InspectBeachCottageClock_AfternoonTimeMinutes,
+        #endif
     },
 
     // Script ID: 0428
@@ -3988,7 +4030,7 @@ mary_script_symbols
         gText_ShopEvent_Rucksack_PurchaseChoice_AreYouSureNow,
         gText_ShopEvent_Rucksack_PurchaseChoice_InsufficientGoldForSmallRucksack,
         gText_ShopEvent_Rucksack_PurchaseChoice_LargeRucksackPrice,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_ShopEvent_Rucksack_PurchaseChoice_ReallyAreYouSure,
         #endif
         gText_ShopEvent_Rucksack_PurchaseChoice_InsufficientGoldForLargeRucksack,
@@ -4100,8 +4142,12 @@ mary_script_symbols
         gText_ShopEvent_Blacksmith_OrderCounter_CopperHammer,
         gText_ShopEvent_Blacksmith_OrderCounter_SilverHammer,
         gText_ShopEvent_Blacksmith_OrderCounter_GoldHammer,
-        gText_ShopEvent_Blacksmith_OrderCounter_MystrileHammer,
-        gText_ShopEvent_Blacksmith_OrderCounter_MythicHammer,
+        #if defined(REGION_DE)
+            gText_ShopEvent_Blacksmith_OrderCounter_Shared_MystrileAndMythicHammer,
+        #else
+            gText_ShopEvent_Blacksmith_OrderCounter_MystrileHammer,
+            gText_ShopEvent_Blacksmith_OrderCounter_MythicHammer,
+        #endif
         gText_ShopEvent_Blacksmith_OrderCounter_CopperWateringCan,
         gText_ShopEvent_Blacksmith_OrderCounter_SilverWateringCan,
         gText_ShopEvent_Blacksmith_OrderCounter_GoldWateringCan,
@@ -4119,15 +4165,22 @@ mary_script_symbols
         gText_ShopEvent_Blacksmith_OrderCounter_MayonnaiseMaker,
         gText_ShopEvent_Blacksmith_OrderCounter_CheeseMaker,
         gText_ShopEvent_Blacksmith_OrderCounter_YarnMaker,
-        gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolOrAccessoryCollected,
+        #if defined(REGION_DE)
+            gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolOrAccessoryCollectedByHand,
+        #else
+            gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolOrAccessoryCollected,
+        #endif
         gText_ShopEvent_Blacksmith_OrderCounter_CompletedMakerReady,
         gText_ShopEvent_Blacksmith_OrderCounter_GrayWillDeliverCompletedMaker,
+        #if defined(REGION_DE)
+            gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolOrAccessoryCollectedIntoRucksack,
+        #endif
         gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolSentToStorageBecauseRucksackFull,
         gText_ShopEvent_Blacksmith_OrderCounter_CompletedAccessoryScheduledForDeliveryBecauseRucksackFull,
         gText_ShopEvent_Blacksmith_OrderCounter_CompletedToolHeldUntilRucksackHasSpace,
         gText_ShopEvent_Blacksmith_OrderCounter_CompletedAccessoryHeldUntilHandsHaveSpace,
         gText_ShopEvent_Blacksmith_OrderCounter_WhatWouldYouLikeTodayI,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_ShopEvent_Blacksmith_OrderCounter_Counters,
         #endif
     },
@@ -4455,8 +4508,10 @@ mary_script_symbols
             gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeSpacedZeroPaddedMinutes,
             gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeSpacedMinutes,
         #endif
-        gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeZeroPaddedMinutes,
-        gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeMinutes,
+        #if !defined(REGION_DE)
+            gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeZeroPaddedMinutes,
+            gText_LocationInteraction_InspectTownCottageClock_AfternoonTimeMinutes,
+        #endif
     },
 
     // Script ID: 0537
@@ -5234,6 +5289,10 @@ mary_script_symbols
         gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_ILookMoreMatureToYou,
         gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_BabySBirthday,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_YouRememberedAfterChildbirth,
+            gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_ILookMoreMatureAfterChildbirth,
+        #endif
         gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_WhatKindOfAFatherAre,
         gText_FamilyEvent_Popuri_SpouseBirthdayDinnerDialogueChoice_HurryUpAndFinishTodayIs,
     },
@@ -5268,10 +5327,18 @@ mary_script_symbols
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_ItMayNotMatterToYou,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_IdBetterApologizeLater,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_AreYouFeelingOKNickNameIf,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_IdBetterApologizeLaterAfterWrongAnswer,
+        #endif
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_AwwwYouRememberedYoureSoBusy,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_SorryAllMyFoodIsThe,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_BabySBirthday,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_AreYouFeelingOKAfterChildbirth,
+            gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_RememberedBirthdayAfterChildbirth,
+            gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_InnCookingAfterChildbirth,
+        #endif
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_ItDoesntTakeMuchToRemember,
         gText_FamilyEvent_Ann_SpouseBirthdayDinnerDialogueChoice_HurryUpAndFinishTodayIs,
     },
@@ -5303,7 +5370,10 @@ mary_script_symbols
         gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_YouReallyDidRememberYouWerent,
         gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_ICantWaitToHaveA,
         gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_CorrectsBirthdayAnswerAfterChildbirth,
+        #endif
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_ElliBabyBirthdayCorrectAnswerReaction,
         #elif defined(REGION_JP)
             gText_FamilyEvent_Elli_SpouseBirthdayDinnerDialogueChoice_ChoiceBabyBirthday,
@@ -5341,7 +5411,7 @@ mary_script_symbols
         gText_FamilyEvent_Karen_SpouseBirthdayDinnerDialogueChoice_WellWeWillCelebrateOurAnniversaries,
         gText_FamilyEvent_Karen_SpouseBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Karen_SpouseBirthdayDinnerDialogueChoice_BabySBirthday,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_Karen_SpouseBirthdayDinnerDialogueChoice_KarenBabyBirthdayCorrectAnswerCelebration,
         #elif defined(REGION_JP)
             gText_FamilyEvent_Karen_SpouseBirthdayDinnerDialogueChoice_KarenLaughsAtWrongBirthdayAnswer,
@@ -5379,7 +5449,7 @@ mary_script_symbols
         gText_FamilyEvent_Mary_SpouseBirthdayDinnerDialogueChoice_ItsNoFunHavingYourBirthday,
         gText_FamilyEvent_Mary_SpouseBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Mary_SpouseBirthdayDinnerDialogueChoice_BabySBirthday,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_Mary_SpouseBirthdayDinnerDialogueChoice_CorrectsPlayerBirthdayAnswerAfterChildbirth,
         #endif
         gText_FamilyEvent_Mary_SpouseBirthdayDinnerDialogueChoice_WhatKindOfAFatherDoesn,
@@ -5410,7 +5480,10 @@ mary_script_symbols
         gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_HowCanYouConfuseMyBirthday,
         gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_BabySBirthday,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_ConfusedSpouseBirthdayAfterChildbirth,
+        #endif
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_LetsAlwaysBeTogether,
         #endif
         gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_WhatAreYouTalkingAboutHow,
@@ -5451,6 +5524,9 @@ mary_script_symbols
         gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_MyBirthdayGetAGripIts,
         gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_BabySBirthday,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_PlayerGetsOlderAfterChildbirth,
+        #endif
         gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_StopFoolingMeIKnowYou,
         gText_FamilyEvent_Ann_PlayerBirthdayDinnerDialogueChoice_HurryUpAndFinishTodayIs,
     },
@@ -5516,10 +5592,13 @@ mary_script_symbols
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_IHadSoMuchFunToday,
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_TeasesPlayerForConfusingSpousesBirthdays,
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_BabySBirthday,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_ThatsRightLetsSpendTheNight,
         #endif
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_WellWeWillCelebrateOurFamily,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_TeasesPlayerForConfusingSpousesBirthdaysAfterChildbirth,
+        #endif
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_TeasesPlayerForConfusingPlayerAndChildBirthdays,
         gText_FamilyEvent_Karen_PlayerBirthdayDinnerDialogueChoice_HurryUpAndFinishTodayIs,
     },
@@ -5574,8 +5653,12 @@ mary_script_symbols
     EventScript_FamilyEvent_Ann_PregnancyDiscovery
     {
         gText_FamilyEvent_Ann_PregnancyDiscovery_AnnFeelsUnwellAtFarmhouse,
-        gText_FamilyEvent_Ann_PregnancyDiscovery_AnnThanksPlayerForConcern,
-        gText_FamilyEvent_Ann_PregnancyDiscovery_DoctorExplainsAnnIsPregnant,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Ann_PregnancyDiscovery_Shared_AnnThanksPlayerAndDoctorPregnancyExplanation,
+        #else
+            gText_FamilyEvent_Ann_PregnancyDiscovery_AnnThanksPlayerForConcern,
+            gText_FamilyEvent_Ann_PregnancyDiscovery_DoctorExplainsAnnIsPregnant,
+        #endif
         gText_FamilyEvent_Ann_PregnancyDiscovery_DoctorCongratulatesPlayerAndAnn,
         gText_FamilyEvent_Ann_PregnancyDiscovery_ElliCongratulatesAnn,
         gText_FamilyEvent_Ann_PregnancyDiscovery_AnnAcknowledgesPregnancy,
@@ -5622,8 +5705,12 @@ mary_script_symbols
         gText_FamilyEvent_Mary_PregnancyDiscovery_ElliCongratulatesMary,
         gText_FamilyEvent_Mary_PregnancyDiscovery_MaryRespondsToCongratulations,
         gText_FamilyEvent_Mary_PregnancyDiscovery_MaryProcessesSuddenPregnancyNews,
-        gText_FamilyEvent_Mary_PregnancyDiscovery_MaryLooksForwardToTellingParents,
-        gText_FamilyEvent_Mary_PregnancyDiscovery_PlayerReflectsOnFatherhoodAndLoveForMary,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Mary_PregnancyDiscovery_Shared_MaryTellsParentsAndPlayerReflectsOnFatherhood,
+        #else
+            gText_FamilyEvent_Mary_PregnancyDiscovery_MaryLooksForwardToTellingParents,
+            gText_FamilyEvent_Mary_PregnancyDiscovery_PlayerReflectsOnFatherhoodAndLoveForMary,
+        #endif
     },
 
     // Script ID: 0659
@@ -5717,8 +5804,12 @@ mary_script_symbols
         gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriCallsChildToShowPlayer,
         gText_FamilyEvent_Popuri_ChildFirstSteps_ChildBabblesBeforeWalking,
         gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriCelebratesChildsFirstSteps,
-        gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriSaysChildStartedWalkingThatMorning,
-        gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriMarvelsAtChildGrowingQuickly,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriSaysChildStartedWalkingAndCelebratesGrowth,
+        #else
+            gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriSaysChildStartedWalkingThatMorning,
+            gText_FamilyEvent_Popuri_ChildFirstSteps_PopuriMarvelsAtChildGrowingQuickly,
+        #endif
     },
 
     // Script ID: 0665
@@ -6308,7 +6399,7 @@ mary_script_symbols
         gText_NPCEvent_Cliff_PermanentWineryJob_WineryNeedsHelpAfterAjaLeft,
         gText_NPCEvent_Cliff_PermanentWineryJob_CliffAcceptsPermanentJob,
         gText_NPCEvent_Cliff_PermanentWineryJob_CliffThanksPlayerForWineryOpportunity,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Cliff_PermanentWineryJob_DukeWelcomesCliffToWinery,
         #elif defined(REGION_JP)
             gText_NPCEvent_Cliff_PermanentWineryJob_DukeSaysNoNeedToApologizeAndReturnsToWork,
@@ -6480,6 +6571,9 @@ mary_script_symbols
         gText_NPCEvent_Anna_CookingClass_MannaThanksAnnaForLesson,
         gText_NPCEvent_Anna_CookingClass_AnnaClosesLessonUntilNextTime,
         gText_NPCEvent_Anna_CookingClass_AnnaTeachesPudding,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Anna_CookingClass_AnnaClosesPuddingLessonUntilNextTime,
+        #endif
         gText_NPCEvent_Anna_CookingClass_AnnaTeachesCheesecake,
         gText_NPCEvent_Anna_CookingClass_AnnaTeachesApplePie,
         gText_NPCEvent_Anna_CookingClass_AnnaAnnouncesFinalLessonNextTime,
@@ -6800,7 +6894,7 @@ mary_script_symbols
         gText_NPCEvent_Jeff_WonOffersToBuyPainting_WonAsksWhyJeffRefuses,
         gText_NPCEvent_Jeff_WonOffersToBuyPainting_SashaUrgesJeffToConsiderMoney,
         gText_NPCEvent_Jeff_WonOffersToBuyPainting_JeffExplainsPaintingsComeFromHeartAndCannotBeSold,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Jeff_WonOffersToBuyPainting_SilentReactionToJeffsConviction,
         #endif
         gText_NPCEvent_Jeff_WonOffersToBuyPainting_SashaCallsJeffByName,
@@ -6946,7 +7040,7 @@ mary_script_symbols
         gText_NPCEvent_KarenAndDuke_DrinkingContestAndDebtSettlement_ChoiceRefuseJudging,
         gText_NPCEvent_KarenAndDuke_DrinkingContestAndDebtSettlement_ChoiceAcceptJudging,
         gText_NPCEvent_KarenAndDuke_DrinkingContestAndDebtSettlement_KarenObjectsToRefusalAndInvitesPlayerToWatch,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_KarenAndDuke_DrinkingContestAndDebtSettlement_SharedKarenStartsContestAfterEitherChoice,
             gText_NPCEvent_KarenAndDuke_DrinkingContestAndDebtSettlement_SharedDukeAcceptsContestAfterEitherChoice,
         #elif defined(REGION_JP)
@@ -7496,12 +7590,12 @@ mary_script_symbols
         gText_NPCEvent_Won_AppleChallenge_WonStrugglesToRememberSUGDWName,
         gText_NPCEvent_Won_AppleChallenge_WonIntroducesHMSGBApple,
         gText_NPCEvent_Won_AppleChallenge_WonExpandsHMSGBName,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Won_AppleChallenge_WonStrugglesToRememberHMSGBName,
         #endif
         gText_NPCEvent_Won_AppleChallenge_WonIntroducesAEPFEApple,
         gText_NPCEvent_Won_AppleChallenge_WonExpandsAEPFEName,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Won_AppleChallenge_WonPraisesAEPFEName,
         #endif
         gText_NPCEvent_Won_AppleChallenge_WonUrgesPlayerToTasteApple,
@@ -7778,6 +7872,9 @@ mary_script_symbols
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_ConfirmsDefaultNickname,
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_RejectsHoneyChoice,
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_RejectsDarlingChoice,
+        #if defined(REGION_DE)
+            gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_ConfirmsDefaultNicknameAfterDarlingChoice,
+        #endif
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_RequestsCustomNickname,
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_RejectsCustomNickname,
         gText_WeddingEvent_HarvestGoddess_CeremonyAndNicknameSelection_ExplainsDivineDutiesAndAbsence,
@@ -7877,6 +7974,9 @@ mary_script_symbols
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_HarvestGoddessDiscussesFutureChild,
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_PlayerReflectsOnCelebration,
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_ChoiceChildBirthday,
+        #if defined(REGION_DE)
+            gText_FamilyEvent_HarvestGoddess_EveningDateChoice_CorrectHarvestGoddessBirthdayResponseAfterChildbirth,
+        #endif
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_HarvestGoddessJokesAboutHerAge,
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_IncorrectChildBirthdayResponse,
         gText_FamilyEvent_HarvestGoddess_EveningDateChoice_StillWorkingResponse,
@@ -7909,7 +8009,7 @@ mary_script_symbols
         gText_FamilyEvent_HarvestGoddess_PlayerBirthdayDateChoice_HarvestGoddessDiscussesFutureChild,
         gText_FamilyEvent_HarvestGoddess_PlayerBirthdayDateChoice_PlayerReflectsOnCelebration,
         gText_FamilyEvent_HarvestGoddess_PlayerBirthdayDateChoice_IncorrectHarvestGoddessBirthdayResponse,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FamilyEvent_HarvestGoddess_PlayerBirthdayDateChoice_ChoicePlayerBirthdayWithChild,
         #endif
         gText_FamilyEvent_HarvestGoddess_PlayerBirthdayDateChoice_ChoiceChildBirthday,
@@ -8087,8 +8187,12 @@ mary_script_symbols
     {
         gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_PopuriAnnouncesRicksWeddingToKaren,
         gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_RickExplainsPopurisMarriageRelievedHisWorry,
-        gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_PopuriTeasesRickThatHerMarriageEnabledHis,
-        gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_RickDismissesPopurisTeasingAndInvitesPlayer,
+        #if defined(REGION_DE)
+            gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_Shared_PopuriTeasesRickAndRickInvitesPlayer,
+        #else
+            gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_PopuriTeasesRickThatHerMarriageEnabledHis,
+            gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_RickDismissesPopurisTeasingAndInvitesPlayer,
+        #endif
         gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_CarterPronouncesCoupleMarried,
         gText_RivalMarriageEvent_RickAndKaren_05_Wedding_CeremonyWithPopuriIntroduction_GuestsToastNewlyweds,
     },
@@ -8257,7 +8361,7 @@ mary_script_symbols
         gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval_PopuriCelebratesLilliasPermission,
         gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval_LilliaExplainsSheWillNotStopTheirDecision,
         gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval_LilliaRequiresKaiToMakePopuriHappy,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval_PopuriOrRickReactsToLilliasMarriageCondition,
         #elif defined(REGION_JP)
             gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval_PopuriReactsToLilliasMarriageCondition,
@@ -8332,7 +8436,7 @@ mary_script_symbols
     // Script ID: 0902
     EventScript_RivalMarriageEvent_PopuriAndKai_05_Wedding_FollowupLilliaDialogue
     {
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_RivalMarriageEvent_PopuriAndKai_05_Wedding_FollowupLilliaDialogue_LilliaLocalizationErrorClaimsMarriageToKai,
         #elif defined(REGION_JP)
             gText_RivalMarriageEvent_PopuriAndKai_05_Wedding_FollowupLilliaDialogue_LilliaReflectsOnPopuriBecomingABride,
@@ -8606,8 +8710,12 @@ mary_script_symbols
     // Script ID: 0929
     EventScript_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer
     {
-        gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_MaryGreetsGrayAtLibrary,
-        gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_GrayGreetsMary,
+        #if defined(REGION_DE)
+            gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_Shared_MaryAndGrayExchangeGreetings,
+        #else
+            gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_MaryGreetsGrayAtLibrary,
+            gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_GrayGreetsMary,
+        #endif
         gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_MaryThanksGrayForVisitingLibrary,
         gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_GrayPraisesLibraryBookSelection,
         gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer_MaryAppreciatesGraysInterestInBooks,
@@ -8796,7 +8904,7 @@ mary_script_symbols
         gText_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall_DoctorThanksElliAndEllen,
         gText_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall_ElliRemindsDoctorToReturnToClinic,
         gText_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall_DoctorAgreesAndTellsEllenToTakeCare,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall_EllenThanksDoctorAgain,
         #endif
     },
@@ -8825,7 +8933,7 @@ mary_script_symbols
         gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll_DoctorSaysHeCanCareForHimselfAndHasElli,
         gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll_ElliAcceptsButWarnsDoctorNotToOverwork,
         gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll_ElliSaysSheWillBeAngryIfDoctorOverworks,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll_DoctorComparesEllisConcernToHisMother,
         #elif defined(REGION_JP)
             gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll_DoctorComparesEllisConcernToAWife,
@@ -9018,8 +9126,12 @@ mary_script_symbols
         gText_AchievementEvent_Fishing_MilestoneReward_Caught10000FishMilestone,
         gText_AchievementEvent_Fishing_MilestoneReward_Caught100000FishMilestone,
         gText_AchievementEvent_Fishing_MilestoneReward_Caught1000000FishMilestone,
-        gText_AchievementEvent_Fishing_MilestoneReward_Caught10000000FishMilestone,
-        gText_AchievementEvent_Fishing_MilestoneReward_Caught100000000FishMilestone,
+        #if defined(REGION_DE)
+            gText_AchievementEvent_Fishing_MilestoneReward_Shared_CaughtTenOrHundredMillionFishMilestone,
+        #else
+            gText_AchievementEvent_Fishing_MilestoneReward_Caught10000000FishMilestone,
+            gText_AchievementEvent_Fishing_MilestoneReward_Caught100000000FishMilestone,
+        #endif
         gText_AchievementEvent_Fishing_MilestoneReward_Caught1000000000FishMilestone,
         gText_AchievementEvent_Fishing_MilestoneReward_CaughtEveryFishSpeciesMilestone,
     },
@@ -9287,7 +9399,7 @@ mary_script_symbols
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpouseVisitsPoultryFarmDuringPregnancyRepeatConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpouseVisitsPoultryFarmAfterChildbirthFirstConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpouseVisitsPoultryFarmAfterChildbirthRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpousePoultryFarmBelowGreenHeartFirstConversation,
         #endif
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpousePoultryFarmBelowGreenHeartRepeatConversation,
@@ -9317,13 +9429,13 @@ mary_script_symbols
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_RivalSpousePoultryFarmFriendship150To199RepeatConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_RivalSpousePoultryFarmFriendship200PlusFirstConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_RivalSpousePoultryFarmFriendship200PlusRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship000To099FirstConversation,
         #endif
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship000To099RepeatConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship100To199FirstConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship100To199RepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship200PlusFirstConversation,
         #endif
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerMarriedOtherCandidatePoultryFarmFriendship200PlusRepeatConversation,
@@ -9354,6 +9466,9 @@ mary_script_symbols
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_RivalSpouseMineralBeachRepeatConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_UnmarriedMineralBeachFirstConversation,
         gText_NPCEvent_Popuri_DialogueAndGiftResponses_UnmarriedMineralBeachRepeatConversation,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Popuri_DialogueAndGiftResponses_MineralBeachCottageRestaurantRecommendation,
+        #endif
     },
 
     // Script ID: 0994
@@ -9398,7 +9513,11 @@ mary_script_symbols
         mary_local_type(var_0, MaryNpcHeldItemInteractionCategory),
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantFavorableGiftWithChildNearbyResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantFavoriteGiftOrHighFriendshipRepeatResponse,
-        gText_NPCEvent_Baby_DialogueAndInteractions_InfantMediumFriendshipRepeatOrYoungChildLikedGiftOrFavorableAnimalResponse,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Baby_DialogueAndInteractions_Shared_InfantMediumFriendshipOrYoungChildFavoriteOrLikedResponse,
+        #else
+            gText_NPCEvent_Baby_DialogueAndInteractions_InfantMediumFriendshipRepeatOrYoungChildLikedGiftOrFavorableAnimalResponse,
+        #endif
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantNeutralGiftResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantDislikedGiftOrYoungChildLowFriendshipRepeatResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantHatedGiftResponse,
@@ -9409,11 +9528,13 @@ mary_script_symbols
         #if defined(REGION_JP)
             gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildFavorableGiftWithChildNearbyResponse,
         #endif
-        gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildFavoriteGiftResponse,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildFavoriteGiftResponse,
+        #endif
         gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildLikedGiftResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildNeutralGiftResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildDislikedGiftResponse,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildHatedGiftOrUnfavorableAnimalResponse,
         #elif defined(REGION_JP)
             gText_NPCEvent_Baby_DialogueAndInteractions_YoungChildHatedGiftResponse,
@@ -9433,7 +9554,7 @@ mary_script_symbols
         gText_NPCEvent_Baby_DialogueAndInteractions_MatureChildAccessoryOrCosmeticResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_MatureChildPerfumeResponse,
         gText_NPCEvent_Baby_DialogueAndInteractions_InfantLowFriendshipFirstConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Baby_DialogueAndInteractions_InfantLowFriendshipRepeatConversation,
             gText_NPCEvent_Baby_DialogueAndInteractions_InfantMediumFriendshipFirstConversation,
         #endif
@@ -9499,7 +9620,7 @@ mary_script_symbols
         gText_NPCEvent_Cliff_DialogueAndGiftResponses_FirstAutumnBeforeGrapeInvitationRepeatConversation,
         gText_NPCEvent_Cliff_DialogueAndGiftResponses_PermanentWineryJobAfterPlayerHelpFirstConversation,
         gText_NPCEvent_Cliff_DialogueAndGiftResponses_PermanentWineryJobAfterPlayerHelpRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Cliff_DialogueAndGiftResponses_FirstAutumnBeforeDepartureFirstConversationSilentPause,
         #endif
         gText_NPCEvent_Cliff_DialogueAndGiftResponses_MissedGrapeJobPlansDepartureRepeatConversation,
@@ -9550,7 +9671,7 @@ mary_script_symbols
         #endif
         gText_NPCEvent_Zack_DialogueAndGiftResponses_FarmLowFriendshipRepeatConversation_PlansPickupRoute,
         gText_NPCEvent_Zack_DialogueAndGiftResponses_FarmLowFriendshipRepeatConversation_RemindsPlayerHeIsWorking,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Zack_DialogueAndGiftResponses_FarmHighFriendshipRepeatConversation_UntranslatedJapaneseLeadIn,
         #elif defined(REGION_JP)
             gText_NPCEvent_Zack_DialogueAndGiftResponses_FarmHighFriendshipShipmentGreeting,
@@ -9675,7 +9796,7 @@ mary_script_symbols
         gText_NPCEvent_Staid_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Staid_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Staid_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Staid_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Staid_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -9743,7 +9864,7 @@ mary_script_symbols
         gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringFriendship051To100FirstConversationWelcomesPlayer,
         gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringFriendship101To150FirstConversationAsksPlayerNotToBullyHim,
         gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringFriendship151PlusFirstConversationOffersPlayerAFavor,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringLowFriendshipRepeatConversationLongSilentPause,
         #endif
         gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringFriendship051To100RepeatConversationTiredFromWork,
@@ -9780,7 +9901,7 @@ mary_script_symbols
         gText_NPCEvent_Timid_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Timid_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Timid_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Timid_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Timid_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -9871,9 +9992,15 @@ mary_script_symbols
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptWateringFor3Days,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptWateringFor1Week,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_HarvestDurationPrompt,
-        gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptHarvestingFor1Day,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Nappy_DialogueAndWorkChoices_Shared_AcceptHarvestingFor1DayOr1Week,
+        #else
+            gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptHarvestingFor1Day,
+        #endif
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptHarvestingFor3Days,
-        gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptHarvestingFor1Week,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptHarvestingFor1Week,
+        #endif
             gText_NPCEvent_Nappy_DialogueAndWorkChoices_AnimalCareDurationPrompt,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptAnimalCareFor1Day,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_AcceptAnimalCareFor3Days,
@@ -9883,7 +10010,7 @@ mary_script_symbols
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Nappy_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Nappy_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Nappy_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -9936,7 +10063,7 @@ mary_script_symbols
         gText_NPCEvent_Bold_DialogueAndWorkChoices_YoungAnimalResponse,
         gText_NPCEvent_Bold_DialogueAndWorkChoices_AdultAnimalResponsePart1,
         gText_NPCEvent_Bold_DialogueAndWorkChoices_AdultAnimalResponsePart2,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Bold_DialogueAndWorkChoices_AccessoryGiftResponse,
         #endif
         gText_NPCEvent_Bold_DialogueAndWorkChoices_AccessoryOrCosmeticGiftResponse,
@@ -9990,7 +10117,7 @@ mary_script_symbols
         gText_NPCEvent_Bold_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Bold_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Bold_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Bold_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Bold_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -10094,7 +10221,7 @@ mary_script_symbols
         gText_NPCEvent_Chef_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Chef_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Chef_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Chef_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Chef_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -10197,7 +10324,7 @@ mary_script_symbols
         gText_NPCEvent_Aqua_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Aqua_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Aqua_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Aqua_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Aqua_DialogueAndWorkChoices_WateringOrHarvestingMinigameLossConcern,
         #elif defined(REGION_JP)
@@ -10300,7 +10427,7 @@ mary_script_symbols
         gText_NPCEvent_Hoggy_DialogueAndWorkChoices_Friendship0To74InsufficientForMinigame,
         gText_NPCEvent_Hoggy_DialogueAndWorkChoices_MinigameSelectionPrompt,
         gText_NPCEvent_Hoggy_DialogueAndWorkChoices_WateringMinigameIntroduction,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Hoggy_DialogueAndWorkChoices_AllMinigamesWinImprovement,
             gText_NPCEvent_Hoggy_DialogueAndWorkChoices_AllMinigamesLossConcern,
         #elif defined(REGION_JP)
@@ -10409,6 +10536,9 @@ mary_script_symbols
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_NorthSideTownGoingToChurch,
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_NorthSideTownTuesdayGoingToClinic,
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_NorthSideTownGoingToInn,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Jeff_DialogueAndGiftResponses_NorthSideTownOutsideTravelHoursCommentsOnEndOfDay,
+        #endif
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_ChurchFirstConversation,
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_ChurchRepeatConversation,
         gText_NPCEvent_Jeff_DialogueAndGiftResponses_ClinicFirstConversation,
@@ -10435,7 +10565,7 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerSpouseLikedGiftResponse,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_NonPlayerSpouseLikedGiftResponse,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_AnyMarriageStateNeutralGiftResponse,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
         #endif
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerSpouseDislikedGiftResponse,
@@ -10518,11 +10648,65 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerSpouseSupermarketOrangeHeartRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerSpouseSupermarketRedHeartFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerSpouseSupermarketRedHeartRepeatConversation,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePoultryFarmSundayFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePoultryFarmSundayRepeatConversationEncouragesMarriage,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePoultryFarmSundayRepeatConversationAsksAboutMarriedLife,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePoultryFarmRainyDayRepeatConversationWorriesAboutChickens,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherLowOrMediumFriendshipFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherLowFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherMediumFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherHighFriendshipFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherHighFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerFianceSupermarketFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerFianceSupermarketRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlackHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlackHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketPurpleHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketPurpleHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlueHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlueHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketGreenHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketGreenHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketYellowHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketYellowHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketOrangeHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketOrangeHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketRedHeartFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketRedHeartRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpouseNorthSideTownSunnyRepeatConversationAsksAboutPlayersWife,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpouseNorthSideTownRainyRepeatConversationWorriesAboutChickens,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedNorthSideTownRainyAfternoonConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedNorthSideTownSunnyAfternoonConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedNorthSideTownEveningConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedMineralBeachFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedMineralBeachRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedMothersHillFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedMothersHillRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedInnFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedInnRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedForestRainyConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedGotzHouseFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedGotzHouseRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownLowFriendshipFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownLowFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownMediumFriendshipFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownMediumFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownHighFriendshipFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_SouthSideTownHighFriendshipRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseMorningFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseMorningRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseAfternoonFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseAfternoonRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseEveningFirstConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseEveningRepeatConversation,
+            gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseSecondFloorConversation,
+        #else
         gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpouseFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePlayerMarriedOtherSunnyRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpousePlayerSingleSunnyRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_RivalSpouseRainyRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherLowOrMediumFriendshipFirstConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerMarriedOtherLowFriendshipFirstConversation,
@@ -10538,7 +10722,7 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PlayerFianceSupermarketRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlackHeartFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketBlackHeartRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketPurpleHeartFirstOrNorthSideTownMorningConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketPurpleHeartFirstConversation,
@@ -10554,7 +10738,7 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketOrangeHeartRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketRedHeartFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedSupermarketRedHeartRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedNorthSideTownRainyAfternoonConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedNorthSideTownMorningConversation,
@@ -10568,7 +10752,7 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedMothersHillRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedInnFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedInnRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedForestRainyConversation,
         #endif
         gText_NPCEvent_Karen_DialogueAndGiftResponses_UnmarriedGotzHouseFirstConversation,
@@ -10586,6 +10770,7 @@ mary_script_symbols
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseEveningFirstConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseEveningRepeatConversation,
         gText_NPCEvent_Karen_DialogueAndGiftResponses_PoultryFarmHouseSecondFloorConversation,
+        #endif
     },
 
     // Script ID: 1009
@@ -10697,8 +10882,12 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_NonPlayerSpouseFavoriteGiftResponse,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseLikedGiftResponse,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_NonPlayerSpouseLikedGiftResponse,
-        gText_NPCEvent_Ann_DialogueAndGiftResponses_AnyMarriageStateNeutralGiftResponse,
-        gText_NPCEvent_Ann_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Ann_DialogueAndGiftResponses_Shared_AnyMarriageStateNeutralGiftResponse,
+        #else
+            gText_NPCEvent_Ann_DialogueAndGiftResponses_AnyMarriageStateNeutralGiftResponse,
+            gText_NPCEvent_Ann_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #endif
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseDislikedGiftResponse,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_NonPlayerSpouseDislikedGiftResponse,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseHatedGiftResponse,
@@ -10774,7 +10963,7 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnPregnancyRepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnAfterChildbirthFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnAfterChildbirthRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_SharedFarmhouseBelowGreenAndInnRedHeartFirstConversationSilence,
         #elif defined(REGION_JP)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_FarmhouseBelowGreenHeartFirstConversationSilence,
@@ -10788,7 +10977,7 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnOrangeHeartRepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnRedHeartFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerSpouseInnRedHeartRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn1FMothersDeathAnniversaryFirstConversation,
             gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn1FMothersDeathAnniversaryRepeatConversation,
         #elif defined(REGION_JP)
@@ -10807,7 +10996,7 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInnFriendship150To199RepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInnFriendship200OrMoreFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInnFriendship200OrMoreRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInn1FMothersDeathAnniversaryFirstConversation,
             gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInn1FMothersDeathAnniversaryRepeatConversation,
         #elif defined(REGION_JP)
@@ -10822,7 +11011,9 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_PlayerMarriedOtherInnHighFriendshipRepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_FianceInnFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_FianceInnRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_NPCEvent_Ann_DialogueAndGiftResponses_Shared_InnBlackPurpleOrOrangeHeartFirstConversationGreeting,
+        #elif defined(REGION_US) || defined(REGION_EU)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_SharedInnBlackOrPurpleHeartFirstConversationGreeting,
         #elif defined(REGION_JP)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_InnBlackHeartFirstConversationGreeting,
@@ -10838,7 +11029,9 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_InnGreenHeartRepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_InnYellowHeartFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_InnYellowHeartRepeatConversation,
-        gText_NPCEvent_Ann_DialogueAndGiftResponses_InnOrangeHeartFirstConversationNervousGreeting,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_Ann_DialogueAndGiftResponses_InnOrangeHeartFirstConversationNervousGreeting,
+        #endif
         gText_NPCEvent_Ann_DialogueAndGiftResponses_InnOrangeHeartRepeatConversation,
         #if defined(REGION_JP)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_InnRedHeartFirstConversationSilence,
@@ -10848,13 +11041,13 @@ mary_script_symbols
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInnBackRoomRepeatConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInnBackRoomFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInnBackRoomRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn2FMothersDeathAnniversaryFirstConversation,
             gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn2FMothersDeathAnniversaryRepeatConversation,
         #endif
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn2FRegularFirstConversation,
         gText_NPCEvent_Ann_DialogueAndGiftResponses_RivalSpouseInn2FRegularRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInn2FMothersDeathAnniversaryFirstConversation,
             gText_NPCEvent_Ann_DialogueAndGiftResponses_NotRivalSpouseInn2FMothersDeathAnniversaryRepeatConversation,
         #endif
@@ -10931,7 +11124,7 @@ mary_script_symbols
         gText_NPCEvent_Basil_DialogueAndGiftResponses_GrapeHarvestJobDoNotTellChoice,
         gText_NPCEvent_Basil_DialogueAndGiftResponses_GrapeHarvestJobDeclinesInvitation,
         gText_NPCEvent_Basil_DialogueAndGiftResponses_BasilHouse2FSunnyFirstConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Basil_DialogueAndGiftResponses_SharedBasilHouse2FSunnyOrRainyRepeatConversation,
         #elif defined(REGION_JP)
             gText_NPCEvent_Basil_DialogueAndGiftResponses_BasilHouse2FSunnyRepeatConversation,
@@ -10975,10 +11168,16 @@ mary_script_symbols
         gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseSpecialFavoriteGiftResponse,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseFavoriteGiftResponse,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseFavoriteGiftResponse,
-        gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLikedGiftResponse,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Mary_DialogueAndGiftResponses_Shared_PlayerSpouseLikedOrNonPlayerSpouseNeutralGiftResponse,
+        #else
+            gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLikedGiftResponse,
+        #endif
         gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseLikedGiftResponse,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseNeutralGiftResponse,
-        gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #endif
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseDislikedGiftResponse,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_NonPlayerSpouseDislikedGiftResponse,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseHatedGiftResponse,
@@ -11044,9 +11243,13 @@ mary_script_symbols
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseFarmhouseRedHeartMorningRepeatConversation,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseFarmhouseRedHeartAfternoonFirstConversation,
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseFarmhouseRedHeartAfternoonRepeatConversation,
-        gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLibrarySharedPregnancyOrJpAfterChildbirthFirstConversation,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Mary_DialogueAndGiftResponses_Shared_PlayerSpouseLibraryPregnancyOrAfterChildbirthFirstConversation,
+        #else
+            gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLibrarySharedPregnancyOrJpAfterChildbirthFirstConversation,
+        #endif
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLibraryPregnancyRepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLibraryAfterChildbirthFirstConversation,
         #endif
         gText_NPCEvent_Mary_DialogueAndGiftResponses_PlayerSpouseLibraryAfterChildbirthRepeatConversation,
@@ -11396,7 +11599,7 @@ mary_script_symbols
         gText_NPCEvent_Stu_DialogueAndGiftResponses_BirthdayGiftResponsePart1,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_BirthdayGiftResponsePart2,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_FavoriteGiftResponse,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Stu_DialogueAndGiftResponses_LikedOrNeutralGiftResponse,
         #elif defined(REGION_JP)
             gText_NPCEvent_Stu_DialogueAndGiftResponses_LikedGiftResponse,
@@ -11410,7 +11613,11 @@ mary_script_symbols
         gText_NPCEvent_Stu_DialogueAndGiftResponses_CosmeticGiftResponse,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_PerfumeGiftResponse,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_CommentsOnBlueFeather,
-        gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseMorningFriendship0To100FirstConversation,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Stu_DialogueAndGiftResponses_Shared_EllenHouseMorningOrOutsideGreeting,
+        #else
+            gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseMorningFriendship0To100FirstConversation,
+        #endif
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseMorningFriendship0To100RepeatConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseMorningFriendship101To200FirstConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseMorningFriendship101To200RepeatConversation,
@@ -11422,7 +11629,9 @@ mary_script_symbols
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseAfternoonNonSunnyNonMondayOrWednesdayRepeatConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseAfternoonMondayOrWednesdayFirstConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseAfternoonMondayOrWednesdayRepeatConversation,
-        gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseOutsideMorningOrAfternoonFirstConversation,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseOutsideMorningOrAfternoonFirstConversation,
+        #endif
         gText_NPCEvent_Stu_DialogueAndGiftResponses_EllenHouseOutsideMorningOrAfternoonRepeatConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_NorthSideTownFirstConversation,
         gText_NPCEvent_Stu_DialogueAndGiftResponses_NorthSideTownRepeatConversation,
@@ -11591,7 +11800,7 @@ mary_script_symbols
         gText_NPCEvent_Harris_DialogueAndGiftResponses_OutdoorBefore18NonSunnyRepeatConversation,
         gText_NPCEvent_Harris_DialogueAndGiftResponses_OutdoorBefore18SunnyFriendship0To100FirstConversation,
         gText_NPCEvent_Harris_DialogueAndGiftResponses_OutdoorBefore18SunnyFriendship0To100RepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Harris_DialogueAndGiftResponses_OutdoorBefore18SunnyFriendshipAbove100FirstConversation,
             gText_NPCEvent_Harris_DialogueAndGiftResponses_OutdoorBefore18SunnyFriendshipAbove100RepeatConversation,
         #elif defined(REGION_JP)
@@ -11604,7 +11813,7 @@ mary_script_symbols
         gText_NPCEvent_Harris_DialogueAndGiftResponses_InnRepeatConversation,
         gText_NPCEvent_Harris_DialogueAndGiftResponses_GotzHouseFriendship0To100FirstConversation,
         gText_NPCEvent_Harris_DialogueAndGiftResponses_GotzHouseFriendship0To100RepeatConversation,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Harris_DialogueAndGiftResponses_GotzHouseFriendshipAbove100FirstConversation,
             gText_NPCEvent_Harris_DialogueAndGiftResponses_GotzHouseFriendshipAbove100RepeatConversation,
         #endif
@@ -11649,7 +11858,9 @@ mary_script_symbols
         gText_NPCEvent_Carter_DialogueAndGiftResponses_FatherSonStoryBody,
         gText_NPCEvent_Carter_DialogueAndGiftResponses_FatherSonStoryInterpretationPrompt,
         gText_NPCEvent_Carter_DialogueAndGiftResponses_FatherSonStoryInterpretation,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_NPCEvent_Carter_DialogueAndGiftResponses_Shared_FatherSonConclusionScaryStoryIntroductionOrSnowWhiteTransition,
+        #elif defined(REGION_US) || defined(REGION_EU)
             gText_NPCEvent_Carter_DialogueAndGiftResponses_SharedFatherSonStoryConclusionOrScaryStoryIntroduction,
             gText_NPCEvent_Carter_DialogueAndGiftResponses_SnowWhiteStoryTransition,
         #elif defined(REGION_JP)
@@ -11690,8 +11901,12 @@ mary_script_symbols
         gText_NPCEvent_Kai_DialogueAndGiftResponses_Introduction,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_BirthdayGiftResponse,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseFavoriteGiftResponse,
-        gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseLikedGiftResponse,
-        gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #if defined(REGION_DE)
+            gText_NPCEvent_Kai_DialogueAndGiftResponses_Shared_NonPlayerSpouseLikedOrNeutralGiftResponse,
+        #else
+            gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseLikedGiftResponse,
+            gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseNeutralGiftResponse,
+        #endif
         gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseDislikedGiftResponse,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseHatedGiftResponse,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_NonPlayerSpouseFavorableAnimalResponse,
@@ -11719,7 +11934,7 @@ mary_script_symbols
         gText_NPCEvent_Kai_DialogueAndGiftResponses_MineralBeachWeekdayRemarksThatTimeMovesSlowly,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_MineralBeachSundayFirstConversationResting,
         gText_NPCEvent_Kai_DialogueAndGiftResponses_MineralBeachSundayRepeatConversationPraisesBeach,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Kai_DialogueAndGiftResponses_BeachCafeSharedFriendshipAnyFirstConversationWelcome,
         #elif defined(REGION_JP)
             gText_NPCEvent_Kai_DialogueAndGiftResponses_BeachCafeFriendship0To100FirstConversationWelcome,
@@ -11765,7 +11980,7 @@ mary_script_symbols
         gText_NPCEvent_Gray_DialogueAndGiftResponses_TownMorningMaryGrayRivalEvent04CompletedBeforeMarriageFirstConversationPraisesMary,
         gText_NPCEvent_Gray_DialogueAndGiftResponses_TownMorningMaryGrayRivalEvent04CompletedBeforeMarriageRepeatConversationResolvesToTry,
         gText_NPCEvent_Gray_DialogueAndGiftResponses_TownMorningMarriedToMaryFirstConversationDiscussesBasilsStories,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Gray_DialogueAndGiftResponses_SharedMarriedToMaryTownOrLibraryRepeatBlacksmithCommitment,
         #elif defined(REGION_JP)
             gText_NPCEvent_Gray_DialogueAndGiftResponses_MarriedToMaryTownRepeatBlacksmithCommitment,
@@ -11863,7 +12078,7 @@ mary_script_symbols
         gText_NPCEvent_Gotz_DialogueAndGiftResponses_ForestWorkFirstConversationSearchesForLumberTrees,
         gText_NPCEvent_Gotz_DialogueAndGiftResponses_ForestWorkRepeatConversationWarnsAgainstOverwork,
         gText_NPCEvent_Gotz_DialogueAndGiftResponses_NorthTownMayorVisitHoursGoingToMayorHouse,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_NPCEvent_Gotz_DialogueAndGiftResponses_NorthTownOutsideMayorVisitEncouragesFarmWork,
         #endif
         gText_NPCEvent_Gotz_DialogueAndGiftResponses_TownInteriorLowFriendshipFirstConversationExplainsSaturdayVisits,
@@ -11898,7 +12113,11 @@ mary_script_symbols
         gText_NPCEvent_May_DialogueAndGiftResponses_PerfumeGiftResponse,
         gText_NPCEvent_May_DialogueAndGiftResponses_BlueFeatherAdmirationAndQuestion,
         gText_NPCEvent_May_DialogueAndGiftResponses_GameCubeLinkJoannaPhoneUpdate,
-        gText_NPCEvent_May_DialogueAndGiftResponses_SunnySouthTownOrYodelHouseLowFriendshipFirstConversationGreeting,
+        #if defined(REGION_DE)
+            gText_NPCEvent_May_DialogueAndGiftResponses_Shared_SouthTownYodelHouseOrMothersHillGreeting,
+        #else
+            gText_NPCEvent_May_DialogueAndGiftResponses_SunnySouthTownOrYodelHouseLowFriendshipFirstConversationGreeting,
+        #endif
         gText_NPCEvent_May_DialogueAndGiftResponses_SunnySouthTownOrYodelHouseLowFriendshipRepeatConversationBarleyTooBusy,
         gText_NPCEvent_May_DialogueAndGiftResponses_SunnySouthTownOrYodelHouseHighFriendshipFirstConversationBarleyMissesJoanna,
         gText_NPCEvent_May_DialogueAndGiftResponses_SunnySouthTownOrYodelHouseHighFriendshipRepeatConversationMissesMother,
@@ -11910,7 +12129,9 @@ mary_script_symbols
         gText_NPCEvent_May_DialogueAndGiftResponses_YodelHouseUpstairsHighFriendshipRepeatConversationRecommendsSleepingOnHay,
         gText_NPCEvent_May_DialogueAndGiftResponses_MothersHillMiddleLowFriendshipFirstConversationExplainsBarleysHotSpringDay,
         gText_NPCEvent_May_DialogueAndGiftResponses_MothersHillMiddleLowFriendshipRepeatConversationDislikesHotSpring,
-        gText_NPCEvent_May_DialogueAndGiftResponses_MothersHillMiddleHighFriendshipFirstConversationGreeting,
+        #if !defined(REGION_DE)
+            gText_NPCEvent_May_DialogueAndGiftResponses_MothersHillMiddleHighFriendshipFirstConversationGreeting,
+        #endif
         gText_NPCEvent_May_DialogueAndGiftResponses_MothersHillMiddleHighFriendshipRepeatConversationMentionsFormerField,
         gText_NPCEvent_May_DialogueAndGiftResponses_NorthTownLowFriendshipFirstConversationComparesCarterAndStu,
         gText_NPCEvent_May_DialogueAndGiftResponses_NorthTownLowFriendshipRepeatConversationLikesStuDespiteTeasing,
@@ -11986,7 +12207,7 @@ mary_script_symbols
         gText_DebugEvent_CharacterAffectionEditor_ReturnToMainMenu,
         gText_DebugEvent_CharacterAffectionEditor_AnnsLoveValueDisplay,
         gText_DebugEvent_CharacterAffectionEditor_EllisLoveValueDisplay,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_DebugEvent_CharacterAffectionEditor_IncreaseLoveBy1000,
             gText_DebugEvent_CharacterAffectionEditor_DecreaseLoveBy1000,
         #endif
@@ -12286,6 +12507,105 @@ mary_script_symbols
     // Script ID: 1039
     EventScript_TV_F314MGrandPrix
     {
+        #if defined(REGION_DE)
+            gText_TV_F314MGrandPrix_Race01_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race01_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race01_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race01_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race02_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race02_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race02_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race02_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race03_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race03_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race03_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race03_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race04_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race04_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race04_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race04_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race05_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race05_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race05_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race05_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race06_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race06_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race06_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race06_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race07_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race07_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race07_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race07_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race08_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race08_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race08_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race08_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race09_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race09_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race09_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race09_ResultsPart02,
+            gText_TV_F314MGrandPrix_Shared_Race10And20PreviewPart01,
+            gText_TV_F314MGrandPrix_Race10_PreviewPart02,
+            gText_TV_F314MGrandPrix_Shared_Race10And20ResultsPart01,
+            gText_TV_F314MGrandPrix_Race10_ResultsPart02,
+            gText_TV_F314MGrandPrix_Shared_Race11And21PreviewPart01,
+            gText_TV_F314MGrandPrix_Race11_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race11_ResultsPart01,
+            gText_TV_F314MGrandPrix_Shared_Race11And21ResultsPart02,
+            gText_TV_F314MGrandPrix_Shared_Race12And22PreviewPart01,
+            gText_TV_F314MGrandPrix_Race12_PreviewPart02,
+            gText_TV_F314MGrandPrix_Shared_Race12And22ResultsPart01,
+            gText_TV_F314MGrandPrix_Race12_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race13_PreviewPart01,
+            gText_TV_F314MGrandPrix_Shared_Race13And23PreviewPart02,
+            gText_TV_F314MGrandPrix_Shared_Race13And23ResultsPart01,
+            gText_TV_F314MGrandPrix_Race13_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race14_PreviewPart01,
+            gText_TV_F314MGrandPrix_Shared_Race14And24ResultsPart01,
+            gText_TV_F314MGrandPrix_Race14_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race15_PreviewPart01,
+            gText_TV_F314MGrandPrix_Shared_Race15And25PreviewPart02,
+            gText_TV_F314MGrandPrix_Race15_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race15_ResultsPart02,
+            gText_TV_F314MGrandPrix_Shared_Race16And26PreviewPart01,
+            gText_TV_F314MGrandPrix_Race16_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race16_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race16_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race17_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race17_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race17_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race18_PreviewPart01,
+            gText_TV_F314MGrandPrix_Shared_Race18And28PreviewPart02,
+            gText_TV_F314MGrandPrix_Race18_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race18_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race19_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race19_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race19_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race20_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race20_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race21_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race22_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race22_ResultsPart02,
+            gText_TV_F314MGrandPrix_Shared_Race03PreviewPart01AndRace27ResultsPart02,
+            gText_TV_F314MGrandPrix_Race23_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race24_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race25_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race25_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race25_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race26_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race26_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race27_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race27_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race28_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race28_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race28_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race29_PreviewPart02,
+            gText_TV_F314MGrandPrix_Race29_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race29_ResultsPart02,
+            gText_TV_F314MGrandPrix_Race30_PreviewPart01,
+            gText_TV_F314MGrandPrix_Race30_ResultsPart01,
+            gText_TV_F314MGrandPrix_Race30_ResultsPart02,
+        #else
         gText_TV_F314MGrandPrix_Race01_PreviewPart01,
         gText_TV_F314MGrandPrix_Race01_PreviewPart02,
         gText_TV_F314MGrandPrix_Race01_ResultsPart01,
@@ -12330,12 +12650,12 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race11_PreviewPart02,
         gText_TV_F314MGrandPrix_Race11_ResultsPart01,
         gText_TV_F314MGrandPrix_Race11_ResultsPart02,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race12_PreviewPart01,
         #endif
         gText_TV_F314MGrandPrix_Race12_ResultsPart01,
         gText_TV_F314MGrandPrix_Race12_ResultsPart02,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race13_PreviewPart01,
         #endif
         gText_TV_F314MGrandPrix_Race13_PreviewPart02,
@@ -12344,7 +12664,7 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race14_PreviewPart01,
         gText_TV_F314MGrandPrix_Race14_ResultsPart01,
         gText_TV_F314MGrandPrix_Race14_ResultsPart02,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race15_PreviewPart01,
         #endif
         gText_TV_F314MGrandPrix_Race15_ResultsPart01,
@@ -12362,7 +12682,7 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race19_PreviewPart01,
         gText_TV_F314MGrandPrix_Race19_ResultsPart01,
         gText_TV_F314MGrandPrix_Race19_ResultsPart02,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race20_PreviewPart01,
         #endif
         gText_TV_F314MGrandPrix_Race20_PreviewPart02,
@@ -12371,7 +12691,7 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race21_PreviewPart01,
         gText_TV_F314MGrandPrix_Race21_ResultsPart01,
         gText_TV_F314MGrandPrix_Race21_ResultsPart02,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race22_PreviewPart01,
         #endif
         gText_TV_F314MGrandPrix_Race22_PreviewPart02,
@@ -12394,7 +12714,7 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race26_ResultsPart02,
         gText_TV_F314MGrandPrix_Race27_PreviewPart02,
         gText_TV_F314MGrandPrix_Race27_ResultsPart01,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_F314MGrandPrix_Race27_ResultsPart02,
         #endif
         gText_TV_F314MGrandPrix_Race28_PreviewPart01,
@@ -12406,6 +12726,7 @@ mary_script_symbols
         gText_TV_F314MGrandPrix_Race30_PreviewPart01,
         gText_TV_F314MGrandPrix_Race30_ResultsPart01,
         gText_TV_F314MGrandPrix_Race30_ResultsPart02,
+        #endif
     },
 
     // Script ID: 1040
@@ -12414,8 +12735,12 @@ mary_script_symbols
         mary_local_type(var_2, MaryHarvestGoddessGameRoundResult),
         gText_TV_HarvestGoddessRockPaperScissors_UnavailableIntroduction,
         gText_TV_HarvestGoddessRockPaperScissors_Instructions,
-        gText_TV_HarvestGoddessRockPaperScissors_PlayerCountdown,
-        gText_TV_HarvestGoddessRockPaperScissors_GoddessCountdown,
+        #if defined(REGION_DE)
+            gText_TV_HarvestGoddessRockPaperScissors_Shared_PlayerAndGoddessCountdown,
+        #else
+            gText_TV_HarvestGoddessRockPaperScissors_PlayerCountdown,
+            gText_TV_HarvestGoddessRockPaperScissors_GoddessCountdown,
+        #endif
         gText_TV_HarvestGoddessRockPaperScissors_ChoiceRock,
         gText_TV_HarvestGoddessRockPaperScissors_ChoicePaper,
         gText_TV_HarvestGoddessRockPaperScissors_ChoiceScissors,
@@ -12912,20 +13237,24 @@ mary_script_symbols
     // Script ID: 1048
     EventScript_TV_MineralTownFriends_CharacterProfiles
     {
-        gText_TV_MineralTownFriends_Rick_Opening,
+        #if defined(REGION_DE)
+            gText_TV_MineralTownFriends_Shared_AllCharacterProfileOpening,
+        #else
+            gText_TV_MineralTownFriends_Rick_Opening,
+        #endif
         gText_TV_MineralTownFriends_Rick_ProfileHeader,
         gText_TV_MineralTownFriends_Rick_FamilySibling,
         gText_TV_MineralTownFriends_Rick_FamilyMother,
         gText_TV_MineralTownFriends_Rick_FamilyFather,
         gText_TV_MineralTownFriends_Rick_BiographyPart01,
         gText_TV_MineralTownFriends_Rick_NextEpisodePreview,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_TV_MineralTownFriends_Shared_Opening,
         #endif
         gText_TV_MineralTownFriends_Popuri_ProfileHeaderBirthdayShiftedForPlayerConflict,
         gText_TV_MineralTownFriends_Popuri_ProfileHeaderDefaultBirthday,
         gText_TV_MineralTownFriends_Popuri_FamilySibling,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_Popuri_FamilyMother,
             gText_TV_MineralTownFriends_Popuri_FamilyFather,
         #endif
@@ -12962,7 +13291,7 @@ mary_script_symbols
         gText_TV_MineralTownFriends_Nappy_HarvestSpriteFamilyOverview,
         gText_TV_MineralTownFriends_Nappy_NextEpisodePreview,
         gText_TV_MineralTownFriends_Bold_ProfileHeader,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_SharedBoldOrChefProfile_HarvestSpriteFamilyMemberStaid,
             gText_TV_MineralTownFriends_BoldProfile_HarvestSpriteFamilyMemberNappy,
         #endif
@@ -12972,7 +13301,7 @@ mary_script_symbols
         gText_TV_MineralTownFriends_Chef_HarvestSpriteFamilyOverview,
         gText_TV_MineralTownFriends_Chef_NextEpisodePreview,
         gText_TV_MineralTownFriends_Aqua_ProfileHeader,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_SharedAquaHoggyOrTimidProfile_HarvestSpriteFamilyMemberNappy,
         #endif
         gText_TV_MineralTownFriends_Aqua_HarvestSpriteFamilyOverview,
@@ -13019,7 +13348,7 @@ mary_script_symbols
         gText_TV_MineralTownFriends_Karen_NextEpisodePreview,
         gText_TV_MineralTownFriends_Sasha_ProfileHeader,
         gText_TV_MineralTownFriends_Sasha_FamilyHusband,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_Sasha_FamilyDaughter,
             gText_TV_MineralTownFriends_Sasha_BiographyPart01,
         #elif defined(REGION_JP)
@@ -13052,7 +13381,7 @@ mary_script_symbols
         gText_TV_MineralTownFriends_Mary_NextEpisodePreview,
         gText_TV_MineralTownFriends_Anna_ProfileHeader,
         gText_TV_MineralTownFriends_Anna_BiographyPart01,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_Anna_FamilyDaughter,
         #endif
         gText_TV_MineralTownFriends_Anna_BiographyPart02,
@@ -13076,7 +13405,7 @@ mary_script_symbols
         gText_TV_MineralTownFriends_Duke_NextEpisodePreview,
         gText_TV_MineralTownFriends_Manna_ProfileHeader,
         gText_TV_MineralTownFriends_Manna_BiographyPart01,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_MineralTownFriends_Manna_BiographyPart02,
         #endif
         gText_TV_MineralTownFriends_Manna_BiographyPart03,
@@ -13386,7 +13715,11 @@ mary_script_symbols
     {
         gText_TV_WeatherChannelForecast_SpringToSummerClear,
         gText_TV_WeatherChannelForecast_SpringToSummerRain,
-        gText_TV_WeatherChannelForecast_SpringToSummerTyphoon,
+        #if defined(REGION_DE)
+            gText_TV_WeatherChannelForecast_Shared_WarmSeasonTyphoon,
+        #else
+            gText_TV_WeatherChannelForecast_SpringToSummerTyphoon,
+        #endif
         gText_TV_WeatherChannelForecast_NoSignalSnow,
         gText_TV_WeatherChannelForecast_NoSignalSnowstorm,
         gText_TV_WeatherChannelForecast_SpringClear,
@@ -13394,13 +13727,15 @@ mary_script_symbols
         gText_TV_WeatherChannelForecast_NoSignalTyphoonWarmSeason,
         gText_TV_WeatherChannelForecast_SummerToFallClear,
         gText_TV_WeatherChannelForecast_SummerToFallRain,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_TV_WeatherChannelForecast_SummerRain,
             gText_TV_WeatherChannelForecast_SummerTyphoon,
+        #elif defined(REGION_DE)
+            gText_TV_WeatherChannelForecast_SummerRain,
         #endif
         gText_TV_WeatherChannelForecast_FallToWinterClear,
         gText_TV_WeatherChannelForecast_NoSignalRain,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_WeatherChannelForecast_NoSignalTyphoonColdSeason,
         #endif
         gText_TV_WeatherChannelForecast_WinterSnow,
@@ -13425,12 +13760,12 @@ mary_script_symbols
         #endif
         gText_TV_EntertainmentChannelWeatherForecast_FallToWinterClear,
         gText_TV_EntertainmentChannelWeatherForecast_NoSignalRain,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_EntertainmentChannelWeatherForecast_NoSignalTyphoonColdSeason,
         #endif
         gText_TV_EntertainmentChannelWeatherForecast_WinterClear,
         gText_TV_EntertainmentChannelWeatherForecast_FallToWinterOrWinterSnowstorm,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_TV_EntertainmentChannelWeatherForecast_WinterRain,
             gText_TV_EntertainmentChannelWeatherForecast_WinterSnow,
         #endif
@@ -13641,7 +13976,7 @@ mary_script_symbols
     // Script ID: 1079
     EventScript_FestivalEvent_HorseRace_EntryInvitation
     {
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_HorseRace_EntryInvitation_SharedNoHorseOrYoungHorse,
         #elif defined(REGION_JP)
             gText_FestivalEvent_HorseRace_EntryInvitation_NoHorse,
@@ -14030,9 +14365,15 @@ mary_script_symbols
     // Script ID: 1130
     EventScript_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack
     {
-        gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_PuppyFestivalAnnouncement,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_Shared_FestivalAnnouncementAndAdultDogInvitation,
+        #else
+            gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_PuppyFestivalAnnouncement,
+        #endif
         gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_PuppyIneligibleExplanation,
-        gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_AdultDogEntryInvitation,
+        #if !defined(REGION_DE)
+            gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_AdultDogEntryInvitation,
+        #endif
         gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_ChoiceEnterDog,
         gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_DontCompete,
         gText_FestivalEvent_FrisbeeTournament_DogEntryInvitation_Zack_InThatCaseIllTakeHim,
@@ -14817,12 +15158,19 @@ mary_script_symbols
     // Script ID: 1236
     EventScript_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas
     {
-        gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_NoHeldItemOrDeclinedResponse,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_NoHeldItemResponse,
+        #else
+            gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_NoHeldItemOrDeclinedResponse,
+        #endif
         gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_AsksWhetherPlayerBroughtIngredient,
         gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_ConfirmContributionChoice,
         gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_DeclineContributionChoice,
         gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_AcceptsHeldFoodContribution,
         gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_RejectsNonFoodContribution,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_HarvestFestival_IngredientContributionChoice_Thomas_DeclinedContributionResponse,
+        #endif
     },
 
     // Script ID: 1237
@@ -14883,12 +15231,24 @@ mary_script_symbols
         gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_AnnReceivesMoonDumplings,
         gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_MaryReceivesMoonDumplings,
         gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_ElliReceivesMoonDumplings,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU)
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenAdditionalReflection,
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_PopuriAdditionalReflection,
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_MaryAdditionalReflection,
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_ElliReceivesMoonDumplingsAlternative,
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenQuestionAboutMoon,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenLateNightReflection,
+        #elif defined(REGION_DE)
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenAdditionalReflection,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_PopuriAdditionalReflection,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_MaryAdditionalReflection,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_PopuriReceivesMoonDumplingsAlternative,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_ElliReceivesMoonDumplingsAlternative,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenQuestionAboutMoon,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_MaryParentsReflectionAfterMoonDumplings,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenClosingReflectionWithoutMoonDumplings,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_MaryParentsReflectionWithoutMoonDumplings,
+            gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_ElliClosingReflectionWithoutMoonDumplings,
             gText_FestivalEvent_MoonViewing_PartnerDialogueAndClosing_KarenLateNightReflection,
         #endif
     },
@@ -14903,8 +15263,12 @@ mary_script_symbols
         gText_FestivalEvent_MoonViewing_Choice_TonightTheMoonWillBeFull,
         gText_FestivalEvent_MoonViewing_Choice_Yes,
         gText_FestivalEvent_MoonViewing_Choice_No,
-        gText_FestivalEvent_MoonViewing_Choice_KarenAgreesToWatchTogether,
-        gText_FestivalEvent_MoonViewing_Choice_PopuriAgreesToWatchTogether,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_MoonViewing_Choice_Shared_KarenAndPopuriAgreeToWatchTogether,
+        #else
+            gText_FestivalEvent_MoonViewing_Choice_KarenAgreesToWatchTogether,
+            gText_FestivalEvent_MoonViewing_Choice_PopuriAgreesToWatchTogether,
+        #endif
         gText_FestivalEvent_MoonViewing_Choice_AnnOrMaryAgreesToWatchTogether,
         #if defined(REGION_JP)
             gText_FestivalEvent_MoonViewing_Choice_MaryAgreesToWatchTogether,
@@ -15283,7 +15647,9 @@ mary_script_symbols
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_ElliIntroductionWithWalkingChild,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_ChildBabbles,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_KarenInvitesFamilyToEatSweets,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_Shared_PopuriAnnAndMaryInviteFamilyToEatSweets,
+        #elif defined(REGION_US) || defined(REGION_EU)
             gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PopuriAndAnnInviteFamilyToEatSweets,
             gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_MaryInvitesFamilyToEatSweets,
         #elif defined(REGION_JP)
@@ -15292,14 +15658,24 @@ mary_script_symbols
             gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_MaryInvitesFamilyToEatSweets,
         #endif
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_ElliInvitesFamilyToEatSweets,
-        gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PlayerOvereatsPumpkinSweets,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PlayerOvereatsPumpkinSweetsWithWalkingChild,
+        #else
+            gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PlayerOvereatsPumpkinSweets,
+        #endif
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_KarenIntroductionWithoutWalkingChild,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PopuriIntroductionWithoutWalkingChild,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_AnnIntroductionWithoutWalkingChild,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_MaryIntroductionWithYoungChild,
         gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_ElliIntroductionWithoutWalkingChild,
-        #if defined(REGION_US)
+        #if defined(REGION_DE)
+            gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PlayerOvereatsPumpkinSweetsWithoutWalkingChild,
+        #endif
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_MaryIntroductionWithoutChild,
+        #endif
+        #if defined(REGION_DE)
+            gText_FestivalEvent_PumpkinFestival_SpouseAndChildCelebration_PlayerOvereatsPumpkinSweetsWithoutChild,
         #endif
     },
 
@@ -15352,7 +15728,7 @@ mary_script_symbols
         gText_FestivalEvent_WinterThanksgiving_RucksackFull_MarySearchesSleepingPlayersRucksack,
         gText_FestivalEvent_WinterThanksgiving_RucksackFull_MaryCannotLeaveGiftBecauseRucksackIsFull,
         gText_FestivalEvent_WinterThanksgiving_RucksackFull_MaryLeavesWithoutGivingGift,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_WinterThanksgiving_RucksackFull_Shared_AnnPopuriAndElliSearchSleepingPlayersRucksack,
         #elif defined(REGION_JP)
             gText_FestivalEvent_WinterThanksgiving_RucksackFull_AnnSearchesSleepingPlayersRucksack,
@@ -15437,7 +15813,7 @@ mary_script_symbols
         gText_FestivalEvent_StarryNight_WithSpouseAndChild_KarenDinnerWithoutChild,
         gText_FestivalEvent_StarryNight_WithSpouseAndChild_PopuriDinnerWithoutChild,
         gText_FestivalEvent_StarryNight_WithSpouseAndChild_AnnDinnerWithoutChild,
-        #if defined(REGION_US)
+        #if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_SharedMaryDinnerWithOrWithoutChild,
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_SharedElliDinnerWithOrWithoutChild,
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_SharedHarvestGoddessDinnerWithOrWithoutChild,
@@ -15446,8 +15822,12 @@ mary_script_symbols
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_ElliDinnerWithoutChild,
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_HarvestGoddessDinnerWithoutChild,
         #endif
-        gText_FestivalEvent_StarryNight_WithSpouseAndChild_KarenDinnerWithChild,
-        gText_FestivalEvent_StarryNight_WithSpouseAndChild_PopuriDinnerWithChild,
+        #if defined(REGION_DE)
+            gText_FestivalEvent_StarryNight_WithSpouseAndChild_SharedKarenAndPopuriDinnerWithChild,
+        #else
+            gText_FestivalEvent_StarryNight_WithSpouseAndChild_KarenDinnerWithChild,
+            gText_FestivalEvent_StarryNight_WithSpouseAndChild_PopuriDinnerWithChild,
+        #endif
         gText_FestivalEvent_StarryNight_WithSpouseAndChild_AnnDinnerWithChild,
         #if defined(REGION_JP)
             gText_FestivalEvent_StarryNight_WithSpouseAndChild_MaryDinnerWithChild,

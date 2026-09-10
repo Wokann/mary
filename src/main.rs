@@ -41,6 +41,12 @@ enum Error {
     #[error("Mary-C symbol mismatch: {0}")]
     MarySymbolMismatch(String),
 
+    #[error("Mary-C ROM target mismatch: selected {selected}, detected {detected:?}")]
+    MaryTargetMismatch {
+        selected: String,
+        detected: mary::utility::rom_info::FomtVariant,
+    },
+
     #[error("Mary-C source error: {0}")]
     MaryScript(#[from] mary::mary_c::MaryScriptError),
 
@@ -166,10 +172,23 @@ enum Command {
     },
 }
 
-fn load_charmap(path: Option<PathBuf>) -> Result<Option<Arc<Charmap>>, Error> {
+fn load_charmap(
+    path: Option<PathBuf>,
+    options: Option<&mary::mary_c::Options>,
+) -> Result<Option<Arc<Charmap>>, Error> {
     path.map(|path| {
         let source = fs::read_to_string(path)?;
-        Ok(Arc::new(Charmap::parse(&source)?))
+        let map = match options {
+            Some(options) => {
+                let active_source = mary::charmap::preprocess_conditionals(&source, options)
+                    .map_err(|error| {
+                        Error::MaryTable(mary::mary_c::MaryCError::Preprocess(error))
+                    })?;
+                Charmap::parse(&active_source)?
+            }
+            None => Charmap::parse(&source)?,
+        };
+        Ok(Arc::new(map))
     })
     .transpose()
 }
@@ -279,9 +298,12 @@ fn main_error() -> Result<(), Error> {
                 None => io::read_to_string(stdin().lock())?,
             };
 
-            let charmap = load_charmap(charmap)?;
+            let mary_options = mary_c
+                .then(|| mary_c_options_from_source(defines.clone(), &code))
+                .transpose()?;
+            let charmap = load_charmap(charmap, mary_options.as_ref())?;
             let scripts = if mary_c {
-                let options = mary_c_options_from_source(defines, &code)?;
+                let options = mary_options.expect("Mary-C options prepared above");
                 let includes = extract_mary_c_includes(&mut code)?;
                 let resolve = |path: PathBuf| {
                     if path.is_absolute() {
@@ -411,13 +433,25 @@ fn main_error() -> Result<(), Error> {
             use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
 
             let rom = fs::read(input_binary)?;
-            let charmap = load_charmap(charmap)?;
             let mary_options = mary_c_options(defines)?;
+            let charmap = load_charmap(charmap, mary_c.then_some(&mary_options))?;
             let mary_target = selected_mary_target(&mary_options);
             if mary_c && mary_target.is_none() {
                 return Err(Error::Cli(
                     "Mary-C decompile requires exactly one MARY_* target",
                 ));
+            }
+            if mary_c && (all || script_id.is_some()) {
+                let detected = rom_info::identify_rom(&rom).ok_or(Error::Cli(
+                    "ROM header does not match a supported Mary-C target",
+                ))?;
+                let selected = mary_target.expect("Mary-C target checked above");
+                if mary_target_variant(selected) != Some(detected) {
+                    return Err(Error::MaryTargetMismatch {
+                        selected: selected.to_owned(),
+                        detected,
+                    });
+                }
             }
             let mary_headers = mary_target.map(mary_header_names);
             let mut script_table_include = script_table
@@ -1110,10 +1144,12 @@ fn mary_c_options_from_source(
 ) -> Result<mary::mary_c::Options, Error> {
     let mut options = mary_c_options(defines)?;
     let targets = [
-        "MARY_FOMT_US",
-        "MARY_MFOMT_US",
         "MARY_FOMT_JP",
+        "MARY_FOMT_US",
+        "MARY_FOMT_EU",
+        "MARY_FOMT_DE",
         "MARY_MFOMT_JP",
+        "MARY_MFOMT_US",
     ];
     for line in source.lines() {
         let line = line.trim();
@@ -1141,16 +1177,32 @@ fn mary_c_options_from_source(
 
 fn selected_mary_target(options: &mary::mary_c::Options) -> Option<&str> {
     let targets = [
-        "MARY_FOMT_US",
-        "MARY_MFOMT_US",
         "MARY_FOMT_JP",
+        "MARY_FOMT_US",
+        "MARY_FOMT_EU",
+        "MARY_FOMT_DE",
         "MARY_MFOMT_JP",
+        "MARY_MFOMT_US",
     ];
     let mut selected = targets
         .into_iter()
         .filter(|name| options.defines.contains_key(*name));
     let first = selected.next()?;
     selected.next().is_none().then_some(first)
+}
+
+fn mary_target_variant(target: &str) -> Option<mary::utility::rom_info::FomtVariant> {
+    use mary::utility::rom_info::FomtVariant;
+
+    match target {
+        "MARY_FOMT_JP" => Some(FomtVariant::FomtJp),
+        "MARY_FOMT_US" => Some(FomtVariant::FomtUs),
+        "MARY_FOMT_EU" => Some(FomtVariant::FomtEu),
+        "MARY_FOMT_DE" => Some(FomtVariant::FomtDe),
+        "MARY_MFOMT_JP" => Some(FomtVariant::MfomtJp),
+        "MARY_MFOMT_US" => Some(FomtVariant::MfomtUs),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1227,7 +1279,8 @@ fn main() -> Result<(), ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::print_empty_single_mary_c_slot;
+    use super::{mary_target_variant, print_empty_single_mary_c_slot};
+    use mary::utility::rom_info::FomtVariant;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1256,5 +1309,34 @@ mod tests {
         assert!(!source.contains("void EventScript_"));
 
         fs::remove_dir_all(output_dir).unwrap();
+    }
+
+    #[test]
+    fn mary_targets_map_to_rom_variants_in_canonical_order() {
+        assert_eq!(
+            mary_target_variant("MARY_FOMT_JP"),
+            Some(FomtVariant::FomtJp)
+        );
+        assert_eq!(
+            mary_target_variant("MARY_FOMT_US"),
+            Some(FomtVariant::FomtUs)
+        );
+        assert_eq!(
+            mary_target_variant("MARY_FOMT_EU"),
+            Some(FomtVariant::FomtEu)
+        );
+        assert_eq!(
+            mary_target_variant("MARY_FOMT_DE"),
+            Some(FomtVariant::FomtDe)
+        );
+        assert_eq!(
+            mary_target_variant("MARY_MFOMT_JP"),
+            Some(FomtVariant::MfomtJp)
+        );
+        assert_eq!(
+            mary_target_variant("MARY_MFOMT_US"),
+            Some(FomtVariant::MfomtUs)
+        );
+        assert_eq!(mary_target_variant("REGION_US"), None);
     }
 }

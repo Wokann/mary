@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`mary` 是《牧场物语：矿石镇的伙伴们》（FoMT）和《牧场物语：矿石镇的伙伴们 女孩版》（MFoMT）GBA 日版、美版事件脚本的编译器与反编译器。
+`mary` 是 GBA《牧场物语：矿石镇的伙伴们》（FoMT）日版、美版、欧版英文及德版，以及《牧场物语：矿石镇的伙伴们 女孩版》（MFoMT）日版、美版事件脚本的编译器与反编译器。
 
 ```text
 ROM 中的 RIFF 字节码
@@ -12,16 +12,18 @@ ROM 中的 RIFF 字节码
 与原始 RIFF/HEX 逐字节一致的字节码
 ```
 
-四个支持版本的全部 5486 个原版有效脚本均已通过严格源码往返测试：解码、结构化反编译、输出源码、重新解析、编译、编码，最后与原始 RIFF 逐字节比较。当前没有脚本需要低级 `ir`，也没有残留 `jump next`。
+六个支持版本的全部 8142 个原版有效脚本均已通过严格源码往返测试：解码、结构化反编译、输出源码、重新解析、编译、编码，最后与原始 RIFF 逐字节比较。当前没有脚本需要低级 `ir`，也没有残留 `jump next`。
 
 | 版本 | 有效脚本 | 结构化高级语言 | 逐字节往返 |
 | --- | ---: | ---: | ---: |
-| FoMT 美版 | 1328 | 1328/1328 | 1328/1328 |
-| MFoMT 美版 | 1415 | 1415/1415 | 1415/1415 |
 | FoMT 日版 | 1328 | 1328/1328 | 1328/1328 |
+| FoMT 美版 | 1328 | 1328/1328 | 1328/1328 |
+| FoMT 欧版英文 | 1328 | 1328/1328 | 1328/1328 |
+| FoMT 德版 | 1328 | 1328/1328 | 1328/1328 |
 | MFoMT 日版 | 1415 | 1415/1415 | 1415/1415 |
+| MFoMT 美版 | 1415 | 1415/1415 | 1415/1415 |
 
-> 这里的 100% 指当前四个原版 ROM 的完整测试语料。任意手写程序仍须使用虚拟机支持的结构，并通过编译器检查。
+> 这里的 100% 指当前六个原版 ROM 的完整测试语料。任意手写程序仍须使用虚拟机支持的结构，并通过编译器检查。
 
 ## 构建
 
@@ -59,7 +61,9 @@ mary decompile rom/fomtjp.gba goodies/fomt_callables.mary.h --all --mary-c --sym
 mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
 ```
 
-可用目标为 `MARY_FOMT_US`、`MARY_MFOMT_US`、`MARY_FOMT_JP` 和 `MARY_MFOMT_JP`。FoMT 使用 `fomt_*` 表，MFoMT 使用 `mfomt_*` 表；每个作品表内部只维护自己的 US/JP 本地化差异，不再把男女版差异很大的物理 ID 序列交织在同一文件中。
+可用目标按统一顺序为 `MARY_FOMT_JP`、`MARY_FOMT_US`、`MARY_FOMT_EU`、`MARY_FOMT_DE`、`MARY_MFOMT_JP`、`MARY_MFOMT_US`。FoMT 使用 `fomt_*` 表，MFoMT 使用 `mfomt_*` 表；解析器会从目标自动派生 `REGION_JP`、`REGION_US`、`REGION_EU` 或 `REGION_DE`，男女版不同的物理 ID 序列继续按文件分离。
+
+使用 `--all` 或 `--script-id` 时，所选目标必须与 ROM 头中的游戏标题和游戏代码匹配。`--offset` 仍可处理任意包含 RIFF 的二进制文件，因此不要求输入具有可识别的 ROM 头。
 
 ## 命令行用法
 
@@ -175,16 +179,18 @@ const MESSAGE_13 =
 
 部分改版 ROM 可能会保留原 STR/RIFF 的声明长度，却把文本放在 RIFF 外部，并让 STR 偏移指向远处。ROM 模式反编译会保留从当前 RIFF 起点到 ROM 后部的后备视图，因此能够解析这种外置文本；CODE 和 JUMP 仍严格受各自块长度限制。
 
-重新编译时会生成标准的自包含 RIFF：字符串按文本 ID 连续写入 STR 字符串池，偏移表及各块长度重新计算。因此采用外置文本布局的改版 ROM 可以正确读取和规范化重建，但规范化后的 RIFF 不保证与原改版 ROM 的特殊物理布局逐字节一致。四个原始 ROM 则继续通过逐字节严格往返测试。
+重新编译时会生成标准的自包含 RIFF：字符串按文本 ID 连续写入 STR 字符串池，偏移表及各块长度重新计算。因此采用外置文本布局的改版 ROM 可以正确读取和规范化重建，但规范化后的 RIFF 不保证与原改版 ROM 的特殊物理布局逐字节一致。六个受支持的原版 ROM 则继续通过逐字节严格往返测试。
 
 ## ROM 指针表
 
 | 版本 | ROM 地址 | 文件偏移 | 槽位情况 |
 | --- | ---: | ---: | --- |
-| FoMT 美版 | `0x080F89D4` | `0x0F89D4` | ID 0 为空，之后为 1328 个脚本 |
-| MFoMT 美版 | `0x081014BC` | `0x1014BC` | ID 0 为空，之后为 1415 个脚本 |
 | FoMT 日版 | `0x080F8230` | `0x0F8230` | ID 0 为空，之后为 1328 个脚本 |
+| FoMT 美版 | `0x080F89D4` | `0x0F89D4` | ID 0 为空，之后为 1328 个脚本 |
+| FoMT 欧版英文 | `0x080F8A20` | `0x0F8A20` | ID 0 为空，之后为 1328 个脚本 |
+| FoMT 德版 | `0x080F8EBC` | `0x0F8EBC` | ID 0 为空，之后为 1328 个脚本 |
 | MFoMT 日版 | `0x0810145C` | `0x10145C` | ID 0 为空，之后为 1415 个脚本 |
+| MFoMT 美版 | `0x081014BC` | `0x1014BC` | ID 0 为空，之后为 1415 个脚本 |
 
 表长由指针合法性和 RIFF 数据确定，不会通过删除空项来推断；空槽位会保留。
 
@@ -199,10 +205,10 @@ Mary-C 支持的 C 子集、未支持语法的等价改写建议，以及 `mary_
 `tests/` 是 Rust 集成测试和人工验证辅助脚本目录：
 
 - `structured_stress.rs`：构造嵌套 `switch`、循环、`if/else`、`break` 和栈密集表达式，连续执行三轮“编译 → 结构化反编译 → 输出源码 → 重编译”并比较字节；其中还包含两层和三层控制流组合矩阵。
-- `mary_c_vanilla.rs`：对四个 ROM 执行“RIFF → Mary-C 文本 → RIFF”严格逐字节往返，同时验证脚本名、文本名和跨脚本调用符号。
-- `vanilla_symmetry.rs`：读取四个原始 ROM 的全部指针表槽位。每个版本分别验证直接解码/编码和高级语言源码往返，要求 RIFF 逐字节一致，并禁止残留低级 `ir` 或 `jump next`。
+- `mary_c_vanilla.rs`：对六个 ROM 执行“RIFF → Mary-C 文本 → RIFF”严格逐字节往返，同时验证脚本名、文本名和跨脚本调用符号。
+- `vanilla_symmetry.rs`：读取六个原始 ROM 的全部指针表槽位。每个版本分别验证直接解码/编码和高级语言源码往返，要求 RIFF 逐字节一致，并禁止残留低级 `ir` 或 `jump next`。
 - `common/mod.rs`：供集成测试共用的 AST 递归检查函数，不会作为独立测试执行。
-- `decompile_all_roms.bat`：手动批量解包四个 ROM 的辅助脚本，不会被 `cargo test` 自动执行。
+- `decompile_all_roms.bat`：手动批量解包六个 ROM 的辅助脚本，不会被 `cargo test` 自动执行。
 
 不依赖 ROM 的普通测试：
 
@@ -210,13 +216,15 @@ Mary-C 支持的 C 子集、未支持语法的等价改写建议，以及 `mary_
 cargo test --all-targets
 ```
 
-完整 ROM 测试前，将四个文件放在以下固定位置：
+完整 ROM 测试前，将六个文件放在以下固定位置：
 
 ```text
-rom/fomt.gba
-rom/mfomt.gba
 rom/fomtjp.gba
+rom/fomt.gba
+rom/fomteu.gba
+rom/fomtde.gba
 rom/mfomtjp.gba
+rom/mfomt.gba
 ```
 
 ROM 和解包输出目录均由 Git 忽略。Mary-C 测试直接使用仓库内 FoMT/MFoMT 两套表，不需要设置环境变量。运行：
@@ -225,7 +233,7 @@ ROM 和解包输出目录均由 Git 忽略。Mary-C 测试直接使用仓库内 
 cargo test --all-targets --features test_with_roms
 ```
 
-只执行四 ROM 的 Mary-C 严格测试并显示逐版本统计：
+只执行六 ROM 的 Mary-C 严格测试并显示逐版本统计：
 
 ```console
 cargo test --features test_with_roms --test mary_c_vanilla -- --nocapture
@@ -239,13 +247,13 @@ cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture
 
 失败时，原始和重建的 RIFF 会保存在被忽略的 `test_failures/<版本>/` 中。完整 ROM 测试的成功标准不是“能够解析”，而是每个脚本重新生成的 RIFF 与 ROM 原始数据逐字节完全一致。
 
-在 Windows 上批量生成四个 ROM 的全部反编译源码，可从仓库根目录运行：
+在 Windows 上批量生成六个 ROM 的全部反编译源码，可从仓库根目录运行：
 
 ```console
 tests\decompile_all_roms.bat
 ```
 
-脚本会先构建当前代码，再生成 `decompiled_text/fomt_us`、`mfomt_us`、`fomt_jp` 和 `mfomt_jp`。它只用于检查解包结果，不替代严格往返测试。
+脚本会先构建当前代码，再生成 `decompiled_text/fomt_jp`、`fomt_us`、`fomt_eu`、`fomt_de`、`mfomt_jp` 和 `mfomt_us`。它只用于检查解包结果，不替代严格往返测试。
 
 ## 相关项目
 

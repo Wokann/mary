@@ -122,6 +122,91 @@ FF2D={Passerby2}
 7C=|
 7D=}
 7E=~
+# Single-width 8x12 glyphs; Western executables override 15 shared byte slots.
+# 单宽 8x12 字模；欧美版程序会截获并改画公共字节域中的 15 个槽位。
+A1=｡
+A2=｢
+A3=｣
+A4=､
+A5=･
+A6=ｦ
+A7=ｧ
+A8=ｨ
+A9=ｩ
+AA=ｪ
+AB=ｫ
+AC=ｬ
+AD=ｭ
+AE=ｮ
+AF=ｯ
+B0=ｰ
+B5=ｵ
+B8=ｸ
+B9=ｹ
+BA=ｺ
+C4=ﾄ
+C5=ﾅ
+C6=ﾆ
+C7=ﾇ
+C8=ﾈ
+C9=ﾉ
+CA=ﾊ
+CB=ﾋ
+CC=ﾌ
+CD=ﾍ
+CE=ﾎ
+CF=ﾏ
+D0=ﾐ
+D1=ﾑ
+D2=ﾒ
+D3=ﾓ
+D4=ﾔ
+D5=ﾕ
+D6=ﾖ
+D7=ﾗ
+D8=ﾘ
+D9=ﾙ
+DA=ﾚ
+DB=ﾛ
+DC=ﾜ
+DD=ﾝ
+DE=ﾞ
+DF=ﾟ
+
+#if defined(REGION_US) || defined(REGION_EU) || defined(REGION_DE)
+B1=♀
+B2=♂
+B3=♪
+B4=♡
+B6={GlyphB6}
+B7={GlyphB7}
+BB=ä
+BC=ü
+BD=ö
+BE=ß
+BF=´
+C0={GlyphC0}
+C1=Ä
+C2=Ö
+C3=Ü
+#elif defined(REGION_JP)
+B1=ｱ
+B2=ｲ
+B3=ｳ
+B4=ｴ
+B6=ｶ
+B7=ｷ
+BB=ｻ
+BC=ｼ
+BD=ｽ
+BE=ｾ
+BF=ｿ
+C0=ﾀ
+C1=ﾁ
+C2=ﾂ
+C3=ﾃ
+#endif
+
 8140=　
 8141=、
 8142=。
@@ -243,8 +328,13 @@ FF2D={Passerby2}
 81CA=￢
 81CB=⇒
 81CC=⇔
-#81CD=∀(origin sjis, fomt use it as love char)
+# In the JP version, Shift-JIS 81CD is reassigned to a pre-stored love-heart glyph.
+# 在日版中，Shift-JIS 81CD 被重新定义为 ROM 内预存的空心爱心字模。
+#if defined(REGION_JP)
 81CD=♡
+#else
+81CD=∀
+#endif
 81CE=∃
 81DA=∠
 81DB=⊥

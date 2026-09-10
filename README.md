@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`mary` is a script compiler and decompiler for the US and Japanese GBA releases of *Harvest Moon: Friends of Mineral Town* (FoMT) and *Harvest Moon: More Friends of Mineral Town* (MFoMT).
+`mary` is a script compiler and decompiler for the Japanese, US, European English, and German GBA releases of *Harvest Moon: Friends of Mineral Town* (FoMT), plus the Japanese and US releases of *Harvest Moon: More Friends of Mineral Town* (MFoMT).
 
 ```text
 RIFF bytecode in ROM
@@ -12,16 +12,18 @@ Editable structured source (UTF-8)
 Byte-exact RIFF/HEX
 ```
 
-All 5,486 valid vanilla scripts from the four supported ROMs pass the strict source round trip: decode, structured decompile, print source, parse source, compile, encode, and compare byte-for-byte with the original RIFF. None currently requires low-level `ir` or retains `jump next`.
+All 8,142 valid vanilla scripts from the six supported ROMs pass the strict source round trip: decode, structured decompile, print source, parse source, compile, encode, and compare byte-for-byte with the original RIFF. None currently requires low-level `ir` or retains `jump next`.
 
 | Version | Valid scripts | Structured source | Byte-exact round trip |
 | --- | ---: | ---: | ---: |
-| FoMT US | 1,328 | 1,328/1,328 | 1,328/1,328 |
-| MFoMT US | 1,415 | 1,415/1,415 | 1,415/1,415 |
 | FoMT JP | 1,328 | 1,328/1,328 | 1,328/1,328 |
+| FoMT US | 1,328 | 1,328/1,328 | 1,328/1,328 |
+| FoMT EU | 1,328 | 1,328/1,328 | 1,328/1,328 |
+| FoMT DE | 1,328 | 1,328/1,328 | 1,328/1,328 |
 | MFoMT JP | 1,415 | 1,415/1,415 | 1,415/1,415 |
+| MFoMT US | 1,415 | 1,415/1,415 | 1,415/1,415 |
 
-> This 100% figure describes the four tested vanilla corpora. Arbitrary handwritten programs must still use structures supported by the VM and pass compiler validation.
+> This 100% figure describes the six tested vanilla corpora. Arbitrary handwritten programs must still use structures supported by the VM and pass compiler validation.
 
 ## Build
 
@@ -59,7 +61,9 @@ This makes an extracted script independently compilable after copying it togethe
 mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
 ```
 
-Available targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. FoMT uses the `fomt_*` tables and MFoMT uses the `mfomt_*` tables. Each family table contains only its own US/JP localization branches; the different FoMT/MFoMT physical ID layouts are no longer interleaved in one file.
+Available targets, in canonical order, are `MARY_FOMT_JP`, `MARY_FOMT_US`, `MARY_FOMT_EU`, `MARY_FOMT_DE`, `MARY_MFOMT_JP`, and `MARY_MFOMT_US`. FoMT uses the `fomt_*` tables and MFoMT uses the `mfomt_*` tables. The parser derives `REGION_JP`, `REGION_US`, `REGION_EU`, or `REGION_DE` from the selected target; the different FoMT/MFoMT physical ID layouts remain separated by file.
+
+For `--all` and `--script-id`, the selected target must match the ROM title and game code in the header. `--offset` remains available for an arbitrary binary containing a RIFF and therefore does not require a recognized ROM header.
 
 ## Command-line usage
 
@@ -175,16 +179,18 @@ Each script is a `RIFF`/`SCR ` container that normally holds a `CODE` chunk, an 
 
 Some modified ROMs may retain the original STR/RIFF declared lengths, place text beyond the RIFF, and point STR offsets at that relocated text. ROM-mode decompilation keeps a backing view from the current RIFF to the remainder of the ROM, so these external strings remain addressable; CODE and JUMP stay bounded by their own chunk lengths.
 
-Compilation produces a standard self-contained RIFF: strings are written consecutively in text-ID order, and the STR offsets and chunk lengths are rebuilt. A modified ROM that uses external strings can therefore be decoded and normalized, but its rebuilt RIFF is not guaranteed to reproduce the modified ROM's unusual physical layout byte-for-byte. The four vanilla ROMs continue to pass strict byte-exact round-trip tests.
+Compilation produces a standard self-contained RIFF: strings are written consecutively in text-ID order, and the STR offsets and chunk lengths are rebuilt. A modified ROM that uses external strings can therefore be decoded and normalized, but its rebuilt RIFF is not guaranteed to reproduce the modified ROM's unusual physical layout byte-for-byte. The six supported vanilla ROMs continue to pass strict byte-exact round-trip tests.
 
 ## ROM pointer tables
 
 | Version | ROM address | File offset | Slots |
 | --- | ---: | ---: | --- |
-| FoMT US | `0x080F89D4` | `0x0F89D4` | null ID 0, then 1,328 scripts |
-| MFoMT US | `0x081014BC` | `0x1014BC` | null ID 0, then 1,415 scripts |
 | FoMT JP | `0x080F8230` | `0x0F8230` | null ID 0, then 1,328 scripts |
+| FoMT US | `0x080F89D4` | `0x0F89D4` | null ID 0, then 1,328 scripts |
+| FoMT EU | `0x080F8A20` | `0x0F8A20` | null ID 0, then 1,328 scripts |
+| FoMT DE | `0x080F8EBC` | `0x0F8EBC` | null ID 0, then 1,328 scripts |
 | MFoMT JP | `0x0810145C` | `0x10145C` | null ID 0, then 1,415 scripts |
+| MFoMT US | `0x081014BC` | `0x1014BC` | null ID 0, then 1,415 scripts |
 
 Table length is determined from pointer validity and RIFF data, not by dropping null entries. Empty slots are retained.
 
@@ -199,10 +205,10 @@ The [Mary-C language reference](docs/MARY_C_LANGUAGE.md) is authoritative for th
 `tests/` contains Rust integration tests and a manual verification helper:
 
 - `structured_stress.rs` constructs nested switches, loops, conditionals, breaks, and stack-heavy expressions. Each case performs three compile/decompile/print/recompile rounds and compares the resulting bytes; pairwise and three-level control-flow matrices are included.
-- `mary_c_vanilla.rs` performs a strict `RIFF -> Mary-C text -> RIFF` byte round trip on all four ROMs and also verifies script names, text names, and symbolic cross-script calls.
-- `vanilla_symmetry.rs` reads every pointer-table slot from all four vanilla ROMs. Each version gets both a direct decode/encode test and a printed high-level source round trip; RIFF bytes must match exactly, with no residual low-level `ir` or `jump next`.
+- `mary_c_vanilla.rs` performs a strict `RIFF -> Mary-C text -> RIFF` byte round trip on all six ROMs and also verifies script names, text names, and symbolic cross-script calls.
+- `vanilla_symmetry.rs` reads every pointer-table slot from all six vanilla ROMs. Each version gets both a direct decode/encode test and a printed high-level source round trip; RIFF bytes must match exactly, with no residual low-level `ir` or `jump next`.
 - `common/mod.rs` provides recursive AST inspection shared by the integration tests and is not an independently executed test.
-- `decompile_all_roms.bat` manually decompiles all four ROMs for inspection and is not run by `cargo test`.
+- `decompile_all_roms.bat` manually decompiles all six ROMs for inspection and is not run by `cargo test`.
 
 Run ordinary tests that do not require ROMs with:
 
@@ -210,13 +216,15 @@ Run ordinary tests that do not require ROMs with:
 cargo test --all-targets
 ```
 
-Before running the complete ROM suite, place the four files at these fixed paths:
+Before running the complete ROM suite, place the six files at these fixed paths:
 
 ```text
-rom/fomt.gba
-rom/mfomt.gba
 rom/fomtjp.gba
+rom/fomt.gba
+rom/fomteu.gba
+rom/fomtde.gba
 rom/mfomtjp.gba
+rom/mfomt.gba
 ```
 
 The ROM and decompiled-output directories are ignored by Git. Mary-C tests read the tracked FoMT and MFoMT table families directly; no environment variables are required. Run:
@@ -225,7 +233,7 @@ The ROM and decompiled-output directories are ignored by Git. Mary-C tests read 
 cargo test --all-targets --features test_with_roms
 ```
 
-To run only the strict four-ROM Mary-C suite and show per-version statistics:
+To run only the strict six-ROM Mary-C suite and show per-version statistics:
 
 ```console
 cargo test --features test_with_roms --test mary_c_vanilla -- --nocapture
@@ -239,13 +247,13 @@ cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture
 
 On failure, original and rebuilt RIFF files are stored under the ignored `test_failures/<variant>/` directory. Success means byte-for-byte equality for every regenerated RIFF—not merely successful parsing.
 
-On Windows, generate decompiled source for all four ROMs from the repository root with:
+On Windows, generate decompiled source for all six ROMs from the repository root with:
 
 ```console
 tests\decompile_all_roms.bat
 ```
 
-The helper builds the current code and writes `decompiled_text/fomt_us`, `mfomt_us`, `fomt_jp`, and `mfomt_jp`. It is intended for inspecting decompiled output and does not replace the strict round-trip suite.
+The helper builds the current code and writes `decompiled_text/fomt_jp`, `fomt_us`, `fomt_eu`, `fomt_de`, `mfomt_jp`, and `mfomt_us`. It is intended for inspecting decompiled output and does not replace the strict round-trip suite.
 
 ## Related projects
 

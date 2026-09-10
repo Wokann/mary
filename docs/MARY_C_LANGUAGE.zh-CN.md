@@ -12,7 +12,7 @@ Mary-C 是 Mary 虚拟栈脚本的 C 形前端。能与 C 保持相同语义的�
 fomt_callables.mary.h / mfomt_callables.mary.h
                                各自作品的原生 callable 有序 ID 表和类型声明
 fomt_constants.mary.h / mfomt_constants.mary.h
-                               各自作品按 US/JP 选择的固定 ID 常量及参数类型
+                               各自作品的固定 ID 常量及参数类型
 fomt_scripts_text.mary.sym / mfomt_scripts_text.mary.sym
                                各自作品仅供反编译使用的脚本/文本符号数据库
 fomt_scripts.mary.h / mfomt_scripts.mary.h
@@ -32,14 +32,18 @@ EventScript_NNNN.mary.c        单个脚本、脚本内文本表和正文
 #include "fomt_scripts.mary.h"
 ```
 
-支持：
+支持目标按统一顺序为：
 
-- `MARY_FOMT_US`
-- `MARY_MFOMT_US`
 - `MARY_FOMT_JP`
+- `MARY_FOMT_US`
+- `MARY_FOMT_EU`
+- `MARY_FOMT_DE`
 - `MARY_MFOMT_JP`
+- `MARY_MFOMT_US`
 
-FoMT 源码必须配套 `fomt_*` 文件，MFoMT 源码必须配套 `mfomt_*` 文件。解析器由四个正式目标自动派生 `REGION_US` 或 `REGION_JP`；作品间不同的 ID 序列已经由文件边界分开，表内不再重复目标校验、派生宏或 `MARY_FOMT`/`MARY_MFOMT` 大分支。
+FoMT 源码必须配套 `fomt_*` 文件，MFoMT 源码必须配套 `mfomt_*` 文件。解析器由正式目标自动派生 `REGION_JP`、`REGION_US`、`REGION_EU` 或 `REGION_DE`；作品间不同的 ID 序列已经由文件边界分开，表内不再重复目标校验、派生宏或 `MARY_FOMT`/`MARY_MFOMT` 大分支。
+
+指针表模式（`--all` 与 `--script-id`）会校验该目标是否与 ROM 头的游戏标题和游戏代码一致；任意二进制 `--offset` 模式不作此要求。
 
 相应 callable、constants 和 `.mary.sym` 只在实际本地化差异处判断地区宏，例如：
 
@@ -757,8 +761,8 @@ mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodie
 
 输出目录按物理槽位完整生成，空指针也有明确占位文件；同时复制常量/callable 头并生成目标脚本表。
 
-四个 `MARY_FOMT_US`／`MARY_FOMT_JP`／`MARY_MFOMT_US`／`MARY_MFOMT_JP` 宏是正式目标，
-每次必须且只能选择一个。
+六个 `MARY_FOMT_JP`／`MARY_FOMT_US`／`MARY_FOMT_EU`／`MARY_FOMT_DE`／
+`MARY_MFOMT_JP`／`MARY_MFOMT_US` 宏是正式目标，每次必须且只能选择一个。
 
 ### 按脚本 ID 反编译
 
@@ -804,6 +808,6 @@ mary compile EventScript_0867.mary.c --mary-c --print-ir --charmap charmap.txt -
 
 ## 验证范围
 
-`tests/mary_c_vanilla.rs` 使用 `charmap.txt` 对四个原版 ROM 执行 ROM → Mary-C 文本 → RIFF 的逐字节严格往返。FoMT US/JP 各保留 1329 个物理槽位（其中 1328 个为非空 RIFF），MFoMT US/JP 各保留 1416 个物理槽位（其中 1415 个为非空 RIFF）；所有非空脚本都必须逐字节一致，空指针槽也必须保持原位。
+`tests/mary_c_vanilla.rs` 使用 `charmap.txt` 对六个原版 ROM 执行 ROM → Mary-C 文本 → RIFF 的逐字节严格往返。FoMT JP/US/EU/DE 各保留 1329 个物理槽位（其中 1328 个为非空 RIFF），MFoMT JP/US 各保留 1416 个物理槽位（其中 1415 个为非空 RIFF）；所有非空脚本都必须逐字节一致，空指针槽也必须保持原位。
 
-`tests/mary_c_stress.rs` 另行覆盖多层 switch/if/do-while、紧凑 switch、case 贯穿、嵌套函数调用、虚拟栈保留结果与非法输入诊断。这里的 100% 只表示上述四个已验证 ROM；手写脚本仍必须属于 VM 可表达的语法范围。
+`tests/mary_c_stress.rs` 另行覆盖多层 switch/if/do-while、紧凑 switch、case 贯穿、嵌套函数调用、虚拟栈保留结果与非法输入诊断。这里的 100% 只表示上述六个已验证 ROM；手写脚本仍必须属于 VM 可表达的语法范围。

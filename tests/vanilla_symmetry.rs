@@ -14,10 +14,12 @@ mod tests {
     use mary::utility::rom_info::FomtVariant;
     use thiserror::Error;
 
-    const FOMT_US_ROM: &str = "rom/fomt.gba";
-    const MFOMT_US_ROM: &str = "rom/mfomt.gba";
     const FOMT_JP_ROM: &str = "rom/fomtjp.gba";
+    const FOMT_US_ROM: &str = "rom/fomt.gba";
+    const FOMT_EU_ROM: &str = "rom/fomteu.gba";
+    const FOMT_DE_ROM: &str = "rom/fomtde.gba";
     const MFOMT_JP_ROM: &str = "rom/mfomtjp.gba";
+    const MFOMT_US_ROM: &str = "rom/mfomt.gba";
     const FOMT_LIBRARY: &str = "goodies/lib_fomt.txt";
     const MFOMT_LIBRARY: &str = "goodies/lib_mfomt.txt";
 
@@ -39,20 +41,6 @@ mod tests {
         slots: usize,
     }
 
-    const FOMT_US: RomCase = RomCase {
-        name: "fomt-us",
-        rom_path: FOMT_US_ROM,
-        library_path: FOMT_LIBRARY,
-        variant: FomtVariant::FomtUs,
-        slots: 1329,
-    };
-    const MFOMT_US: RomCase = RomCase {
-        name: "mfomt-us",
-        rom_path: MFOMT_US_ROM,
-        library_path: MFOMT_LIBRARY,
-        variant: FomtVariant::MfomtUs,
-        slots: 1416,
-    };
     const FOMT_JP: RomCase = RomCase {
         name: "fomt-jp",
         rom_path: FOMT_JP_ROM,
@@ -60,11 +48,39 @@ mod tests {
         variant: FomtVariant::FomtJp,
         slots: 1329,
     };
+    const FOMT_US: RomCase = RomCase {
+        name: "fomt-us",
+        rom_path: FOMT_US_ROM,
+        library_path: FOMT_LIBRARY,
+        variant: FomtVariant::FomtUs,
+        slots: 1329,
+    };
+    const FOMT_EU: RomCase = RomCase {
+        name: "fomt-eu",
+        rom_path: FOMT_EU_ROM,
+        library_path: FOMT_LIBRARY,
+        variant: FomtVariant::FomtEu,
+        slots: 1329,
+    };
+    const FOMT_DE: RomCase = RomCase {
+        name: "fomt-de",
+        rom_path: FOMT_DE_ROM,
+        library_path: FOMT_LIBRARY,
+        variant: FomtVariant::FomtDe,
+        slots: 1329,
+    };
     const MFOMT_JP: RomCase = RomCase {
         name: "mfomt-jp",
         rom_path: MFOMT_JP_ROM,
         library_path: MFOMT_LIBRARY,
         variant: FomtVariant::MfomtJp,
+        slots: 1416,
+    };
+    const MFOMT_US: RomCase = RomCase {
+        name: "mfomt-us",
+        rom_path: MFOMT_US_ROM,
+        library_path: MFOMT_LIBRARY,
+        variant: FomtVariant::MfomtUs,
         slots: 1416,
     };
 
@@ -211,7 +227,20 @@ mod tests {
 
         let lib_text = fs::read_to_string(case.library_path)?;
         let charmap_source = fs::read_to_string("charmap.txt")?;
-        let charmap = Arc::new(mary::charmap::Charmap::parse(&charmap_source)?);
+        let target = match case.variant {
+            FomtVariant::FomtJp => "MARY_FOMT_JP",
+            FomtVariant::FomtUs => "MARY_FOMT_US",
+            FomtVariant::FomtEu => "MARY_FOMT_EU",
+            FomtVariant::FomtDe => "MARY_FOMT_DE",
+            FomtVariant::MfomtJp => "MARY_MFOMT_JP",
+            FomtVariant::MfomtUs => "MARY_MFOMT_US",
+        };
+        let options = mary::mary_c::Options::default()
+            .define(target)
+            .expect("test target macro is valid");
+        let active_charmap = mary::charmap::preprocess_conditionals(&charmap_source, &options)
+            .expect("test charmap conditionals are valid");
+        let charmap = Arc::new(mary::charmap::Charmap::parse(&active_charmap)?);
 
         let lib_scope = match compiler::parse_string(&lib_text) {
             Ok(parse_context) => parse_context.const_scope,
@@ -430,13 +459,15 @@ mod tests {
     }
 
     rom_round_trip_tests!(
-        (script_reencode_fomt, script_recompile_fomt, FOMT_US),
-        (script_reencode_mfomt, script_recompile_mfomt, MFOMT_US),
         (script_reencode_fomt_jp, script_recompile_fomt_jp, FOMT_JP),
+        (script_reencode_fomt, script_recompile_fomt, FOMT_US),
+        (script_reencode_fomt_eu, script_recompile_fomt_eu, FOMT_EU),
+        (script_reencode_fomt_de, script_recompile_fomt_de, FOMT_DE),
         (
             script_reencode_mfomt_jp,
             script_recompile_mfomt_jp,
             MFOMT_JP
         ),
+        (script_reencode_mfomt, script_recompile_mfomt, MFOMT_US),
     );
 }

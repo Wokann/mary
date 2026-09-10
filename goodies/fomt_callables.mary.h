@@ -1,12 +1,15 @@
-/* FoMT ordered callable IDs. Select MARY_FOMT_US or MARY_FOMT_JP.
+/* FoMT ordered callable IDs. Select exactly one of MARY_FOMT_JP,
+ * MARY_FOMT_US, MARY_FOMT_EU, or MARY_FOMT_DE.
  *
  * Evidence provenance: the current `fomt` source tree represents FoMT-US.
- * US/JP localization differences are selected inside this FoMT-only table.
+ * Verified localization differences are selected by the matching REGION_*
+ * macro derived from the selected target.
  *
- * FoMT 有序 callable ID。请选择 MARY_FOMT_US 或 MARY_FOMT_JP。
+ * FoMT 有序 callable ID。必须且只能选择 MARY_FOMT_JP、MARY_FOMT_US、
+ * MARY_FOMT_EU 或 MARY_FOMT_DE 之一。
  *
- * 证据来源说明：当前 `fomt` 源码树代表 FoMT-US；US/JP 本地化差异仅在本表
- * 内部选择。 */
+ * 证据来源说明：当前 `fomt` 源码树代表 FoMT-US；经过验证的本地化差异由
+ * 所选目标派生出的对应 REGION_* 宏选择。 */
 mary_callable_table
 {
     /* VM-internal stack/control slots, not source-level calls. */

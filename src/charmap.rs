@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
+use crate::mary_c::{self, Options, PreprocessError};
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum CharmapError {
     #[error("charmap line {line}: expected HEX=TEXT")]
@@ -29,6 +31,30 @@ pub struct Charmap {
     multibyte_lengths: HashMap<u8, Vec<usize>>,
     max_bytes: usize,
     max_chars: usize,
+}
+
+/// Apply Mary-C conditionals while retaining ordinary `# comment` lines for
+/// the charmap parser. Blank replacements preserve diagnostic line numbers.
+pub fn preprocess_conditionals(source: &str, options: &Options) -> Result<String, PreprocessError> {
+    let conditional_source = source
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("#if")
+                || trimmed.starts_with("#elif")
+                || trimmed == "#else"
+                || trimmed.starts_with("#endif")
+            {
+                line
+            } else if trimmed.starts_with('#') {
+                ""
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    mary_c::preprocess(&conditional_source, options)
 }
 
 impl Charmap {
@@ -202,6 +228,16 @@ mod tests {
         assert_eq!(map.decode_one(&[0x42]), None);
         assert_eq!(map.decode_one(&[0x20]), Some((1, " ")));
         assert_eq!(map.encode_text("A ").unwrap(), vec![0x41, 0x20]);
+    }
+
+    #[test]
+    fn c_conditionals_coexist_with_hash_comments() {
+        let source = "# ordinary comment\n#if defined(REGION_DE)\nB4=♡\n#else\n81CD=♡\n#endif\n";
+        let options = Options::default().define("MARY_FOMT_DE").unwrap();
+        let active = preprocess_conditionals(source, &options).unwrap();
+        let map = Charmap::parse(&active).unwrap();
+        assert_eq!(map.decode_one(&[0xB4]), Some((1, "♡")));
+        assert_eq!(map.decode_one(&[0x81, 0xCD]), None);
     }
 
     #[test]
