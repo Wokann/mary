@@ -203,6 +203,7 @@ fn print_compiled_scripts_in_c<W: io::Write>(
     w: &mut W,
     scripts: Vec<(IntValue, String, Script)>,
     pretty_bytecode: bool,
+    charmap: Option<&Charmap>,
 ) -> Result<(), Error> {
     use mary::bytecode::try_encode_script;
 
@@ -212,7 +213,7 @@ fn print_compiled_scripts_in_c<W: io::Write>(
         // print bytecode as C
 
         if pretty_bytecode {
-            write_ir_as_comment(w, script)?;
+            write_ir_as_comment(w, script, charmap)?;
             writeln!(w)?;
         }
 
@@ -242,7 +243,11 @@ fn print_compiled_scripts_in_c<W: io::Write>(
     Ok(())
 }
 
-fn write_ir_as_comment<W: io::Write>(w: &mut W, script: &Script) -> Result<(), io::Error> {
+fn write_ir_as_comment<W: io::Write>(
+    w: &mut W,
+    script: &Script,
+    charmap: Option<&Charmap>,
+) -> Result<(), io::Error> {
     use mary::ir::Ins;
 
     writeln!(w, "/*")?;
@@ -265,7 +270,10 @@ fn write_ir_as_comment<W: io::Write>(w: &mut W, script: &Script) -> Result<(), i
     writeln!(w, "Script strings (IR):")?;
 
     for i in 0..script.strings.len() {
-        let pretty_string_lit = PrettyStringLit::new(&script.strings[i]);
+        let pretty_string_lit = match charmap {
+            Some(charmap) => PrettyStringLit::with_charmap(&script.strings[i], charmap),
+            None => PrettyStringLit::new(&script.strings[i]),
+        };
         writeln!(w, "    {i}: {pretty_string_lit}")?;
     }
 
@@ -374,8 +382,10 @@ fn main_error() -> Result<(), Error> {
                     }
                 }
             } else {
-                let parse_result = match charmap {
-                    Some(charmap) => mary::compiler::parse_string_with_charmap(&code, charmap)?,
+                let parse_result = match charmap.as_ref() {
+                    Some(charmap) => {
+                        mary::compiler::parse_string_with_charmap(&code, Arc::clone(charmap))?
+                    }
                     None => parse_string(&code)?,
                 };
                 parse_result.scripts
@@ -406,10 +416,20 @@ fn main_error() -> Result<(), Error> {
                 if let Some(path) = output {
                     let output = File::create(path)?;
                     let mut buf_write = BufWriter::new(output);
-                    print_compiled_scripts_in_c(&mut buf_write, scripts, print_ir)?;
+                    print_compiled_scripts_in_c(
+                        &mut buf_write,
+                        scripts,
+                        print_ir,
+                        charmap.as_deref(),
+                    )?;
                     buf_write.flush()?;
                 } else {
-                    print_compiled_scripts_in_c(&mut stdout().lock(), scripts, print_ir)?;
+                    print_compiled_scripts_in_c(
+                        &mut stdout().lock(),
+                        scripts,
+                        print_ir,
+                        charmap.as_deref(),
+                    )?;
                 }
 
                 Ok(())
@@ -1103,7 +1123,7 @@ fn print_decompiled_script<W: io::Write>(
         write!(w, "{source}")?;
         if let Some(script) = print_ir {
             writeln!(w)?;
-            write_ir_as_comment(w, script)?;
+            write_ir_as_comment(w, script, charmap)?;
         }
         return Ok(());
     }
@@ -1122,7 +1142,7 @@ fn print_decompiled_script<W: io::Write>(
 
     if let Some(script) = print_ir {
         writeln!(w)?;
-        write_ir_as_comment(w, script)?;
+        write_ir_as_comment(w, script, charmap)?;
     }
 
     Ok(())
@@ -1279,8 +1299,8 @@ fn main() -> Result<(), ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mary_target_variant, print_empty_single_mary_c_slot};
-    use mary::utility::rom_info::FomtVariant;
+    use super::{mary_target_variant, print_empty_single_mary_c_slot, write_ir_as_comment};
+    use mary::{charmap::Charmap, ir::Script, utility::rom_info::FomtVariant};
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1338,5 +1358,18 @@ mod tests {
             Some(FomtVariant::MfomtUs)
         );
         assert_eq!(mary_target_variant("REGION_US"), None);
+    }
+
+    #[test]
+    fn ir_comment_decodes_strings_with_the_active_charmap() {
+        let charmap = Charmap::parse("82A0=あ\n05={Press}\n").unwrap();
+        let script = Script::new(Vec::new(), vec![vec![0x82, 0xA0, 0x05]]);
+        let mut output = Vec::new();
+
+        write_ir_as_comment(&mut output, &script, Some(&charmap)).unwrap();
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(output.contains("Script strings (IR):\n    0: \"あ{Press}\""));
+        assert!(!output.contains("\\x82\\xA0\\x05"));
     }
 }
