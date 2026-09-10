@@ -7,6 +7,7 @@
 # \t = no actual functionality has been found yet.
 # \r = return to the left margin without moving to the next line
 # \n = move to the next line without returning to the left margin
+# \p = move to the next text page
 # \r\n = return to the left margin, then move to the next line
 # {Press}\r\n = wait for input, then scroll the text window by one line and return the cursor to the left margin
 # {Press}\p = wait for input, then advance to the next text page

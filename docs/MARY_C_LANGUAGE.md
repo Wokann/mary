@@ -1,79 +1,71 @@
-# Mary-C 语言与无损工作流
+# Mary-C Language and Lossless Workflow
 
-[简体中文](MARY_C_LANGUAGE.md) | [English](MARY_C_LANGUAGE.en.md)
+[English](MARY_C_LANGUAGE.md) | [简体中文](MARY_C_LANGUAGE.zh-CN.md)
 
-Mary-C 是 Mary 虚拟栈脚本的 C 形前端。能与 C 保持相同语义的部分使用标准 C 写法；虚拟机独有且会影响栈或字节布局的行为使用 `mary_` 前缀。`.mary.c`、`.mary.h` 可以获得常见编辑器的 C 高亮，但不是 ISO C，必须由 `mary` 编译。
+Mary-C is the C-shaped frontend for Mary's stack VM. Constructs with genuine C semantics use standard C spelling; VM-only behavior that affects the stack or byte layout uses an explicit `mary_` prefix. `.mary.c` and `.mary.h` receive normal C highlighting, but they are not ISO C and must be compiled by `mary`.
 
-“成功反编译”必须满足 ROM 字节码转换成 `.mary.c` 后能够重新解析、编译并逐字节还原原 RIFF。批量、具名、单脚本及公共默认入口都使用严格结构化反编译；遇到低级 `ir`、未高级化的 `jump next` 或无法唯一恢复的控制流时会报错，不会静默降级并伪装成高级语言成功。`--print-ir` 只会把底层指令作为明确的审计注释附加到成功输出，不参与回编，也不替代高级化。
+A successful decompilation means ROM bytecode can be printed as Mary-C, parsed again, and rebuilt to the exact original RIFF bytes. Batch, named, single-script, and public default entry points all require strict structural recovery; residual low-level `ir`, `jump next`, and control flow that cannot be recovered uniquely are errors rather than silent fallback. `--print-ir` only appends explicitly marked low-level audit comments to otherwise successful output; those comments are not recompiled and never substitute for high-level recovery.
 
-## 文件与唯一数据来源
+## Files and sources of truth
 
 ```text
-mary_callables.mary.h          原生 callable 的有序 ID 表和类型声明
-mary_constants.mary.h          按目标选择的固定 ID 常量及参数类型
-mary_scripts_text.mary.sym     仅供反编译使用的脚本/文本符号数据库
-mary_scripts.mary.h            针对目标从 ROM 槽位和 .sym 名称生成的脚本表
-EventScript_NNNN.mary.c        单个脚本、脚本内文本表和正文
+fomt_callables.mary.h / mfomt_callables.mary.h
+                               per-game ordered native-callable IDs and prototypes
+fomt_constants.mary.h / mfomt_constants.mary.h
+                               per-game US/JP fixed constants and parameter types
+fomt_scripts_text.mary.sym / mfomt_scripts_text.mary.sym
+                               per-game decompiler-only script/text symbols
+fomt_scripts.mary.h / mfomt_scripts.mary.h
+                               per-game script slots generated from ROM + symbols
+EventScript_NNNN.mary.c        one script, its local text table, and its body
 ```
 
-`.mary.sym` 不会被 `.mary.c` include，也不参与回编。批量反编译会复制固定常量头与 callable 头，并从 ROM 指针槽和所选 `.sym` 名称生成本地 `mary_scripts.mary.h`，因此脚本表与输出函数名来自同一来源。单脚本反编译写入文件时同样复制固定头；若提供脚本符号表或脚本表，则同时生成本地脚本表头。
+The `.mary.sym` file is never included by generated source and is not required for recompilation. Batch decompilation copies the fixed constants and callable headers and generates a local `fomt_scripts.mary.h` from physical ROM slots and selected symbol names, keeping header and function names synchronized. A single-script decompile written to a file copies the fixed headers as well; when script symbols or a script table are supplied, it also generates the local script-table header.
 
-## 目标选择
+## Target selection
 
-每个 `.mary.c` 必须显式定义且只定义一个目标：
+Every `.mary.c` explicitly selects exactly one target:
 
 ```c
 #define MARY_FOMT_JP
-#include "mary_callables.mary.h"
-#include "mary_scripts.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
 ```
 
-支持：
+Targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. FoMT source uses the `fomt_*` files and MFoMT source uses `mfomt_*`. The parser derives `REGION_US` or `REGION_JP` from the selected formal target. Cross-game layouts are separated by file, so the tables contain no repeated target validation, derived-family boilerplate, or interleaved family conditionals.
 
-- `MARY_FOMT_US`
-- `MARY_MFOMT_US`
-- `MARY_FOMT_JP`
-- `MARY_MFOMT_JP`
-
-编译器会自动派生上位宏，源码不需要重复 `#define`：`MARY_FOMT_US` 同时满足 `MARY_FOMT` 和 `MARY_US`，`MARY_MFOMT_US` 同时满足 `MARY_MFOMT` 和 `MARY_US`，JP 两种目标同理满足对应作品宏和 `MARY_JP`。因此脚本级差异通常使用 `MARY_FOMT`/`MARY_MFOMT`，脚本内部的语言文本差异通常使用 `MARY_US`/`MARY_JP`；只有无法按单一维度表达的组合才直接判断四个具体目标宏。
-
-`mary_callables.mary.h` 和独立使用的 `.mary.sym` 会在文件开头显式写出这种关系，例如：
+The corresponding callable, constants, and `.mary.sym` files test region macros only where localization data actually differs, for example:
 
 ```c
-#if defined(MARY_MFOMT_JP)
-#define MARY_MFOMT
-#define MARY_JP
+#if defined(REGION_JP)
+    JapaneseLayoutEntry,
+#elif defined(REGION_US)
+    EnglishLayoutEntry,
 #endif
 ```
 
-## callable ID
+## Ordered IDs
 
-callable 表的预处理后顺序就是 `Call(id)` 的物理 ID：
+The post-preprocessing order of `mary_callable_table` is the physical `Call(id)` order. Prototypes are declared separately; `NULL` preserves VM-internal or unavailable slots:
 
 ```c
 mary_callable_table
 {
-    SetEntityPosition,
-#if defined(MARY_FOMT)
-    FomtOnlyNative,
-#elif defined(MARY_MFOMT)
-    MfomtOnlyNative,
-#endif
-    TalkMessage,
-    NULL,
+    /* 0x000 */ NULL,
+    /* 0x001 */ NULL,
+    /* 0x002 */ SetEntityPosition,
+    /* 0x003 */ GetEntityX,
 };
 
 void SetEntityPosition(int entity, int x, int y, int facing);
-void FomtOnlyNative(void);
-void MfomtOnlyNative(void);
-void TalkMessage(const char *message);
+int GetEntityX(int entity);
 ```
 
-`void` 原型是无返回值过程，`int` 原型是有返回值函数；参数支持 `int`、`const char *` 及固定 ID 类型。`NULL` 明确保留 VM 内部、不可调用或无法作为独立脚本接口公开的槽位，不能删除。具名的 `NoOp*` 与 `NULL` 不同：它们是原版脚本实际调用、且经四套 ROM 原生处理函数确认不产生效果的零操作；声明仍保留原字节码压入的参数数量，才能严格逐字节往返。比如教程中的 `NoOpTutorialFieldTile(...)` 看似携带坐标和对象参数，但原生入口直接返回，不能再伪装成“设置农田格”的高级功能。
+`void` declares a procedure and `int` a value-returning function. Parameters may be `int`, `const char *`, or a fixed-ID type. `NULL` preserves a VM-internal, unavailable, or otherwise non-exportable slot and must not be removed. A named `NoOp*` is different from `NULL`: retail scripts really call that slot, but the native handlers in all four ROMs have been verified to produce no effect. Its declaration retains the exact number of operands pushed by the original bytecode so strict byte-for-byte round trips remain possible. For example, `NoOpTutorialFieldTile(...)` carries coordinate- and object-shaped operands, yet its native entry returns immediately; it must not be presented as a fake high-level field-update operation.
 
-物理 callable 表会保留原生变体。例如 `FadeInScreenWithoutSceneHook(...)` 与 `FadeInScreen(...)` 使用相同的渐变参数域和核心过渡流程，但前者跳过后者在过渡前执行的当前场景虚函数；两者各自占用真实的 `Call(id)` 槽，不能错误合并为别名。ROM 的脚本调用 callable 已根据源码中的 `ScriptEngine::LoadById` 路径确认为 `CallScript(MaryScriptId script_id)`。
+The physical callable table also preserves native variants. `FadeInScreenWithoutSceneHook(...)` uses the same fade domains and core inward-transition path as `FadeInScreen(...)`, but skips the active-scene virtual hook executed by the latter before the transition. Each occupies a real `Call(id)` slot and must not be collapsed into an alias. The ROM script-launching callable has been verified through the source-level `ScriptEngine::LoadById` path and is declared as `CallScript(MaryScriptId script_id)`.
 
-固定 ID 使用带显式边界的 C 风格枚举：
+Fixed-ID domains use C-shaped enums with explicit brace boundaries:
 
 ```c
 typedef enum MaryCharacterId
@@ -83,33 +75,28 @@ typedef enum MaryCharacterId
 } MaryCharacterId;
 ```
 
-枚举类型只在编译期标明参数所属的编号域；成员和原始整数都会在发射虚拟栈指令前消解为相同整数，因此 `SetTalkNameplateCharacter(CHARACTER_KAREN)` 与 `SetTalkNameplateCharacter(19)` 生成完全相同的字节。没有自身固定成员、由其他有序表提供符号的类型（例如 `MaryScriptId`）仍使用 `typedef int`。
+The enum type is only a compile-time label for an argument's numeric domain. Members and raw integers are both erased to the same VM integer before bytecode emission, so `SetTalkNameplateCharacter(CHARACTER_KAREN)` and `SetTalkNameplateCharacter(19)` produce identical bytes. Types whose symbols come from another ordered table and have no fixed members of their own, such as `MaryScriptId`, remain `typedef int`.
 
-`mary_constants.mary.h` 中的食品、物品、工具、地图、人物、对话头像、产品、资料页、音频序列、钓鱼记录、联动里程碑及屏幕渐变选择器，均覆盖已经确认的完整物理编号域，不以原版脚本是否使用为筛选条件。其他编号域也必须以原生表的完整范围为完成标准；只收录脚本曾用值不算完成。`MaryVarId` 明确保留 FoMT 的 0–589 和 MFoMT 的 0–727 每一个物理槽：已经确认的槽位使用语义名；尚未证实者使用 `VAR_UNKNOWN_SLOT_nnn` 显式占位，直到原生读取者、写入者、生命周期和值域得到独立确认。未知占位表示“身份仍待证实”，不表示该槽未被使用。
+In `fomt_constants.mary.h` and `mfomt_constants.mary.h`, food, articles, tools, maps, characters, talk portraits, products, reference pages, audio sequences, fishing records, link milestones, and screen-fade selectors cover their verified complete physical domains; vanilla script usage is not a filter. Every other ID domain must likewise cover its complete native range before it is considered finished—listing only values seen in scripts is insufficient. `MaryVarId` preserves every physical slot from 0 through 589 in FoMT and 0 through 727 in MFoMT. Established slots use semantic names; an unproven slot remains explicitly visible as `VAR_UNKNOWN_SLOT_nnn` until its native readers, writers, lifecycle, and value domain are independently established. The placeholder is evidence of an unresolved identity, not a claim that the slot is unused.
 
-并非每个整数参数都是固定 ID 域。数量、时间和计数由当前运行状态决定，不存在一张跨脚本稳定的全局成员表，因此有意保留为 `int`。开放坐标域也不是有限枚举，但使用 `MaryMapSpaceX`、`MaryMapSpaceY` 及恒等包装 `X(...)`、`Y(...)` 区分轴向；包装不改变数值或生成指令。类别内部的家畜索引不同：其物理范围已经得到证明，因此牛羊舍槽位和鸡舍槽位使用两个独立类型，并根据动物类别参数选择。只有原生有序表、位域或有限分派器能够证明完整成员集合时，才建立对应的 `Mary*Id`、`Mary*Kind` 或状态枚举；不能仅根据原版脚本碰巧出现过的几个数值制造不完整枚举。
+Not every integer parameter is a fixed ID domain. Quantities, times, and counters are selected by runtime context and have no stable cross-script global member table, so they deliberately remain `int`. The open coordinate domain is not a finite enum either, but `MaryMapSpaceX`, `MaryMapSpaceY`, and the identity wrappers `X(...)` and `Y(...)` distinguish its axes without changing values or emitting instructions. Family-local livestock indices are a different case: their physical ranges are proven, so barn and chicken slots use separate types selected from the animal-kind argument. A `Mary*Id`, `Mary*Kind`, or state enum is introduced only when a native ordered table, bit domain, or finite dispatcher proves the complete member set; the few values that happen to occur in vanilla scripts are not enough to justify an incomplete enum.
 
-部分 VM 整数只有在另一个值确定后才能缩小到具体语义域。常量头通过编译器元数据记录这种关系：`mary_callable_return_type_when(...)` 根据某个参数选择返回值域，`mary_callable_return_type_when_callable(...)` 关联两个已经保存的 callable 返回值，`mary_callable_parameter_type_when(...)` 根据一个参数选择另一个参数的类型，`mary_type_subset(Sub, Super)` 则声明两个已证实枚举域的包含关系，使同时用于宽、窄域的局部值保留更窄的语义符号。这些声明不生成字节码。Mary 加载 callable 表时会校验其中的函数名、参数位置和类型名称，在局部变量及控制流中传播选定类型，并在没有已声明包含关系的路径发生类型冲突时保留原始数字。符号替换也会保留物理编码。普通负数字面量及具名负常量（例如 `-1` 和 `TOOL_NOT_PRESENT`）默认直接压入负值；如果输入字节码采用“先压入正数，再执行 Neg”的另一种物理编码，反编译会输出 `mary_negated_int(TOOL_NOT_PRESENT)`。这一显式 Mary-C 写法既保留语义常量名，也明确要求通过 Neg 指令产生相同的负值。
+Some VM integers acquire a narrower domain only after another value is known. The constants header records these facts with compiler metadata: `mary_callable_return_type_when(...)` selects a return domain from one argument, `mary_callable_return_type_when_callable(...)` relates two captured callable results, `mary_callable_parameter_type_when(...)` selects one parameter's domain from another parameter, and `mary_type_subset(Sub, Super)` records a proven containment relation so a local used through both domains keeps the narrower semantic symbols. These declarations emit no bytecode. Mary validates their callable names, parameter indices, and type names when loading the callable table, propagates the selected type through locals and control flow, and keeps a raw number whenever paths conflict without a declared containment relation. Symbol replacement also preserves physical encoding. Ordinary negative literals and named negative constants, such as `-1` and `ITEM_TOOL_NOT_PRESENT`, directly push the negative value by default. If input bytecode instead pushes the positive magnitude and then executes `Neg`, decompilation emits `mary_negated_int(ITEM_TOOL_NOT_PRESENT)`; this explicit Mary-C form keeps the semantic name while requesting the distinct negate-instruction encoding.
 
-`mary_type_subset` 的关系必须是严格、无环的；重复声明、自包含以及直接或间接循环都会在加载常量头时被拒绝，避免“更窄类型”的选择依赖表达式顺序。
+`mary_type_subset` relations must be strict and acyclic. Duplicate declarations, self-containment, and direct or transitive cycles are rejected while loading the constants header, preventing narrower-type selection from depending on expression order.
 
-## script ID
-
-脚本 ID 由 `mary_scripts.mary.h` 的有序表决定：
+Script IDs likewise come from an ordered table:
 
 ```c
 mary_script_table
 {
-    NULL,
-    EventScript_OpeningEvent,
-    EventScript_MayorExplainsFarm,
-#if defined(MARY_MFOMT)
-    EventScript_GirlVersionEvent,
-#endif
+    /* 0x0000 */ NULL,
+    /* 0x0001 */ EventScript_OpeningEvent,
+    /* 0x0002 */ EventScript_MayorExplainsFarm,
 };
 ```
 
-脚本定义本身不再写 `mary_script(id)`：
+Definitions carry no numeric annotation:
 
 ```c
 void EventScript_MayorExplainsFarm(void)
@@ -118,86 +105,96 @@ void EventScript_MayorExplainsFarm(void)
 }
 ```
 
-脚本符号可作为整数常量使用，因此对已验证为“脚本 ID 参数”的真实 callable，可以写符号或数字；两者生成相同整数。编译器不会把任意整数参数猜成脚本调用，也不会制造隐藏语义。
+Script symbols are integer constants, so a verified native parameter that really accepts a script ID can use either a symbol or a number. Mary does not infer script-call semantics from arbitrary integer arguments.
 
-## text ID
+## Script-local text IDs
 
-文本 ID 是当前脚本内部 STR 表的顺序：
+Text IDs are the order of the current script's STR table:
 
 ```c
 mary_text_table
 {
     const char gText_MayorGreeting[] =
-        "第一行\r\n"
-        "第二行{Press}";
+        "First line\r\n"
+        "Second line{Press}";
 
     const char gText_GrandfatherWill[] =
-        "下一页\p"
-        "继续。{Press}";
+        "Next page\p"
+        "Continue.{Press}";
 };
 ```
 
-表内声明顺序直接决定 text ID，不需要在表头重复列出名称。同一符号被多次使用仍只有一个 text ID。内容相同但需要两个物理 ID 时，应保留两个不同名称的声明；编译器不会擅自合并。旧的“表中名称列表、表外字符串声明”格式仅保留读取兼容，新反编译固定输出表内声明。
+Declaration order inside the table directly determines text IDs, so names are not repeated in a separate slot list. Reusing one symbol reuses one ID. Equal bytes in two physical slots remain two declarations with different names; the compiler never merges them automatically. The former name-list-plus-external-declaration form remains readable for compatibility, but new decompilation always emits declarations inside the table. Without symbol metadata, names are generated in memory as `gText_<script>_<text-id>` and appear only in `.mary.c`.
 
-文本参数必须引用当前脚本中已经声明的 `gText_*` 符号；不存在的名称会在编译期报错。原版四个 ROM 的运行时 `GetString` 都有 `id <= string_count` 的越界判断错误，但 Mary-C 不开放这个不安全的额外索引：合法 ID 始终是 `0` 至 `string_count - 1`。
+Text arguments must reference a `gText_*` symbol declared by the current script; an absent name is a compile-time error. The original `GetString` implementation in all four ROMs has an `id <= string_count` bounds bug, but Mary-C does not expose that unsafe extra index: valid IDs are always `0` through `string_count - 1`.
 
-未提供符号时，反编译器在内存中生成 `gText_脚本名_文本ID`。这些默认名只写入 `.mary.c`，不会反写进 `.mary.h`。
+## Decompiler symbol database
 
-## 反编译符号库
-
-`mary_scripts_text.mary.sym` 是有序的反编译符号表。目标预处理后的外层位置自动成为 script ID，脚本内部名称的位置自动成为 text ID：
+`fomt_scripts_text.mary.sym` is an ordered decompiler symbol table. After target preprocessing, outer positions become script IDs and inner positions become text IDs:
 
 ```c
 mary_script_symbols
 {
     NULL,
-
     EventScript_MayorExplainsFarm
     {
         mary_local_type(var_0, MaryBool),
         gText_MayorGreeting,
         gText_GrandfatherWill,
-#if defined(MARY_JP)
+#if defined(REGION_JP)
         gText_JapaneseOnlyExplanation,
-#elif defined(MARY_US)
-        gText_EnglishOnlyExplanation,
 #endif
     },
-
-#if defined(MARY_MFOMT)
-    EventScript_GirlVersionOnlyEvent
+    EventScript_RegionSensitiveEvent
     {
-        gText_GirlVersionOnlyEvent_000,
-#if defined(MARY_JP)
-        gText_GirlVersionJapaneseOnly_001,
+#if defined(REGION_US)
+        gText_EnglishOnlyMessage,
+#elif defined(REGION_JP)
+        gText_JapaneseOnlyMessage,
 #endif
     },
-    EventScript_GirlVersionNextEvent
-    {
-        gText_GirlVersionNextEvent_000,
-    },
-#endif
 };
 ```
 
-文件中不记录数字 ID。插入或删除脚本/文本后，后续 ID 随顺序自动调整；`NULL` 保留空脚本槽。连续且适用版本相同的独占脚本共用一个外层条件块；脚本内部仍可嵌套更窄的条件来控制文本槽。公共项只写一次，版本差异只包住实际不同的范围。重复脚本名、同一脚本中的重复文本名、无效标识符和错误的表结构都会报错。
+The file contains no numeric IDs. Inserting or removing an ordered script/text automatically shifts later IDs. `NULL` preserves an empty script slot. Consecutive target-exclusive scripts share one outer conditional range, while narrower text differences may be nested inside an individual script. Common entries occur once, and conditions wrap only actual differences. Duplicate symbols and malformed tables are errors.
 
-`mary_local_type(var_N, Type)` 是只供反编译使用的局部类型标注，不占用文本槽，也不写入生成的 `.mary.c`。它用于脚本把裸整数先存入局部变量、之后只在条件或 `switch` 中使用，因而无法从 callable 参数或返回值自动恢复语义域的情况。例如上面的 `var_0` 若只取 `0/1`，反编译会输出 `FALSE/TRUE`。类型名必须来自所选目标的常量头，`var_N` 必须确实存在于该脚本；未知类型、拼错的局部名和同一局部的重复标注都会报错。只有整个脚本生命周期中始终保持同一含义的局部量才应使用此标注；被不同功能复用的局部量继续保留原数字。
+`mary_local_type(var_N, Type)` is decompiler-only local-type metadata. It consumes no text slot and is never emitted into generated `.mary.c`. It covers scripts that first store bare integers in a local and later use that local only in conditions or switches, leaving no callable parameter or return type from which to recover the semantic domain. For example, the `MaryBool` annotation above makes a local whose values are `0/1` decompile as `FALSE/TRUE`. The type must exist in the selected target's constants header and the generated `var_N` must exist in that script; unknown types, misspelled locals, and duplicate annotations are errors. Use this only when the local retains one meaning for its entire lifetime. A local reused for unrelated purposes must remain numeric.
 
-## 支持的 C 子集
+### Mary metadata in headers and symbol databases
 
-Mary-C 只接受能够确定映射到 Mary 虚拟栈的语法。当前支持：
+The following forms are not ISO C declarations. Mary-C reads them while loading tables and recovering semantic types; none emits VM instructions or RIFF bytes:
 
-| 类别 | 支持内容 |
+```c
+mary_var_type(VAR_SEASON, MarySeason);
+mary_typed_identity(MaryMapSpaceX, X);
+mary_type_subset(MaryCharacterId, MaryEntityId);
+mary_callable_return_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_COW, MaryAnimalCowGrowthStage);
+mary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_FOOD, MaryItemFoodId);
+mary_callable_parameter_type_when(OpenNameEntry, 0, NAME_ENTRY_COW, 1, MaryAnimalSlotIndex);
+```
+
+- `mary_var_type` binds a global game variable to a declared enum domain so reads, writes, comparisons, and `switch` cases can print semantic constants.
+- `mary_typed_identity` declares a typed value-preserving wrapper such as `X(120)`; it emits neither a call nor an extra instruction.
+- `mary_type_subset` records a proven strict containment relation and preserves the narrowest still-correct enum domain when control-flow paths merge.
+- `mary_callable_return_type_when` selects a call's return type from one of that call's parameter values.
+- `mary_callable_return_type_when_callable` selects a return type from another captured callable result.
+- `mary_callable_parameter_type_when` selects one parameter's type from another parameter value.
+- `mary_local_type` occurs only in `.mary.sym` and supplies one stable whole-script type when callable data flow cannot recover a local's domain.
+
+Metadata must reference declared variables, callables, parameter positions, constants, and types. Duplicates, unknown references, invalid parameter indices, cyclic subset relations, and annotations inconsistent with a local's lifetime are diagnosed instead of guessed or silently printed with an incorrect symbol.
+
+## Supported language
+
+Mary-C accepts only syntax with a defined mapping to the Mary stack VM:
+
+| Category | Supported forms |
 | --- | --- |
-| 类型 | 局部 `int`、`const int`、文本 `const char []`、callable 参数中的 `const char *`，以及头文件中用于 callable/常量传播的命名 ID 类型 |
-| 字面量 | 十进制/十六进制整数（可编码范围 `-2147483648` 至 `0xFFFFFFFF`）、由 charmap 编码的字符串、用于保留原字节的 `\xNN` |
-| 表达式 | `+ - * / %`、一元 `-`/`!`、`== != < <= > >=`、非短路 `&& ||`、括号和嵌套 callable 调用 |
-| 修改 | `= += -= *= /= %=`，以及前置/后置 `++`、`--` |
-| 语句 | 局部声明、调用、赋值、`if/else if/else`、`for`、`do/while`、`switch`、`return;` |
-| switch | 多个 `case` 共用正文、显式贯穿、`default`、标准 `break;`，并允许嵌套控制流 |
-
-典型结构如下：
+| Types | local `int`, `const int`, text `const char []`, callable `const char *` parameters, and named ID types used by headers for callable/constant propagation |
+| Literals | decimal/hexadecimal integers (encodable range `-2147483648` through `0xFFFFFFFF`), charmap-encoded strings, and `\xNN` for retained bytes |
+| Expressions | `+ - * / %`, unary `-`/`!`, comparisons, eager `&& ||`, parentheses, and nested callable calls |
+| Mutation | `= += -= *= /= %=`, plus prefix/postfix `++` and `--` |
+| Statements | declarations, calls, assignments, `if`/`else`, `for`, `do`/`while`, `switch`, and `return;` |
+| Switches | shared case bodies, explicit fallthrough, `default`, switch `break;`, and nested control flow |
 
 ```c
 if (condition) { ... } else { ... }
@@ -207,52 +204,33 @@ switch (value) { case 1: ... break; default: ... break; }
 return;
 ```
 
-`return;` 对应 VM 的脚本退出，而不是从普通 C 函数返回。case 末尾没有 `break;` 时保留 C 的贯穿语义。当前前端只接受直接所属于 `switch` 的标准 `break;`；普通循环 break 尚未建模，因此会明确报错，但这不是 VM 跳转能力的限制。
+`return;` exits the current VM script; it is not a return from an ordinary C function. Omitting `break;` preserves C fallthrough. Standard `break;` is currently accepted only when it directly belongs to a switch.
 
-局部 `int` 遵循块作用域：内层允许声明同名变量并遮蔽外层变量，离开该块后恢复
-外层绑定。编译器会为仍同时存活的祖先／子块变量分配不同 VM 槽；只有生命周期
-不重叠的兄弟块临时量才可能复用槽位。该规则同样适用于 `if`、`for`、`do/while`
-和 `switch` 内的嵌套块。
+Local `int` declarations have block scope. An inner block may shadow an outer
+name, and leaving that block restores the outer binding. Variables whose
+lifetimes overlap in ancestor and child blocks receive distinct VM slots; only
+temporaries in nonoverlapping sibling blocks may reuse a slot. This applies to
+nested blocks inside `if`, `for`, `do`/`while`, and `switch` constructs.
 
-命名 ID 类型是 Mary-C 读取头文件时使用的静态语义标注，例如 `MaryCharacterId`；当前脚本局部声明仍写作 `int character`，不能写成 `MaryCharacterId character`。反编译器会根据 callable 参数、返回值和数据流选择相应枚举符号，但 VM 中的物理值仍是整数。
+A named ID type such as `MaryCharacterId` is a static semantic annotation read from Mary-C headers. Script locals are still declared as `int character`, not `MaryCharacterId character`. The decompiler selects enum symbols from callable parameters, return types, and propagated data flow, while the physical VM value remains an integer.
 
-`&&` 和 `||` 目前直接对应 VM 的逻辑运算指令，左右操作数都会求值；它们不具有 ISO C 的短路副作用语义。因此只能在两边都无副作用时当作 C 式逻辑条件阅读：
+Standard `break;` currently exits a switch. Loop `break`, `while`, `continue`, `goto`, and user labels are not yet modeled by the Mary-C frontend and structured decompiler, although the VM instruction set can encode all of them with labels and conditional or unconditional jumps. Supporting them requires both compilation and lossless control-flow recovery; one-way bytecode emission alone is not considered complete support. Value-returning `return`, pointer arithmetic, structs, and arbitrary ordinary C functions remain outside the supported subset.
 
-```c
-if (hour >= 6 && hour < 18) { ... }       // 可用：两边都是纯计算
-if (IsReady() && ConsumeItem()) { ... }   // 不能假定 ConsumeItem() 会被短路
-```
+The current `&&` and `||` operators evaluate both operands and then emit VM `LogicalAnd` or `LogicalOr`. They do not provide ISO C short-circuit side-effect semantics. They are C-like only when both operands are free of side effects.
 
-### 当前前端未支持，但现有 IR 可以表达
+The unsupported surface falls into three different categories:
 
-- `while`、`continue`、循环 `break`、`goto`、用户标签和任意跳转：IR 已有 `Label`、`Jmp` 及条件分支；缺少的是 C AST、跳转目标回填和反编译结构恢复。
-- 三元运算符：可以由条件分支和共同结果栈位表达；当前只是语法和反编译器没有建模。
-- 逗号运算符：可以按顺序求值、丢弃前项并保留末项；当前前端未接受该语法。
-- 字符字面量：VM 可接受整数，但 Mary-C 尚未定义字符应映射为 charmap 编码、Unicode 码点还是单字节整数，因此暂不接受。
-- 有限的整数类型转换和 `sizeof`：对单一 VM 整数类型可做编译期处理，但当前没有 ISO C 类型系统、对象布局或相应语法。
-- 宏函数：属于预处理层缺失，不是 VM 限制；展开后的内容若属于 Mary-C 子集，IR 本身可以表达。
+- **Expressible by the existing IR but not yet modeled by the frontend/decompiler:** `while`, `continue`, loop `break`, `goto`, user labels, the conditional operator, the comma operator, and true short-circuit evaluation. Character literals, limited integer casts, and limited `sizeof` could also be compile-time features once Mary-C defines their exact meanings. Function-like macros are a missing preprocessor feature rather than a VM limitation.
+- **No general direct support in the current IR:** script parameters and return values, user-defined callable C functions, pointer dereference and general memory access, runtime arrays/structs/unions, floating point, bitwise operations and shifts, dynamic memory, the C standard library, and ordinary object-file linkage. These require verified native callables or a VM/runtime extension.
+- **Superficially C-like but semantically narrower:** addresses may be manipulated as integers but cannot be generally dereferenced; the text table is a build-time RIFF string table rather than a runtime C array; Mary-C headers accept only supported tables, enums, callable declarations, and target conditionals rather than arbitrary ISO C declarations.
 
-### 现有 IR 没有通用直接支撑
+Supported `#define`, `#if`, `#elif`, `#else`, `#endif`, and local `#include` forms select targets and read Mary-C tables/declarations; they are not a complete C preprocessor. Unsupported input is diagnosed rather than silently reinterpreted or lowered to pseudo-high-level IR.
 
-- `return value;`、带参数或非 `void` 的脚本入口、用户自定义并调用的普通 C 函数：VM 只有退出当前脚本的 `Exit` 和按 ID 调用游戏原生 callable 的 `Call`，没有通用的脚本参数、返回值和局部函数调用约定。
-- 取地址/解引用、普通数组下标、结构体/联合和成员访问：IR 只能操作局部整数栈位、文本 ID 和 callable，没有通用内存读写指令或 C 对象模型。地址数值本身可当整数计算，但无法在脚本中普遍解引用。
-- 浮点数：IR 只有整数栈和整数算术；除非游戏提供特定 callable，否则只能手动设计定点数协议，不等价于 C 浮点。
-- 位与/或/异或/取反和移位：现有 `LogicalAnd`/`LogicalOr` 是逻辑指令，不是 C 位运算；IR 没有对应的通用位指令。特定取值范围下可用算术改写，但不能宣称为任意整数的等价支持。
-- 动态内存、C 标准库、普通目标文件链接：Mary VM 不是机器码 C ABI，不能直接链接或执行普通 C 库。
-
-### 语义相似但不能当作 ISO C
-
-- `&&`/`||` 的真值计算已有 IR，但当前两边都会求值，不能依赖 ISO C 短路语义。真正短路可用条件跳转实现，但暂未建模。
-- 指针运算只能被视为整数地址计算，且计算结果仍无法通用解引用；脚本文本表是构建期 RIFF 字符串表，不是运行时 C 数组。
-- 普通头文件中的任意 ISO C 声明及完整 C 副作用顺序不是当前语言契约。Mary-C 只读取自己支持的表、枚举、callable 声明和目标条件。
-
-`#define`、`#if`、`#elif`、`#else`、`#endif` 和本地 `#include` 只用于选择目标及读取 Mary-C 的表/声明文件，不构成完整 C 预处理器。遇到不支持的语法，编译器必须报错，不能静默改变含义或退回伪高级语言。
-
-### 不支持语法的建议改写
+### Recommended rewrites for unsupported syntax
 
 #### `while`
 
-不支持：
+Unsupported:
 
 ```c
 while (HasWork())
@@ -261,7 +239,7 @@ while (HasWork())
 }
 ```
 
-可用 `for` 明确保留先判断后执行的语义：
+Preserve the pre-test behavior with `for`:
 
 ```c
 for (int keep_running = HasWork(); keep_running; keep_running = HasWork())
@@ -270,11 +248,11 @@ for (int keep_running = HasWork(); keep_running; keep_running = HasWork())
 }
 ```
 
-只有在正文必须至少执行一次时才可改用 `do/while`；两者不是普遍等价的。
+Use `do/while` only when the body must execute at least once; it is not generally equivalent.
 
 #### `continue`
 
-不支持：
+Unsupported:
 
 ```c
 for (int i = 0; i < 10; i++)
@@ -287,7 +265,7 @@ for (int i = 0; i < 10; i++)
 }
 ```
 
-把剩余正文放进反向条件：
+Guard the remaining body instead:
 
 ```c
 for (int i = 0; i < 10; i++)
@@ -299,9 +277,9 @@ for (int i = 0; i < 10; i++)
 }
 ```
 
-#### 循环 `break`
+#### Loop `break`
 
-不支持：
+Unsupported:
 
 ```c
 for (int i = 0; i < 10; i++)
@@ -314,7 +292,7 @@ for (int i = 0; i < 10; i++)
 }
 ```
 
-把退出状态写入循环条件：
+Carry the exit state in the loop condition:
 
 ```c
 int keep_running = 1;
@@ -331,28 +309,26 @@ for (int i = 0; i < 10 && keep_running; i++)
 }
 ```
 
-`mary_break_switch;` 不是普通循环 break 的替代品；它只表达原 ROM 中“位于内层循环内、但目标是外层 switch 末尾”的特殊跳转。
+`mary_break_switch;` is not a substitute for loop `break`; it represents a specific original-ROM jump from inside a loop to the end of an enclosing switch.
 
-上述限制属于当前 Mary-C 前端和反编译结构化器，不是 Mary VM 指令集的能力上限。VM 已有标签、无条件跳转和条件跳转，因此 `while`、`continue`、循环 `break`、`goto` 和用户标签在指令层都可以实现。要将它们纳入受支持语法，还必须同时完成编译跳转、反编译目标识别、嵌套循环归属和逐字节往返验证；不能只让新源码单向编译成功。
+#### Lexically unreachable statements after control transfer
 
-#### 控制转移后的词法不可达语句
-
-同一语句块中，直接 `return;`、`break;`，或两侧都终止的 `if/else` 后面不能继续写语句：
+A statement cannot follow a direct `return;`, `break;`, or an `if/else` whose two branches both terminate within the same block:
 
 ```c
 switch (state)
 {
     case STATE_DONE:
         break;
-        Cleanup(); /* 错误：永远无法执行。 */
+        Cleanup(); /* Error: this can never execute. */
 }
 ```
 
-Mary-C 会明确报告 `unreachable statement after return or break`。允许这种输入会生成结构化反编译器无法重新表示的尾部控制流，破坏源码往返。源码格式化器也会拒绝把含有这种尾部语句的旧式 AST 输出为 Mary-C，避免生成无法重新编译的源码。这里限制的是终止语句之后物理排列的代码；由运行时条件造成的原版不可达分支仍会按原结构保留，不会被编译器删除或改写。
+Mary-C reports `unreachable statement after return or break`. Accepting this input would produce trailing control flow that the structured decompiler cannot represent again, breaking source round trips. The source formatter also rejects legacy ASTs with such trailing statements instead of emitting Mary-C that cannot be compiled again. This restriction concerns code physically placed after a terminating statement; original-ROM branches that are unreachable only because of runtime conditions are still preserved exactly and are not optimized or rewritten.
 
-#### `goto`、用户标签和任意跳转
+#### `goto`, user labels, and arbitrary jumps
 
-当前不接受：
+Currently unsupported:
 
 ```c
 goto retry;
@@ -360,11 +336,11 @@ retry:
     RetryOperation();
 ```
 
-若跳转表达的是普通条件或循环，应重写成受支持的 `if`、`for`、`do/while` 或 `switch`。若原始控制流不能被这些结构无损表示，则当前没有安全的 Mary-C 高级写法；不能用 `mary_dead_jump:` 代替，因为它只保留 switch 内不可达的物理尾跳转，并不是用户标签。
+Rewrite ordinary conditions and loops with supported `if`, `for`, `do/while`, or `switch` forms. If those structures cannot represent the original control flow losslessly, there is no safe high-level Mary-C spelling yet. `mary_dead_jump:` is not a substitute: it only preserves an unreachable physical tail jump inside a switch and is not a user label.
 
-#### 需要短路副作用的 `&&` 和 `||`
+#### `&&` and `||` with short-circuit side effects
 
-不能依赖这种 ISO C 行为：
+Do not rely on this ISO C behavior:
 
 ```c
 if (IsReady() && ConsumeItem())
@@ -373,7 +349,7 @@ if (IsReady() && ConsumeItem())
 }
 ```
 
-应显式嵌套条件，保证第二个调用只在第一个条件成立后执行：
+Nest the conditions so the second call executes only after the first succeeds:
 
 ```c
 if (IsReady())
@@ -385,17 +361,17 @@ if (IsReady())
 }
 ```
 
-当前 `&&`/`||` 只适合两边都是无副作用的数值或查询表达式。
+The current `&&` and `||` forms are safe only when both operands are side-effect-free values or queries.
 
-#### 三元运算符
+#### Conditional operator
 
-不支持：
+Unsupported:
 
 ```c
 int result = condition ? when_true : when_false;
 ```
 
-改为显式分支：
+Use an explicit branch:
 
 ```c
 int result;
@@ -409,9 +385,9 @@ else
 }
 ```
 
-#### 逗号运算符、字符字面量和有限编译期运算
+#### Comma operator, character literals, and limited compile-time operations
 
-当前不接受：
+Currently unsupported:
 
 ```c
 int result = (First(), Second());
@@ -419,7 +395,7 @@ int letter = 'A';
 int width = sizeof(int);
 ```
 
-顺序副作用应拆成独立语句；单字节或 charmap 字符值应使用经过确认的整数或命名枚举；固定大小应写成经过验证的常量：
+Split sequential side effects into statements. Represent a verified byte or charmap character with an integer or named enum, and represent a fixed size with a verified constant:
 
 ```c
 First();
@@ -428,11 +404,11 @@ int letter = LETTER_A;
 int width = MARY_VM_INTEGER_WIDTH;
 ```
 
-示例名称只有在相应枚举确实已由项目头文件定义时才能使用。Mary-C 不会自行把 Unicode 字符或宿主 C 的 `sizeof(int)` 猜成 ROM 数值。
+Those example symbols may be used only when the project header actually defines them. Mary-C does not guess that a Unicode character or the host C compiler's `sizeof(int)` equals a ROM value.
 
-#### 带返回值的脚本函数和普通辅助函数
+#### Value-returning scripts and helper functions
 
-不支持：
+Unsupported:
 
 ```c
 int AddOne(int value)
@@ -441,35 +417,35 @@ int AddOne(int value)
 }
 ```
 
-Mary VM 的脚本入口只有 `void ScriptName(void)`。简单计算应直接写成表达式；游戏原生功能必须在有序 callable 表中声明后调用：
+Mary VM script entries are `void ScriptName(void)`. Inline simple calculations and call verified native callables for engine services:
 
 ```c
 int result = value + 1;
 int affection = GetCharacterLove(CHARACTER_KAREN);
 ```
 
-需要启动另一个事件脚本时使用 `CallScript(EventScript_Name);`，但被调用脚本不能像 C 函数一样返回一个值。
+Use `CallScript(EventScript_Name);` to start another event script, but a called script cannot return a C value.
 
-#### 指针、结构体、普通数组与动态内存
+#### Pointers, structs, runtime arrays, and allocation
 
-这类写法没有通用无损替代：
+There is no general lossless rewrite for:
 
 ```c
 Actor *actor = &actors[index];
 actor->position.x = 10;
 ```
 
-必须使用已经由 ROM callable 提供并确认语义的接口，例如：
+Use an independently verified ROM callable when one exists:
 
 ```c
 SetEntityPosition(entity_id, 10, 20, FACING_DOWN);
 ```
 
-若 VM 没有对应 callable，就不能只靠 Mary-C 源码增加这种能力。脚本文本是唯一受支持的专用数组形式，应放在 `mary_text_table` 中。
+Without a corresponding callable, Mary-C source alone cannot add the operation. Script text is the only supported array-shaped special form and belongs in `mary_text_table`.
 
-#### 位运算、移位和类型转换
+#### Bit operations, shifts, and casts
 
-下列内容当前没有通用语法：
+These have no general syntax at present:
 
 ```c
 int masked = value & 0x0F;
@@ -477,19 +453,19 @@ int shifted = value << 2;
 int narrowed = (unsigned char)value;
 ```
 
-只有在能证明取值范围和算术重写完全等价时，才可使用 `+ - * / %` 重写；否则必须调用已确认的原生 callable，或保留需求等待 VM/编译器增加明确指令支持。不能为了通过编译擅自换成近似计算。
+Rewrite with `+ - * / %` only when the input range proves exact equivalence. Otherwise use a verified native callable or wait for an explicit VM/compiler feature; an approximation is not a valid compilation.
 
-浮点数同样没有通用替代。若游戏逻辑已有明确的定点比例，可以把比例和取值范围写进命名常量并使用整数运算；否则应使用已确认的原生 callable，不能把浮点字面量静默截断成整数。
+Floating point likewise has no general replacement. A verified fixed-point protocol may use named scale constants and integer arithmetic; otherwise use a verified native callable. Mary-C never silently truncates a floating-point literal to an integer.
 
-#### 宏函数和复杂预处理
+#### Function-like macros and complex preprocessing
 
-不支持把 C 宏当成可展开函数：
+Function-like C macros are unsupported:
 
 ```c
 #define IS_WEEKEND(day) ((day) == 0 || (day) == 6)
 ```
 
-直接写表达式，固定编号则放入带类型的枚举：
+Write the expression directly, and put fixed numeric domains in typed enums:
 
 ```c
 if (day == DAY_OF_WEEK_SUNDAY || day == DAY_OF_WEEK_SATURDAY)
@@ -498,86 +474,73 @@ if (day == DAY_OF_WEEK_SUNDAY || day == DAY_OF_WEEK_SATURDAY)
 }
 ```
 
-目标差异仍可用受支持的条件块：
+Target differences may still use supported conditionals:
 
 ```c
-#if defined(MARY_JP)
+#if defined(REGION_JP)
     TalkMessage(gText_JapaneseMessage);
-#elif defined(MARY_US)
+#elif defined(REGION_US)
     TalkMessage(gText_EnglishMessage);
 #endif
 ```
 
-## Mary 专用语法
+## Mary-specific syntax
 
-这些扩展只在标准 C 无法区分原 VM 字节布局时使用。它们不是额外的游戏功能，而是为了让看起来相同的高级语义仍能重建不同的原始字节。
+These extensions are used only where standard C cannot distinguish the original VM byte layout. They do not add new gameplay features; they preserve byte-exact reconstruction of otherwise identical high-level semantics.
 
 ### `mary_negated_int`
 
-普通负数和具名负常量默认直接压入其负值：
+A normal negative literal or named constant directly pushes its negative value:
 
 ```c
-SetHeldTool(TOOL_NOT_PRESENT);
+SetHeldTool(ITEM_TOOL_NOT_PRESENT);
 ```
 
-若原字节码先压入正数再执行 `Neg`，反编译器则明确输出：
+If the original bytecode first pushes the positive magnitude and then executes
+`Neg`, the decompiler makes that physical distinction explicit:
 
 ```c
-SetHeldTool(mary_negated_int(TOOL_NOT_PRESENT));
+SetHeldTool(mary_negated_int(ITEM_TOOL_NOT_PRESENT));
 ```
 
-`mary_negated_int` 只接受一个可在编译期求值的整数常量。两种写法的高级数值都为 `-1`，但普通形式直接压入 `-1`，专用形式压入 `1` 后执行 `Neg`。该语法仅用于逐字节还原，不应作为普通算术或类型转换使用。
+`mary_negated_int` accepts exactly one compile-time integer constant. Both forms
+have the high-level value `-1`; the ordinary form directly pushes `-1`, while
+the explicit form pushes `1` and executes `Neg`. It exists only for byte-exact
+reconstruction and is not general arithmetic or a cast.
 
-VM 的立即数和 `case` 值是 32 位物理字段。Mary-C 接受完整的有符号／无符号位模式
-表示范围，即 `-2147483648` 至 `4294967295`（`0xFFFFFFFF`）；超出范围的值会报错，
-不会静默截取低 32 位。整数文本本身超过 `i64`、常量运算溢出、除以零或取模零同样会
-返回编译诊断，不会导致编译器崩溃。
+VM immediates and `case` values occupy physical 32-bit fields. Mary-C accepts
+the complete signed/unsigned bit-pattern range, from `-2147483648` through
+`4294967295` (`0xFFFFFFFF`). Values outside that range are diagnosed instead
+of being silently truncated to their low 32 bits. Integer text beyond `i64`,
+constant-expression overflow, division by zero, and remainder by zero likewise
+produce compilation diagnostics rather than crashing the compiler.
 
-### `X(...)` 与 `Y(...)`
+### `X(...)` and `Y(...)`
 
-`MaryMapId` 选择具体地图；`X(...)`、`Y(...)` 标记该地图自身局部像素空间中的坐标轴，不表示把所有地图拼接起来的世界坐标：
+`MaryMapId` selects a map. `X(...)` and `Y(...)` mark axes in that map's local
+pixel space, not a world coordinate formed by joining every map:
 
 ```c
 ChangeMap(MAP_ZACK_HOUSE, X(120), Y(141));
 SetEntityPosition(ENTITY_ZACK, X(130), Y(116), FACING_DOWN);
-PanCameraTo(X(120), Y(208), CAMERA_MOVE_SPEED_2);
+PanCameraTo(X(120), Y(208), CAMERA_MOVE_SPEED_NOMINAL_2_PIXELS_PER_UPDATE);
 ```
 
-二者是带类型的恒等包装，不生成 callable 或额外 VM 指令。普通负坐标写作 `Y(-48)`；只有原字节码使用正值后取负结构时，才输出 `Y(mary_negated_int(-48))`。
+They are typed identity wrappers and emit neither a callable nor extra VM
+instructions. Write an ordinary negative coordinate as `Y(-48)`. Only an
+original positive-push-plus-`Neg` encoding is printed as
+`Y(mary_negated_int(-48))`.
 
 ### `mary_nodisc`
 
-普通赋值会丢弃 VM 栈上的赋值结果：
-
 ```c
 value = VarGet(VAR_HOUR);
-```
-
-如果原字节码在赋值后故意没有执行 `Discard`，反编译器会输出：
-
-```c
 mary_nodisc(value = VarGet(VAR_HOUR));
 ```
 
-两者对变量 `value` 的表面效果相同，但后者还在虚拟栈上保留一份结果，因而字节不同。普通手写脚本不应为了省略指令而主动使用它。
+The first assignment discards its VM-stack result. The second preserves that result because the original bytecode omitted `Discard`. Their visible assignment semantics match, but their bytes and later stack state do not.
 
 ### `mary_switch_compact`
-
-普通 `switch` 按标准 Mary VM 布局生成尾部死跳转：
-
-```c
-switch (choice)
-{
-case 0:
-    Accept();
-    break;
-default:
-    Decline();
-    break;
-}
-```
-
-某些原 ROM 脚本省略了该死跳转，同样的高级语义要写成：
 
 ```c
 mary_switch_compact (choice)
@@ -591,25 +554,9 @@ default:
 }
 ```
 
-两段逻辑等价，区别只在 switch 调度区附近的物理指令布局。
+It has the same high-level behavior as `switch`, but omits the standard layout's dead tail jump before the VM switch dispatcher.
 
 ### `mary_implicit_default`
-
-标准 `default:` 会在 JUMP 块中生成明确的默认 case 表项：
-
-```c
-switch (choice)
-{
-default:
-    Decline();
-    break;
-case 1:
-    Accept();
-    break;
-}
-```
-
-原脚本有默认执行路径、但 JUMP 块没有默认表项时，使用：
 
 ```c
 switch (choice)
@@ -623,11 +570,9 @@ case 1:
 }
 ```
 
-它保留“代码顺序中存在默认代码，但 case 表不引用它”的原始结构。
+Unlike `default:`, it emits executable default-path code without adding a default entry to the JUMP case table.
 
 ### `mary_dead_jump`
-
-有些 switch 在物理代码中留有没有任何 case 会到达的跳转。标准 C 没有对应语义，Mary-C 用专用标记保留：
 
 ```c
 switch (choice)
@@ -639,11 +584,9 @@ mary_dead_jump:
 }
 ```
 
-`mary_dead_jump:` 不是可供 `goto` 调用的用户标签；它不在 case 表中建立入口，只按原样生成影响布局的不可达跳转。
+This preserves an unreachable jump present in the physical switch body. It is not a user label and cannot be targeted by `goto`.
 
 ### `mary_break_switch`
-
-在内层循环中的标准 `break;` 只应退出该循环。如果原 VM 跳转直接指向外层 switch 末尾，则明确写成：
 
 ```c
 switch (choice)
@@ -664,17 +607,17 @@ default:
 }
 ```
 
-`mary_break_switch;` 会同时穿过内层循环并到达外层 switch 的结束位置；它与未来支持的普通循环 `break;` 不是同一种跳转。
+This jump crosses the inner loop and targets the end of the enclosing switch. It is distinct from an ordinary loop `break;`.
 
-### 完整对照示例
+### Complete representative source
 
-下面的文件同时展示目标选择、本地头文件、脚本内文本、固定 ID、嵌套调用、条件、循环、switch、其他脚本调用和脚本退出：
+The following example combines target selection, local headers, script-local text, typed constants, nested calls, conditions, a loop, a switch, a symbolic cross-script call, a numeric cross-script call, and script exit. It assumes the ordered script table contains both named script symbols shown below:
 
 ```c
 #define MARY_FOMT_JP
-#include "mary_constants.mary.h"
-#include "mary_callables.mary.h"
-#include "mary_scripts.mary.h"
+#include "fomt_constants.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
 
 mary_text_table
 {
@@ -722,84 +665,69 @@ void EventScript_FarmMorningCheck(void)
 }
 ```
 
-若把上例循环体改成 `break;`，编译器会报告“循环 break 不受支持”。若只是跳过剩余循环体，应重新组织条件；若原 ROM 是“穿过内层循环退出外层 switch”的特殊布局，才使用 `mary_break_switch;`。Mary-C 不会为了看起来像 C 而伪造无法编码的控制流。
-
-脚本调用的数字和符号形式完全等价：
+The numeric and symbolic cross-script forms are byte-equivalent:
 
 ```c
 CallScript(638);
 CallScript(EventScript_WeekendEvent);
 ```
 
-前者固定调用物理 ID 638；后者使用当前目标的 `mary_script_table` 查找名称对应的 ID，适合脚本插入或版本表调整。两者最终都只向 VM 压入一个整数。
+The first fixes physical script ID 638. The second resolves the name through the selected target's ordered `mary_script_table`, so it follows deliberate table insertions or target-specific slot changes.
 
-## 命令行
+## Commands
 
-### 批量反编译 ROM 指针表
-
-```console
-mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o OUTPUT
-```
-
-输出目录按物理槽位完整生成，空指针也有明确占位文件；同时复制常量/callable 头并生成目标脚本表。
-
-四个 `MARY_FOMT_US`／`MARY_FOMT_JP`／`MARY_MFOMT_US`／`MARY_MFOMT_JP` 宏是主目标，
-每次必须且只能选择一个。额外布局宏可以与主目标叠加，但不能替代主目标。例如，本仓库
-已审计的 FoMT-JP 改版删除了 Manna 脚本 1021 中原版未引用的第 58 个空尾文本槽；解包
-该布局时使用：
+### Decompile every pointer-table slot
 
 ```console
-mary decompile MODIFIED_ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP -D MARY_FOMT_CN --charmap MODIFIED_CHARMAP -o OUTPUT
+mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap.txt -o OUTPUT
 ```
 
-`MARY_FOMT_CN` 只选择这一项已验证的 STR 布局差异；callable、常量、脚本指针表及其他
-文本槽仍由 `MARY_FOMT_JP` 决定。不要把它用于任意改版，也不要用它绕过一般的文本数量
-错位错误。
+The output preserves physical slot order and emits an explicit placeholder file for a null pointer. It also copies the constants/callable headers and generates the target script table.
 
-### 按脚本 ID 反编译
+The four macros `MARY_FOMT_US`, `MARY_FOMT_JP`, `MARY_MFOMT_US`, and
+`MARY_MFOMT_JP` are the supported targets; exactly one must be selected.
+
+### Decompile one script ID
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --script-id 867 --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o EventScript_0867.mary.c
+mary decompile ROM goodies/fomt_callables.mary.h --script-id 867 --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap.txt -o EventScript_0867.mary.c
 ```
 
-### 从任意二进制偏移反编译
+### Decompile an arbitrary binary offset
 
 ```console
-mary decompile INPUT.bin goodies/mary_callables.mary.h --offset 0x123456 --mary-c -D MARY_FOMT_JP --charmap charmap_jp.txt -o Extracted.mary.c
+mary decompile INPUT.bin goodies/fomt_callables.mary.h --offset 0x123456 --mary-c -D MARY_FOMT_JP --charmap charmap.txt -o Extracted.mary.c
 ```
 
-`--script-id` 使用内置 ROM 版本的指针表；`--offset` 直接把给定文件偏移视作 RIFF 起点，接受十进制或带 `0x` 前缀的十六进制，两者不能同时使用。越过输入文件或指向无效 RIFF 会返回明确错误。
+This path does not require a recognized ROM or pointer table. `--offset` accepts decimal or `0x`-prefixed hexadecimal file offsets and must identify a valid RIFF script; an out-of-range or malformed location is diagnosed.
 
-### 编译为单个 RIFF
-
+### Compile one generated source to RIFF
 
 ```console
-mary compile OUTPUT/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt --binary -o EventScript_0867.riff
+mary compile OUTPUT/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
 ```
 
-`--binary` 只允许一个脚本，并输出可直接比较或嵌入 ROM 的 RIFF 二进制。
-
-### 编译为 C 字节数组
+### Compile as a C byte array
 
 ```console
-mary compile OUTPUT/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt -o EventScript_0867.c
+mary compile EventScript_0867.mary.c --mary-c --charmap charmap.txt -o EventScript_0867.inc.c
 ```
 
-不使用 `--binary` 时输出适合 C 工程引用的数据定义。这是输出容器选择，不表示 `.mary.c` 能由普通 C 编译器直接编译。
+Omit `--binary` to emit the C data definition; this chooses the output container and does not make `.mary.c` valid input to an ordinary C compiler.
 
-### 同时查看 IR
+### Print IR beside Mary-C
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --script-id 867 --mary-c --print-ir -D MARY_FOMT_JP --charmap charmap_jp.txt -o EventScript_0867.mary.c
-mary compile EventScript_0867.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o EventScript_0867.c
+mary decompile ROM goodies/fomt_callables.mary.h --script-id 867 --mary-c --print-ir -D MARY_FOMT_JP --charmap charmap.txt -o EventScript_0867.mary.c
+mary compile EventScript_0867.mary.c --mary-c --print-ir --charmap charmap.txt -o EventScript_0867.c
 ```
 
-`--print-ir` 在文本形式的反编译源码或 C 字节数组定义中把对应虚拟栈 IR 作为注释输出，用于审计高级结构和底层指令的对应关系；IR 注释不参与再次编译。`--binary` 是纯 RIFF 字节流，无法携带注释，不应与 `--print-ir` 组合。
+`--print-ir` appends stack-VM audit comments to textual decompiler output or C byte-array definitions. The comments are not recompiled. A `--binary` result is a raw RIFF byte stream and cannot carry comments, so the two options should not be combined.
 
-源文件中的 `#define` 选择目标，`#include` 相对当前 `.mary.c` 解析。也可以使用 `--library` 和 `--script-table` 显式传入表文件；`-D` 仍可用于自动化和反编译阶段。若源文件已经定义目标，不必在命令行重复 `-D`。
+The source `#define` selects the target, and both quoted includes resolve relative to the `.mary.c` file. `-D` remains available for decompilation and automation.
 
-## 验证范围
+## Verification
 
-`tests/mary_c_vanilla.rs` 使用 `charmap_jp.txt` 对四个原版 ROM 执行 ROM → Mary-C 文本 → RIFF 的逐字节严格往返。FoMT US/JP 各保留 1329 个物理槽位（其中 1328 个为非空 RIFF），MFoMT US/JP 各保留 1416 个物理槽位（其中 1415 个为非空 RIFF）；所有非空脚本都必须逐字节一致，空指针槽也必须保持原位。
+`tests/mary_c_vanilla.rs` performs a charmap-aware ROM → Mary-C text → RIFF byte-exact round trip. FoMT US/JP each preserve 1,329 physical slots (1,328 non-null RIFFs), while MFoMT US/JP each preserve 1,416 physical slots (1,415 non-null RIFFs). Every non-null script must match byte for byte, and every null slot must remain in place.
 
-`tests/mary_c_stress.rs` 另行覆盖多层 switch/if/do-while、紧凑 switch、case 贯穿、嵌套函数调用、虚拟栈保留结果与非法输入诊断。这里的 100% 只表示上述四个已验证 ROM；手写脚本仍必须属于 VM 可表达的语法范围。
+`tests/mary_c_stress.rs` covers unfamiliar nested switch/if/do-while combinations, compact and fallthrough switches, nested calls, retained stack results, and invalid-input diagnostics. The 100% claim applies to those four verified vanilla corpora, not arbitrary C programs.

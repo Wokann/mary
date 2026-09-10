@@ -1,5 +1,7 @@
 #![cfg(feature = "test_with_roms")]
 
+mod common;
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1098,7 +1100,7 @@ fn native_shipment_box_deposit_animation_only_dispatches_the_scene_action() {
 
 #[test]
 fn native_audio_null_slot_topology_matches_neutral_symbols_on_all_targets() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let constants_source = common::constants_source();
 
     for case in CASES {
         let table_offset = match case.target {
@@ -1253,7 +1255,7 @@ fn assert_statically_typed_arguments_are_symbolic(
         "MaryNpcFriendshipDelta",
         "MaryNpcFriendshipValue",
         "MaryRequestedInventoryCount",
-        "MaryRequestedToolStackCount",
+        "MaryItemToolRequestedStackCount",
         "MaryRgb5Channel",
         "MaryStaminaDelta",
         "MaryTextNumberFieldWidth",
@@ -1315,17 +1317,10 @@ fn assert_statically_typed_arguments_are_symbolic(
 fn every_target_exposes_statically_typed_callable_arguments() {
     for case in CASES {
         let options = Options::default().define(case.target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert!(
             callables
                 .scope
@@ -1347,23 +1342,14 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(entries.len(), case.slots, "{} slot count", case.name);
 
     let options = Options::default().define(case.target)?;
-    let constants = parse_constant_header(
-        &fs::read_to_string("goodies/mary_constants.mary.h")?,
-        &options,
-    )?;
-    let callables = parse_callable_table_with_scope(
-        &fs::read_to_string("goodies/mary_callables.mary.h")?,
-        &options,
-        &constants,
-    )?;
-    let symbols = parse_text_name_table(
-        &fs::read_to_string("goodies/mary_scripts_text.mary.sym")?,
-        &options,
-    )?;
+    let constants = parse_constant_header(&common::constants_source(), &options)?;
+    let callables =
+        parse_callable_table_with_scope(&common::callables_source(), &options, &constants)?;
+    let symbols = parse_text_name_table(&common::symbols_source(), &options)?;
     let script_table = symbols.script_table()?;
     let mut decompile_scope = callables.scope.clone();
     script_table.add_constants(&mut decompile_scope);
-    let charmap = Charmap::parse(&fs::read_to_string("charmap_jp.txt")?)?;
+    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt")?)?;
     assert_eq!(script_table.slots().len(), entries.len());
     for entry in &entries {
         assert_eq!(
@@ -1379,23 +1365,36 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
     let mut symbolic_script_calls = 0;
     let mut numbered_audio_sequences = HashSet::new();
     let mut numbered_audio_usage: HashMap<String, HashMap<String, usize>> = HashMap::new();
-    let preamble = format!("#define {}\n#include \"mary_constants.mary.h\"\n#include \"mary_callables.mary.h\"\n#include \"mary_scripts.mary.h\"\n\n", case.target);
+    let family = if case.target.contains("MFOMT") {
+        "mfomt"
+    } else {
+        "fomt"
+    };
+    let constants_header = format!("{family}_constants.mary.h");
+    let callables_header = format!("{family}_callables.mary.h");
+    let scripts_header = format!("{family}_scripts.mary.h");
+    let preamble = format!(
+        "#define {}\n#include \"{constants_header}\"\n#include \"{callables_header}\"\n#include \"{scripts_header}\"\n\n",
+        case.target
+    );
     let mut outputs = Vec::new();
     let mut table = String::from("mary_script_table\n{\n");
     for entry in &entries {
         match script_table.name(entry.id()) {
-            Some(name) => table.push_str(&format!("    {name},\n")),
-            None => table.push_str("    NULL,\n"),
+            Some(name) => table.push_str(&format!("    /* 0x{:04X} */ {name},\n", entry.id())),
+            None => table.push_str(&format!("    /* 0x{:04X} */ NULL,\n", entry.id())),
         }
     }
     table.push_str("};\n");
-    outputs.push((String::from("mary_scripts.mary.h"), table));
-    for header in ["mary_constants.mary.h", "mary_callables.mary.h"] {
-        outputs.push((
-            header.to_owned(),
-            fs::read_to_string(Path::new("goodies").join(header))?,
-        ));
-    }
+    outputs.push((scripts_header, table));
+    outputs.push((
+        constants_header,
+        fs::read_to_string(format!("goodies/{family}_constants.mary.h"))?,
+    ));
+    outputs.push((
+        callables_header,
+        fs::read_to_string(format!("goodies/{family}_callables.mary.h"))?,
+    ));
     for entry in entries {
         let slot_id = entry.id();
         let ScriptTableEntry::Script { id, data, backing } = entry else {
@@ -1425,6 +1424,12 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
             .names(id, decoded.strings.len())
             .iter()
             .all(Option::is_some));
+        assert_eq!(
+            symbols.text_count(id),
+            decoded.strings.len(),
+            "{} script {id} symbol count must exactly match its STR count",
+            case.name
+        );
         let text_names = symbols.names(id, decoded.strings.len());
         let local_types = symbols.local_types(id, &decompile_scope)?;
         let ast = decompile_script_with_metadata(
@@ -1558,8 +1563,8 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
             assert!(source.contains("ClearEntityEventScript(ENTITY_HARRIS)"));
         }
         if name == "EventScript_NPCEvent_Zack_GivesFishingRod" {
-            assert!(source.contains("SetPlayerHeldTool(TOOL_FISHING_ROD_IRON, 1)"));
-            assert!(source.contains("AddToolToRucksack(TOOL_FISHING_ROD_IRON, 1)"));
+            assert!(source.contains("SetPlayerHeldTool(ITEM_TOOL_FISHING_ROD_IRON, 1)"));
+            assert!(source.contains("AddToolToRucksack(ITEM_TOOL_FISHING_ROD_IRON, 1)"));
             assert!(source.contains(
                 "VarSet(VAR_ZACK_GIVES_FISHING_ROD_EVENT_STATE, EVENT_LIFECYCLE_IN_PROGRESS)"
             ));
@@ -1618,7 +1623,11 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
                 .contains("VarSet(VAR_WON_INTRODUCTION_EVENT_STATE, EVENT_LIFECYCLE_COMPLETED)"));
         }
         if name == "EventScript_NPCEvent_Won_AppleChallenge" {
-            for food in ["FOOD_SUGDW_APPLE", "FOOD_HMSGB_APPLE", "FOOD_AEPFE_APPLE"] {
+            for food in [
+                "ITEM_FOOD_SUGDW_APPLE",
+                "ITEM_FOOD_HMSGB_APPLE",
+                "ITEM_FOOD_AEPFE_APPLE",
+            ] {
                 assert!(source.contains(&format!("SetPlayerHeldFood({food})")));
             }
             assert!(source.contains("SubtractMoney(500)"));
@@ -1644,7 +1653,7 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
         if name == "EventScript_FestivalEvent_HarvestSpriteTeaParty" {
-            assert!(source.contains("SetPlayerHeldFood(FOOD_RELAX_TEA_LEAVES)"));
+            assert!(source.contains("SetPlayerHeldFood(ITEM_FOOD_RELAX_TEA_LEAVES)"));
             for sprite in ["STAID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY", "TIMID"] {
                 assert!(source.contains(&format!("AddNpcFriendship(CHARACTER_{sprite}, 10)")));
             }
@@ -1654,15 +1663,15 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
         if name == "EventScript_AchievementEvent_Collection_HarvestGoddessJewelsExchange" {
-            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_HARVEST_GODDESS_JEWEL)"));
-            assert!(source.contains("TOOL_GEM_GODDESS"));
+            assert!(source.contains("RemoveAllOwnedArticles(ITEM_ARTICLE_HARVEST_GODDESS_JEWEL)"));
+            assert!(source.contains("ITEM_TOOL_GEM_GODDESS"));
             assert!(source.contains(
                 "VarSet(VAR_HARVEST_GODDESS_JEWEL_EXCHANGE_STATE, EVENT_LIFECYCLE_COMPLETED)"
             ));
         }
         if name == "EventScript_AchievementEvent_Collection_KappaJewelsExchange" {
-            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_KAPPA_JEWEL)"));
-            assert!(source.contains("TOOL_GEM_KAPPA"));
+            assert!(source.contains("RemoveAllOwnedArticles(ITEM_ARTICLE_KAPPA_JEWEL)"));
+            assert!(source.contains("ITEM_TOOL_GEM_KAPPA"));
             assert!(source
                 .contains("VarSet(VAR_KAPPA_JEWEL_EXCHANGE_STATE, EVENT_LIFECYCLE_COMPLETED)"));
         }
@@ -1671,8 +1680,8 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
             assert!(source.contains(
                 "VarSet(VAR_JEWELS_OF_TRUTH_EXCHANGE_RETRY_STATE, EVENT_LIFECYCLE_COMPLETED)"
             ));
-            assert!(source.contains("RemoveAllOwnedArticles(ARTICLE_JEWEL_OF_TRUTH)"));
-            assert!(source.contains("TOOL_GEM_TRUTH"));
+            assert!(source.contains("RemoveAllOwnedArticles(ITEM_ARTICLE_JEWEL_OF_TRUTH)"));
+            assert!(source.contains("ITEM_TOOL_GEM_TRUTH"));
             assert!(source
                 .contains("VarSet(VAR_JEWELS_OF_TRUTH_REWARD_STATE, EVENT_LIFECYCLE_COMPLETED)"));
         }
@@ -1683,9 +1692,9 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
         }
         if name == "EventScript_NPCEvent_Staid_DialogueAndWorkChoices" {
             let invitation = if case.target.contains("MFOMT") {
-                "ARTICLE_HARVEST_SPRITE_INVITATION"
+                "ITEM_ARTICLE_HARVEST_SPRITE_INVITATION"
             } else {
-                "ARTICLE_INVITATION"
+                "ITEM_ARTICLE_INVITATION"
             };
             assert!(source.contains(&format!("case {invitation}:")));
             assert!(source.contains("var_0 = HARVEST_SPRITE_INTERACTION_TEA_PARTY_INVITATION"));
@@ -1792,9 +1801,9 @@ fn assert_generated_output_invariants(
         "ENTITY_",
         "ANIMATION_",
         "ANIMATION_ID_",
-        "FOOD_",
-        "ARTICLE_",
-        "TOOL_",
+        "ITEM_FOOD_",
+        "ITEM_ARTICLE_",
+        "ITEM_TOOL_",
     ];
     const SEMANTIC_VARIABLE_SUFFIXES: [&str; 9] = [
         "STATE",
@@ -1938,7 +1947,7 @@ fn assert_generated_output_invariants(
             );
             if token.contains("UNKNOWN") || token.contains("Unknown") {
                 assert!(
-                    token.starts_with("VAR_UNKNOWN_SLOT_"),
+                    token.starts_with("VAR_UNKNOWN_"),
                     "{} {filename} contains unaudited unknown symbol {token}",
                     case.name
                 );
@@ -2088,16 +2097,18 @@ fn assert_generated_output_invariants(
 
         let mut unknown_ids = source
             .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .filter_map(|token| token.strip_prefix("VAR_UNKNOWN_SLOT_"))
-            .map(|suffix| suffix.parse::<i64>().unwrap())
+            .filter(|token| token.starts_with("VAR_UNKNOWN_"))
+            .map(|token| scope.const_int_value(token).unwrap())
             .collect::<Vec<_>>();
         unknown_ids.sort_unstable();
         unknown_ids.dedup();
         if unknown_ids == generic_guard_ids {
             guard_files += 1;
             for id in &unknown_ids {
+                let variable_type = scope.user_type("MaryVarId").unwrap();
+                let symbol = scope.typed_int_const_name(variable_type, *id).unwrap();
                 assert!(
-                    source.contains(&format!("VarGet(VAR_UNKNOWN_SLOT_{id:03}) == 1")),
+                    source.contains(&format!("VarGet({symbol}) == 1")),
                     "{} {filename}: unknown slot {id} escaped the audited guard form",
                     case.name
                 );
@@ -2111,17 +2122,17 @@ fn assert_generated_output_invariants(
                 let Some(arguments) = line.split_once(operation).map(|(_, rest)| rest) else {
                     continue;
                 };
-                let Some(suffix) = arguments.strip_prefix("VAR_UNKNOWN_SLOT_") else {
+                let Some(symbol) = arguments
+                    .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                    .next()
+                    .filter(|symbol| symbol.starts_with("VAR_UNKNOWN_"))
+                else {
                     continue;
                 };
-                let digits = suffix
-                    .bytes()
-                    .take_while(u8::is_ascii_digit)
-                    .collect::<Vec<_>>();
                 writers.push((
                     filename.clone(),
                     operation.trim_end_matches('(').to_owned(),
-                    std::str::from_utf8(&digits).unwrap().parse().unwrap(),
+                    scope.const_int_value(symbol).unwrap(),
                 ));
             }
         }
@@ -2252,11 +2263,7 @@ fn numbered_script_symbols_are_only_empty_or_terminal_placeholders_in_roms() {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let entries = get_script_table(&rom).unwrap();
         let options = Options::default().define(case.target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let mut empty = 0;
         let mut terminal = 0;
 
@@ -2580,17 +2587,10 @@ fn native_callable_stack_pop_counts_match_every_public_declaration() {
     ] {
         let rom = fs::read(case.rom).unwrap();
         let options = Options::default().define(case.target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let by_id = callables
             .scope
             .callable_map()
@@ -4053,7 +4053,7 @@ fn native_food_bonus_addition_saturates_signed_bytes_in_four_targets() {
 fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
     let mut reference = None;
     let vanilla_us = fs::read(local_rom_path(CASES[0].rom)).unwrap();
-    let charmap = Charmap::parse(&fs::read_to_string("charmap_jp.txt").unwrap()).unwrap();
+    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt").unwrap()).unwrap();
     let thresholds = [
         100, 80, 50, 30, 80, 60, 30, 10, 80, 50, 20, 10, 100, 70, 40, 20, 80, 60, 30, 20,
     ];
@@ -4172,7 +4172,7 @@ fn native_cooking_rating_threshold_dispatch_matches_four_targets() {
 
 #[test]
 fn native_wool_p_and_x_article_records_preserve_target_specific_text_pointers() {
-    let charmap = Charmap::parse(&fs::read_to_string("charmap_jp.txt").unwrap()).unwrap();
+    let charmap = Charmap::parse(&fs::read_to_string("charmap.txt").unwrap()).unwrap();
 
     for (case, (table, expected_icons)) in CASES.iter().zip([
         (0xEFED4usize, [487u16, 489u16]),
@@ -13035,7 +13035,7 @@ fn native_random_meal_scripted_animation_and_presented_item_slots_match_all_targ
     }
 
     // Random-meal fallback branches construct food IDs 0x3F and 0x40,
-    // FOOD_RICE_BALL and FOOD_BREAD in the complete food domain.
+    // ITEM_FOOD_RICE_BALL and ITEM_FOOD_BREAD in the complete food domain.
     assert_eq!(
         &rom[0x16E34..0x16E44],
         &[

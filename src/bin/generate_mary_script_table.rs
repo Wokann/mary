@@ -12,10 +12,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let symbols = parse_text_name_table(&fs::read_to_string(&args[1])?, &options)?;
     let scripts = symbols.script_table()?;
     let mut output = String::from("mary_script_table\n{\n");
-    for slot in scripts.slots() {
+    for (id, slot) in scripts.slots().iter().enumerate() {
         match slot {
-            ScriptSlot::Empty => output.push_str("    NULL,\n"),
-            ScriptSlot::Script(name) => output.push_str(&format!("    {name},\n")),
+            ScriptSlot::Empty => output.push_str(&format!("    /* 0x{id:04X} */ NULL,\n")),
+            ScriptSlot::Script(name) => {
+                output.push_str(&format!("    /* 0x{id:04X} */ {name},\n"));
+            }
         }
     }
     output.push_str("};\n");

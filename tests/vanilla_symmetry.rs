@@ -210,7 +210,7 @@ mod tests {
             .collect();
 
         let lib_text = fs::read_to_string(case.library_path)?;
-        let charmap_source = fs::read_to_string("charmap_jp.txt")?;
+        let charmap_source = fs::read_to_string("charmap.txt")?;
         let charmap = Arc::new(mary::charmap::Charmap::parse(&charmap_source)?);
 
         let lib_scope = match compiler::parse_string(&lib_text) {

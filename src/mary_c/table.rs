@@ -524,23 +524,37 @@ mary_callable_table(FOMT_FAMILY, 0x10) {
     }
 
     #[test]
-    fn unified_table_requires_exactly_one_verified_target() {
-        let source = include_str!("../../goodies/mary_callables.mary.h");
-        assert!(parse_callable_table(source, &Options::default()).is_err());
-        let both = Options::default()
-            .define("MARY_FOMT_US")
-            .unwrap()
-            .define("MARY_MFOMT_US")
-            .unwrap();
-        assert!(parse_callable_table(source, &both).is_err());
-        assert!(
-            parse_callable_table(source, &Options::default().define("MARY_FOMT_US").unwrap())
-                .is_ok()
-        );
-        assert!(
-            parse_callable_table(source, &Options::default().define("MARY_MFOMT_US").unwrap())
-                .is_ok()
-        );
+    fn family_tables_do_not_repeat_target_selection_boilerplate() {
+        for (source, own_target, other_region, other_family) in [
+            (
+                include_str!("../../goodies/fomt_callables.mary.h"),
+                "MARY_FOMT_US",
+                "MARY_FOMT_JP",
+                "MARY_MFOMT_US",
+            ),
+            (
+                include_str!("../../goodies/mfomt_callables.mary.h"),
+                "MARY_MFOMT_US",
+                "MARY_MFOMT_JP",
+                "MARY_FOMT_US",
+            ),
+        ] {
+            let default = parse_callable_table(source, &Options::default()).unwrap();
+            for options in [
+                Options::default().define(own_target).unwrap(),
+                Options::default()
+                    .define(own_target)
+                    .unwrap()
+                    .define(other_region)
+                    .unwrap(),
+                Options::default().define(other_family).unwrap(),
+            ] {
+                let selected = parse_callable_table(source, &options).unwrap();
+                assert_eq!(selected.next_id, default.next_id);
+            }
+            assert!(!source.contains("#error Select exactly one"));
+            assert!(!source.contains("#define MARY_"));
+        }
     }
 
     #[test]

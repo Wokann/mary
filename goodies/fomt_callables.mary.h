@@ -1,382 +1,342 @@
-/* Shared ordered callable IDs. Select one MARY_* target in the .mary.c source.
+/* FoMT ordered callable IDs. Select MARY_FOMT_US or MARY_FOMT_JP.
  *
  * Evidence provenance: the current `fomt` source tree represents FoMT-US.
- * MFoMT-US and MFoMT-JP callable semantics are verified separately from
- * their ROM handlers and scripts.
+ * US/JP localization differences are selected inside this FoMT-only table.
  *
- * 共享的有序 callable ID。请在 .mary.c 源文件中选择一个 MARY_* 目标。
+ * FoMT 有序 callable ID。请选择 MARY_FOMT_US 或 MARY_FOMT_JP。
  *
- * 证据来源说明：当前 `fomt` 源码树代表 FoMT-US；MFoMT-US 与 MFoMT-JP callable
- * 的语义必须分别通过各自 ROM 原生处理函数和脚本独立验证。 */
-#if !(defined(MARY_FOMT_US) || defined(MARY_MFOMT_US) || defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))
-#error Select exactly one MARY_* target
-#endif
-#if (defined(MARY_FOMT_US) && (defined(MARY_MFOMT_US) || defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))) || (defined(MARY_MFOMT_US) && (defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))) || (defined(MARY_FOMT_JP) && defined(MARY_MFOMT_JP))
-#error Select exactly one MARY_* target
-#endif
-#if defined(MARY_FOMT_US)
-#define MARY_FOMT
-#define MARY_US
-#elif defined(MARY_MFOMT_US)
-#define MARY_MFOMT
-#define MARY_US
-#elif defined(MARY_FOMT_JP)
-#define MARY_FOMT
-#define MARY_JP
-#elif defined(MARY_MFOMT_JP)
-#define MARY_MFOMT
-#define MARY_JP
-#endif
+ * 证据来源说明：当前 `fomt` 源码树代表 FoMT-US；US/JP 本地化差异仅在本表
+ * 内部选择。 */
 mary_callable_table
 {
     /* VM-internal stack/control slots, not source-level calls. */
-    NULL,
-    NULL,
-    SetEntityPosition,
-    GetEntityX,
-    GetEntityY,
-    SetEntityFacing,
-    GetEntityFacing,
-    SetEntitySpritePriority,
-    MoveEntityXTo,
-    MoveEntityXToRaw,
-    MoveEntityYTo,
-    MoveEntityYToRaw,
-    WaitForEntityMovement,
-    SetEntityAnim,
-    NoOp014,
-    HideEntity,
-    SetEntityAuxRenderProfile,
-    StartEntityEffect,
-    StopEntityEffect,
-    GetOppositeFacing,
-    GetEntityLocation,
-    OffsetEntityPosition,
-    ChangeMap,
-    PanCameraTo,
-    WaitForCameraMovement,
-    PlayBGM,
-    StopBGM,
-    PlaySong,
-    StopAllSongs,
-    FadeOutBGM,
-    ResetTalkUi,
-    TalkOpen,
-#if defined(MARY_MFOMT)
-    TalkOpenNoPortrait,
-#endif
-    TalkClose,
-    TalkMessage,
-    TalkMessageSlow,
-    TalkAppendMessage,
-    TalkPromptChoice2,
-    TalkPromptChoice3,
-    TalkPromptChoice4,
-    TalkChoice2,
-    TalkChoice3,
-    TalkChoice4,
-    TalkChoice5,
-    TalkChoice6,
-    SetTalkNameplateCharacter,
-    SetTalkNameplateText,
-    ClearTalkNameplate,
-    SetTalkPortrait,
-    ClearTalkPortrait,
-    ShowTalkHeartIndicator,
-    HideTalkHeartIndicator,
-    FadeOutScreen,
-    FadeInScreen,
-    FadeInScreenWithoutSceneHook,
-    WaitFrames,
-    CallScript,
-    SetTextVariableNumber,
-    SetTextVariableNumberFieldWidth,
-    SetTextVariableString,
-    RandomU15,
-    RandomIntInclusive,
-    VarGet,
-    VarSet,
-    IsPlayerHoldingNothing,
-    GetPlayerHeldItemKind,
-    IsPlayerHeldItemWrapped,
-    GetPlayerHeldFoodId,
-    GetPlayerHeldArticleId,
-    GetPlayerHeldChickenId,
-    UsePlayerHeldItem,
-    ClearPlayerHeldItem,
-    SetPlayerHeldFood,
-    SetPlayerHeldArticle,
-    SetPlayerHeldWrappedFood,
-    SetPlayerHeldWrappedArticle,
-    CanDiscardPlayerHeldArticle,
-    TryShipPlayerHeldItem,
-    ThrowPlayerHeldItem,
-    GetPlayerHeldToolId,
-    GetPlayerHeldToolStackCount,
-    SetPlayerHeldTool,
-    ClearPlayerHeldTool,
-    FindFoodInRucksack,
-    FindArticleInRucksack,
-    ClearRucksackItemSlot,
-    GetFirstFreeRucksackToolSlot,
-    GetFirstFreeRucksackItemSlot,
-    AddArticleToRucksack,
-    AddFoodToRucksack,
-    AddToolToRucksack,
-    ShowPlayerHoldingTool,
-    ChangePlayerStaminaAndFatigue,
-    IsPlayerHoldingTool,
-    PlayerOwnsTool,
-    PlayerOwnsFood,
-    PlayerOwnsArticle,
-    RemoveAllOwnedArticles,
-    ObtainPowerBerry,
-    ObtainMysticBerry,
-    IsPlayerRidingHorse,
-    EnterHotSpringBathingState,
-    ExitHotSpringBathingState,
-    PreservePlayerLocationForNextDay,
-    ClearPreservedPlayerLocation,
-    GetPreservedPlayerMapId,
-    EatRandomMeal,
-    PreparePlayerForScriptedAnimation,
-    RestorePlayerAfterScriptedAnimation,
-    GetPresentedItemKind,
-    GetPresentedItemId,
-    IsPresentedItemGiftWrapped,
-    CanReceiveTool,
-    CanReceiveFood,
-    CanReceiveArticle,
-    GivePlayerBasket,
-    PlayerHasBasket,
-    UpgradeRucksack,
-    GetRucksackUpgradeLevel,
-    SetPlayerActorUpdateSuspended,
-#if defined(MARY_MFOMT)
-    GetPlayerOutfitColor,
-    SetPlayerOutfitColor,
-#endif
-    HasLocalLinkMilestone,
-    HasReceivedLinkMilestone,
-    SetLocalLinkMilestone,
-    ClearLocalLinkMilestone,
-    IsCharacterBirthdayToday,
-    GetNpcFriendship,
-    AddNpcFriendship,
-    SetNpcFriendship,
-    GetDaysSinceLastSpokenToNpc,
-    MarkNpcSpokenTo,
-    WasNpcSpokenToToday,
-    WasNpcSpokenToJustNow,
-    HasMetNpc,
-    MarkNpcGifted,
-    WasNpcGiftedToday,
-    GetCharacterLove,
-    AddCharacterLove,
-    SetCharacterLove,
-    SetEntityEventScript,
-    ClearEntityEventScript,
-    OpenSupermarketShop,
-    PurchaseSupermarketItem,
-    OpenWonShop,
-    OpenCarpenterShop,
-    OpenBlacksmithShop,
-    OpenClinicShop,
-    OpenBeachCafeShop,
-    OpenYodelRanchShop,
-    OpenWineryShop,
-    OpenInnShop,
-    OpenPoultryFarmShop,
-    OpenSpecialMerchantShop,
-    OpenGiftWrappingMenu,
-    ShowReferencePage,
-    OpenBookList,
-    OpenLetterList,
-    OpenCalendar,
-    OpenShelf,
-    OpenToolChest,
-    OpenRefrigerator,
-    OpenClock,
-    OpenCookingMenu,
-    OpenRecipeList,
-    RunGameCubeLink,
-    OpenNameEntry,
-    StartFarmInheritanceFlashback,
-    OpenNameEntryKeyboard,
-    OpenRucksackMenu,
-    SelectFestivalAnimal,
-    RunStaffCredits,
-    OpenFarmingTutorial,
-    PrepareClockMenuTransition,
-    RestoreAfterClockMenu,
-    PrepareCookingMenuTransition,
-    RestoreAfterCookingMenu,
-    PrepareRecipeMenuTransition,
-    RestoreAfterRecipeMenu,
-    RecordPlayerHasAlbum,
-    SwapRecordPlayerAlbum,
-    RemoveRecordPlayerAlbum,
-    LightFireplaceAtLocation,
-    IsFireplaceLitAtLocation,
-    SetVaseArticleId,
-    GetVaseArticleId,
-    IsChickenFeedTroughFilled,
-    FillChickenFeedTrough,
-    BeginEggIncubation,
-    IsIncubatorOccupied,
-    GetIncubatorCapacity,
-    IsEggReadyToHatch,
-    AttemptEggHatch,
-    IsBarnFeedTroughFilled,
-    FillBarnFeedTrough,
-    StartShipmentBoxDepositAnimation,
-    GetPregnancyStallCapacity,
-    IsBarnAnimalReadyToGiveBirth,
-    AttemptBarnAnimalBirth,
-    BuildMountainCottage,
-    BuildSeasideCottage,
-    HasGoldenLumberOnFarm,
-    OpenDoor,
-    CloseDoor,
-    RedrawRucksackShelfAfterPurchase,
-    RedrawBlueFeatherShelfAfterPurchase,
-    GetHarvestSpriteCurrentTask,
-    GetHarvestSpriteWorkDaysLeft,
-    GetHarvestSpriteTaskExperience,
-    HasHarvestSpritePlayedMinigameToday,
-    HasHarvestSpriteMinigameExperience,
-    StartHarvestSpriteTask,
-    ScheduleHarvestSpriteTaskToEndAfterToday,
-    IsHarvestSpriteDailyWorkComplete,
-    RunHarvestSpriteAnimalCareMinigame,
-    RunHarvestSpriteHarvestingMinigame,
-    RunHarvestSpriteWateringMinigame,
-    RunChickenFestivalContest,
-    RunHorseRace,
-    PrepareHorseRaceEntries,
-    OpenHorseRaceMedalExchange,
-    RunFrisbeeGame,
-    RunFrisbeeTournamentRound,
-    PrepareAnimalFestivalOpponents,
-    GetTVShoppingSelection,
-    GetPendingTVShoppingItem,
-    IsTVShoppingDeliveryReady,
-    SetTVShoppingSelection,
-    ConfirmTVShoppingOrder,
-    CompleteTVShoppingDelivery,
-    IsVacationVillaBuilt,
-    AreAllRequiredVillagersAtMaxFriendship,
-    HasShippedOneOfEachCrop,
-    AreAllFarmAnimalsAtMaxAffection,
-    HasShippedOneOfEachMineral,
-    HasCaughtEveryFishSpecies,
-    GetTotalFishCaught,
-    HasObtainedMythicTool,
-    HasShippedOneOfEachProduct,
-    GetMoney,
-    AddMoney,
-    SubtractMoney,
-    EnableScriptedNpcControl,
-    DisableScriptedNpcControl,
-    GetBlacksmithOrderId,
-    IsBlacksmithOrderReady,
-    CollectBlacksmithOrder,
-    SetGameTime,
-    IsLetterWaiting,
-    HasReceivedLetter,
-    DeliverLetter,
-    MarkLetterRead,
-    GetWaitingLetterCount,
-    GetSavedLetterCount,
-    ShowTelevisionMessage,
-    SetTelevisionProgram,
-    EndTelevisionProgram,
-    RefreshAllNpcSchedules,
-    DoesAnimalExist,
-    CreateFarmHorse,
-    RemoveFarmHorse,
-    GetAnimalName,
-    GetInteractingAnimalIndex,
-    HasAnimalBeenTalkedTo,
-    SetAnimalTalkedTo,
-    AddAnimalAffection,
-    IsAnimalUnhappy,
-    IsAnimalSick,
-    IsAnimalPregnant,
-    GetAnimalHealthyPregnancyDays,
-    GetAnimalAge,
-    GetAnimalAffection,
-    GetAnimalGrowthStage,
-    IsSheepSheared,
-    CountAnimalsByLifeState,
-    ShowLivestockNeglectDeathSummary,
-    RemoveLivestockDeadFromNeglect,
-    ShowNaturalLivestockDeathSummary,
-    RemoveNaturallyDeadLivestock,
-    IsCowAtBarnSlot,
-    GetCowCount,
-    GetSheepCount,
-    GetChickenCount,
-    SetContestAnimal,
-    ClearContestAnimal,
-    GetContestAnimalIndex,
-    SetTextVariableToCaughtFishName,
-    GetCaughtFishSize,
-    IsCaughtFishMaximumSize,
-    IsCaughtFishKing,
-    SelectMoonViewingPartner,
-#if defined(MARY_MFOMT)
-    SelectMoonViewingPartnerAlias,
-#endif
-    GetCookingFestivalDishRating,
-    SelectThomasStockingGift,
-    GetRandomSpouseGiftArticleId,
-    UnlockNextVanAlbum,
-    AreAllVanAlbumsAvailable,
-    SetPlayerNicknameForSpouse,
-    PlacePlayerAtFarmhouseBed,
-    FlashScreenColor,
-    RebuildMapEntitiesForNewDay,
-    CureAllSickLivestock,
-    AddAffectionToAllFarmAnimals,
-    EnableShootingStarShippingBonus,
-    GetAmountShipped,
-    CreatePlayerChildEntity,
-    RelocateEntityToMap,
-    CreateNewYearSunriseEffect,
-    PlayNewYearSunriseEffect,
-    DestroyNewYearSunriseEffect,
-    PlayStarSparkleEffect,
-    GetKnownRecipeCount,
-    GenerateMineFloorLayout,
-    DescendMineFloor,
-    IsToolCursed,
-    AdvanceCursedToolLiftProgress,
-    AttemptChurchCursedToolRemoval,
-    CreateEventIcon,
-    RemoveEventIcon,
-    GetFoodIconId,
-    GetArticleIconId,
-    GetToolIconId,
-    NoOpTutorialFieldTile,
-    NoOpTutorialFieldObject,
-    NoOpTutorialEggDefinition,
-    NoOpTutorialEggSelection,
-    BeginHoldingActorGraphic,
-    NoOpAnimalEventEntityInitialization,
-    SetTextVariableToProductName,
-    GetEventContextValue,
-    CycleBackwardToNonCursedTool,
-#if defined(MARY_MFOMT)
-    IsMayonnaiseMakerInstalled,
-    IsCheeseMakerInstalled,
-    IsYarnMakerInstalled,
-    GetFishCatchCount,
-    GetLargestCaughtFishSize,
-    IsMapRegistered,
-    GetToolExperience,
-    CountFestivalWinningAnimals,
-#endif
+    /* 0x000 */ NULL,
+    /* 0x001 */ NULL,
+    /* 0x002 */ SetEntityPosition,
+    /* 0x003 */ GetEntityX,
+    /* 0x004 */ GetEntityY,
+    /* 0x005 */ SetEntityFacing,
+    /* 0x006 */ GetEntityFacing,
+    /* 0x007 */ SetEntitySpritePriority,
+    /* 0x008 */ MoveEntityXTo,
+    /* 0x009 */ MoveEntityXToRaw,
+    /* 0x00A */ MoveEntityYTo,
+    /* 0x00B */ MoveEntityYToRaw,
+    /* 0x00C */ WaitForEntityMovement,
+    /* 0x00D */ SetEntityAnim,
+    /* 0x00E */ NoOp014,
+    /* 0x00F */ HideEntity,
+    /* 0x010 */ SetEntityAuxRenderProfile,
+    /* 0x011 */ StartEntityEffect,
+    /* 0x012 */ StopEntityEffect,
+    /* 0x013 */ GetOppositeFacing,
+    /* 0x014 */ GetEntityLocation,
+    /* 0x015 */ OffsetEntityPosition,
+    /* 0x016 */ ChangeMap,
+    /* 0x017 */ PanCameraTo,
+    /* 0x018 */ WaitForCameraMovement,
+    /* 0x019 */ PlayBGM,
+    /* 0x01A */ StopBGM,
+    /* 0x01B */ PlaySong,
+    /* 0x01C */ StopAllSongs,
+    /* 0x01D */ FadeOutBGM,
+    /* 0x01E */ ResetTalkUi,
+    /* 0x01F */ TalkOpen,
+    /* 0x020 */ TalkClose,
+    /* 0x021 */ TalkMessage,
+    /* 0x022 */ TalkMessageSlow,
+    /* 0x023 */ TalkAppendMessage,
+    /* 0x024 */ TalkPromptChoice2,
+    /* 0x025 */ TalkPromptChoice3,
+    /* 0x026 */ TalkPromptChoice4,
+    /* 0x027 */ TalkChoice2,
+    /* 0x028 */ TalkChoice3,
+    /* 0x029 */ TalkChoice4,
+    /* 0x02A */ TalkChoice5,
+    /* 0x02B */ TalkChoice6,
+    /* 0x02C */ SetTalkNameplateCharacter,
+    /* 0x02D */ SetTalkNameplateText,
+    /* 0x02E */ ClearTalkNameplate,
+    /* 0x02F */ SetTalkPortrait,
+    /* 0x030 */ ClearTalkPortrait,
+    /* 0x031 */ ShowTalkHeartIndicator,
+    /* 0x032 */ HideTalkHeartIndicator,
+    /* 0x033 */ FadeOutScreen,
+    /* 0x034 */ FadeInScreen,
+    /* 0x035 */ FadeInScreenWithoutSceneHook,
+    /* 0x036 */ WaitFrames,
+    /* 0x037 */ CallScript,
+    /* 0x038 */ SetTextVariableNumber,
+    /* 0x039 */ SetTextVariableNumberFieldWidth,
+    /* 0x03A */ SetTextVariableString,
+    /* 0x03B */ RandomU15,
+    /* 0x03C */ RandomIntInclusive,
+    /* 0x03D */ VarGet,
+    /* 0x03E */ VarSet,
+    /* 0x03F */ IsPlayerHoldingNothing,
+    /* 0x040 */ GetPlayerHeldItemKind,
+    /* 0x041 */ IsPlayerHeldItemWrapped,
+    /* 0x042 */ GetPlayerHeldFoodId,
+    /* 0x043 */ GetPlayerHeldArticleId,
+    /* 0x044 */ GetPlayerHeldChickenId,
+    /* 0x045 */ UsePlayerHeldItem,
+    /* 0x046 */ ClearPlayerHeldItem,
+    /* 0x047 */ SetPlayerHeldFood,
+    /* 0x048 */ SetPlayerHeldArticle,
+    /* 0x049 */ SetPlayerHeldWrappedFood,
+    /* 0x04A */ SetPlayerHeldWrappedArticle,
+    /* 0x04B */ CanDiscardPlayerHeldArticle,
+    /* 0x04C */ TryShipPlayerHeldItem,
+    /* 0x04D */ ThrowPlayerHeldItem,
+    /* 0x04E */ GetPlayerHeldToolId,
+    /* 0x04F */ GetPlayerHeldToolStackCount,
+    /* 0x050 */ SetPlayerHeldTool,
+    /* 0x051 */ ClearPlayerHeldTool,
+    /* 0x052 */ FindFoodInRucksack,
+    /* 0x053 */ FindArticleInRucksack,
+    /* 0x054 */ ClearRucksackItemSlot,
+    /* 0x055 */ GetFirstFreeRucksackToolSlot,
+    /* 0x056 */ GetFirstFreeRucksackItemSlot,
+    /* 0x057 */ AddArticleToRucksack,
+    /* 0x058 */ AddFoodToRucksack,
+    /* 0x059 */ AddToolToRucksack,
+    /* 0x05A */ ShowPlayerHoldingTool,
+    /* 0x05B */ ChangePlayerStaminaAndFatigue,
+    /* 0x05C */ IsPlayerHoldingTool,
+    /* 0x05D */ PlayerOwnsTool,
+    /* 0x05E */ PlayerOwnsFood,
+    /* 0x05F */ PlayerOwnsArticle,
+    /* 0x060 */ RemoveAllOwnedArticles,
+    /* 0x061 */ ObtainPowerBerry,
+    /* 0x062 */ ObtainMysticBerry,
+    /* 0x063 */ IsPlayerRidingHorse,
+    /* 0x064 */ EnterHotSpringBathingState,
+    /* 0x065 */ ExitHotSpringBathingState,
+    /* 0x066 */ PreservePlayerLocationForNextDay,
+    /* 0x067 */ ClearPreservedPlayerLocation,
+    /* 0x068 */ GetPreservedPlayerMapId,
+    /* 0x069 */ EatRandomMeal,
+    /* 0x06A */ PreparePlayerForScriptedAnimation,
+    /* 0x06B */ RestorePlayerAfterScriptedAnimation,
+    /* 0x06C */ GetPresentedItemKind,
+    /* 0x06D */ GetPresentedItemId,
+    /* 0x06E */ IsPresentedItemGiftWrapped,
+    /* 0x06F */ CanReceiveTool,
+    /* 0x070 */ CanReceiveFood,
+    /* 0x071 */ CanReceiveArticle,
+    /* 0x072 */ GivePlayerBasket,
+    /* 0x073 */ PlayerHasBasket,
+    /* 0x074 */ UpgradeRucksack,
+    /* 0x075 */ GetRucksackUpgradeLevel,
+    /* 0x076 */ SetPlayerActorUpdateSuspended,
+    /* 0x077 */ HasLocalLinkMilestone,
+    /* 0x078 */ HasReceivedLinkMilestone,
+    /* 0x079 */ SetLocalLinkMilestone,
+    /* 0x07A */ ClearLocalLinkMilestone,
+    /* 0x07B */ IsCharacterBirthdayToday,
+    /* 0x07C */ GetNpcFriendship,
+    /* 0x07D */ AddNpcFriendship,
+    /* 0x07E */ SetNpcFriendship,
+    /* 0x07F */ GetDaysSinceLastSpokenToNpc,
+    /* 0x080 */ MarkNpcSpokenTo,
+    /* 0x081 */ WasNpcSpokenToToday,
+    /* 0x082 */ WasNpcSpokenToJustNow,
+    /* 0x083 */ HasMetNpc,
+    /* 0x084 */ MarkNpcGifted,
+    /* 0x085 */ WasNpcGiftedToday,
+    /* 0x086 */ GetCharacterLove,
+    /* 0x087 */ AddCharacterLove,
+    /* 0x088 */ SetCharacterLove,
+    /* 0x089 */ SetEntityEventScript,
+    /* 0x08A */ ClearEntityEventScript,
+    /* 0x08B */ OpenSupermarketShop,
+    /* 0x08C */ PurchaseSupermarketItem,
+    /* 0x08D */ OpenWonShop,
+    /* 0x08E */ OpenCarpenterShop,
+    /* 0x08F */ OpenBlacksmithShop,
+    /* 0x090 */ OpenClinicShop,
+    /* 0x091 */ OpenBeachCafeShop,
+    /* 0x092 */ OpenYodelRanchShop,
+    /* 0x093 */ OpenWineryShop,
+    /* 0x094 */ OpenInnShop,
+    /* 0x095 */ OpenPoultryFarmShop,
+    /* 0x096 */ OpenSpecialMerchantShop,
+    /* 0x097 */ OpenGiftWrappingMenu,
+    /* 0x098 */ ShowReferencePage,
+    /* 0x099 */ OpenBookList,
+    /* 0x09A */ OpenLetterList,
+    /* 0x09B */ OpenCalendar,
+    /* 0x09C */ OpenShelf,
+    /* 0x09D */ OpenToolChest,
+    /* 0x09E */ OpenRefrigerator,
+    /* 0x09F */ OpenClock,
+    /* 0x0A0 */ OpenCookingMenu,
+    /* 0x0A1 */ OpenRecipeList,
+    /* 0x0A2 */ RunGameCubeLink,
+    /* 0x0A3 */ OpenNameEntry,
+    /* 0x0A4 */ StartFarmInheritanceFlashback,
+    /* 0x0A5 */ OpenNameEntryKeyboard,
+    /* 0x0A6 */ OpenRucksackMenu,
+    /* 0x0A7 */ SelectFestivalAnimal,
+    /* 0x0A8 */ RunStaffCredits,
+    /* 0x0A9 */ OpenFarmingTutorial,
+    /* 0x0AA */ PrepareClockMenuTransition,
+    /* 0x0AB */ RestoreAfterClockMenu,
+    /* 0x0AC */ PrepareCookingMenuTransition,
+    /* 0x0AD */ RestoreAfterCookingMenu,
+    /* 0x0AE */ PrepareRecipeMenuTransition,
+    /* 0x0AF */ RestoreAfterRecipeMenu,
+    /* 0x0B0 */ RecordPlayerHasAlbum,
+    /* 0x0B1 */ SwapRecordPlayerAlbum,
+    /* 0x0B2 */ RemoveRecordPlayerAlbum,
+    /* 0x0B3 */ LightFireplaceAtLocation,
+    /* 0x0B4 */ IsFireplaceLitAtLocation,
+    /* 0x0B5 */ SetVaseArticleId,
+    /* 0x0B6 */ GetVaseArticleId,
+    /* 0x0B7 */ IsChickenFeedTroughFilled,
+    /* 0x0B8 */ FillChickenFeedTrough,
+    /* 0x0B9 */ BeginEggIncubation,
+    /* 0x0BA */ IsIncubatorOccupied,
+    /* 0x0BB */ GetIncubatorCapacity,
+    /* 0x0BC */ IsEggReadyToHatch,
+    /* 0x0BD */ AttemptEggHatch,
+    /* 0x0BE */ IsBarnFeedTroughFilled,
+    /* 0x0BF */ FillBarnFeedTrough,
+    /* 0x0C0 */ StartShipmentBoxDepositAnimation,
+    /* 0x0C1 */ GetPregnancyStallCapacity,
+    /* 0x0C2 */ IsBarnAnimalReadyToGiveBirth,
+    /* 0x0C3 */ AttemptBarnAnimalBirth,
+    /* 0x0C4 */ BuildMountainCottage,
+    /* 0x0C5 */ BuildSeasideCottage,
+    /* 0x0C6 */ HasGoldenLumberOnFarm,
+    /* 0x0C7 */ OpenDoor,
+    /* 0x0C8 */ CloseDoor,
+    /* 0x0C9 */ RedrawRucksackShelfAfterPurchase,
+    /* 0x0CA */ RedrawBlueFeatherShelfAfterPurchase,
+    /* 0x0CB */ GetHarvestSpriteCurrentTask,
+    /* 0x0CC */ GetHarvestSpriteWorkDaysLeft,
+    /* 0x0CD */ GetHarvestSpriteTaskExperience,
+    /* 0x0CE */ HasHarvestSpritePlayedMinigameToday,
+    /* 0x0CF */ HasHarvestSpriteMinigameExperience,
+    /* 0x0D0 */ StartHarvestSpriteTask,
+    /* 0x0D1 */ ScheduleHarvestSpriteTaskToEndAfterToday,
+    /* 0x0D2 */ IsHarvestSpriteDailyWorkComplete,
+    /* 0x0D3 */ RunHarvestSpriteAnimalCareMinigame,
+    /* 0x0D4 */ RunHarvestSpriteHarvestingMinigame,
+    /* 0x0D5 */ RunHarvestSpriteWateringMinigame,
+    /* 0x0D6 */ RunChickenFestivalContest,
+    /* 0x0D7 */ RunHorseRace,
+    /* 0x0D8 */ PrepareHorseRaceEntries,
+    /* 0x0D9 */ OpenHorseRaceMedalExchange,
+    /* 0x0DA */ RunFrisbeeGame,
+    /* 0x0DB */ RunFrisbeeTournamentRound,
+    /* 0x0DC */ PrepareAnimalFestivalOpponents,
+    /* 0x0DD */ GetTVShoppingSelection,
+    /* 0x0DE */ GetPendingTVShoppingItem,
+    /* 0x0DF */ IsTVShoppingDeliveryReady,
+    /* 0x0E0 */ SetTVShoppingSelection,
+    /* 0x0E1 */ ConfirmTVShoppingOrder,
+    /* 0x0E2 */ CompleteTVShoppingDelivery,
+    /* 0x0E3 */ IsVacationVillaBuilt,
+    /* 0x0E4 */ AreAllRequiredVillagersAtMaxFriendship,
+    /* 0x0E5 */ HasShippedOneOfEachCrop,
+    /* 0x0E6 */ AreAllFarmAnimalsAtMaxAffection,
+    /* 0x0E7 */ HasShippedOneOfEachMineral,
+    /* 0x0E8 */ HasCaughtEveryFishSpecies,
+    /* 0x0E9 */ GetTotalFishCaught,
+    /* 0x0EA */ HasObtainedMythicTool,
+    /* 0x0EB */ HasShippedOneOfEachProduct,
+    /* 0x0EC */ GetMoney,
+    /* 0x0ED */ AddMoney,
+    /* 0x0EE */ SubtractMoney,
+    /* 0x0EF */ EnableScriptedNpcControl,
+    /* 0x0F0 */ DisableScriptedNpcControl,
+    /* 0x0F1 */ GetBlacksmithOrderId,
+    /* 0x0F2 */ IsBlacksmithOrderReady,
+    /* 0x0F3 */ CollectBlacksmithOrder,
+    /* 0x0F4 */ SetGameTime,
+    /* 0x0F5 */ IsLetterWaiting,
+    /* 0x0F6 */ HasReceivedLetter,
+    /* 0x0F7 */ DeliverLetter,
+    /* 0x0F8 */ MarkLetterRead,
+    /* 0x0F9 */ GetWaitingLetterCount,
+    /* 0x0FA */ GetSavedLetterCount,
+    /* 0x0FB */ ShowTelevisionMessage,
+    /* 0x0FC */ SetTelevisionProgram,
+    /* 0x0FD */ EndTelevisionProgram,
+    /* 0x0FE */ RefreshAllNpcSchedules,
+    /* 0x0FF */ DoesAnimalExist,
+    /* 0x100 */ CreateFarmHorse,
+    /* 0x101 */ RemoveFarmHorse,
+    /* 0x102 */ GetAnimalName,
+    /* 0x103 */ GetInteractingAnimalIndex,
+    /* 0x104 */ HasAnimalBeenTalkedTo,
+    /* 0x105 */ SetAnimalTalkedTo,
+    /* 0x106 */ AddAnimalAffection,
+    /* 0x107 */ IsAnimalUnhappy,
+    /* 0x108 */ IsAnimalSick,
+    /* 0x109 */ IsAnimalPregnant,
+    /* 0x10A */ GetAnimalHealthyPregnancyDays,
+    /* 0x10B */ GetAnimalAge,
+    /* 0x10C */ GetAnimalAffection,
+    /* 0x10D */ GetAnimalGrowthStage,
+    /* 0x10E */ IsSheepSheared,
+    /* 0x10F */ CountAnimalsByLifeState,
+    /* 0x110 */ ShowLivestockNeglectDeathSummary,
+    /* 0x111 */ RemoveLivestockDeadFromNeglect,
+    /* 0x112 */ ShowNaturalLivestockDeathSummary,
+    /* 0x113 */ RemoveNaturallyDeadLivestock,
+    /* 0x114 */ IsCowAtBarnSlot,
+    /* 0x115 */ GetCowCount,
+    /* 0x116 */ GetSheepCount,
+    /* 0x117 */ GetChickenCount,
+    /* 0x118 */ SetContestAnimal,
+    /* 0x119 */ ClearContestAnimal,
+    /* 0x11A */ GetContestAnimalIndex,
+    /* 0x11B */ SetTextVariableToCaughtFishName,
+    /* 0x11C */ GetCaughtFishSize,
+    /* 0x11D */ IsCaughtFishMaximumSize,
+    /* 0x11E */ IsCaughtFishKing,
+    /* 0x11F */ SelectMoonViewingPartner,
+    /* 0x120 */ GetCookingFestivalDishRating,
+    /* 0x121 */ SelectThomasStockingGift,
+    /* 0x122 */ GetRandomSpouseGiftArticleId,
+    /* 0x123 */ UnlockNextVanAlbum,
+    /* 0x124 */ AreAllVanAlbumsAvailable,
+    /* 0x125 */ SetPlayerNicknameForSpouse,
+    /* 0x126 */ PlacePlayerAtFarmhouseBed,
+    /* 0x127 */ FlashScreenColor,
+    /* 0x128 */ RebuildMapEntitiesForNewDay,
+    /* 0x129 */ CureAllSickLivestock,
+    /* 0x12A */ AddAffectionToAllFarmAnimals,
+    /* 0x12B */ EnableShootingStarShippingBonus,
+    /* 0x12C */ GetAmountShipped,
+    /* 0x12D */ CreatePlayerChildEntity,
+    /* 0x12E */ RelocateEntityToMap,
+    /* 0x12F */ CreateNewYearSunriseEffect,
+    /* 0x130 */ PlayNewYearSunriseEffect,
+    /* 0x131 */ DestroyNewYearSunriseEffect,
+    /* 0x132 */ PlayStarSparkleEffect,
+    /* 0x133 */ GetKnownRecipeCount,
+    /* 0x134 */ GenerateMineFloorLayout,
+    /* 0x135 */ DescendMineFloor,
+    /* 0x136 */ IsToolCursed,
+    /* 0x137 */ AdvanceCursedToolLiftProgress,
+    /* 0x138 */ AttemptChurchCursedToolRemoval,
+    /* 0x139 */ CreateEventIcon,
+    /* 0x13A */ RemoveEventIcon,
+    /* 0x13B */ GetFoodIconId,
+    /* 0x13C */ GetArticleIconId,
+    /* 0x13D */ GetToolIconId,
+    /* 0x13E */ NoOpTutorialFieldTile,
+    /* 0x13F */ NoOpTutorialFieldObject,
+    /* 0x140 */ NoOpTutorialEggDefinition,
+    /* 0x141 */ NoOpTutorialEggSelection,
+    /* 0x142 */ BeginHoldingActorGraphic,
+    /* 0x143 */ NoOpAnimalEventEntityInitialization,
+    /* 0x144 */ SetTextVariableToProductName,
+    /* 0x145 */ GetEventContextValue,
+    /* 0x146 */ CycleBackwardToNonCursedTool,
 };
 
 /*
@@ -385,7 +345,7 @@ mary_callable_table
  * Declaration order exactly follows mary_callable_table and therefore mirrors
  * its logical callable ID order.
  *
- * Mary*Id and Mary*Kind accept symbols from mary_constants.mary.h or original
+ * Mary*Id and Mary*Kind accept symbols from fomt_constants.mary.h or original
  * integers; both compile to identical bytes.
  *
  * Every callable currently exposed by name has been assigned from source and
@@ -397,7 +357,7 @@ mary_callable_table
  *
  * 声明顺序严格跟随 mary_callable_table，亦即逻辑 callable ID 顺序。
  *
- * Mary*Id、Mary*Kind 可使用 mary_constants.mary.h 的符号或原始整数，
+ * Mary*Id、Mary*Kind 可使用 fomt_constants.mary.h 的符号或原始整数，
  * 两者编译字节完全相同。
  *
  * 当前所有具名 callable 均已根据源码和原生处理函数行为确定；原版脚本存在
@@ -1351,7 +1311,7 @@ void WaitFrames(MaryFrameCount frame_count);
 
 /*
  * Calls another slot in the selected ROM's ordered script table.
- * Parameter: script_id is a SCRIPT_* symbol from mary_scripts.mary.h or the
+ * Parameter: script_id is a SCRIPT_* symbol from fomt_scripts.mary.h or the
  * exact numeric script-table ID. Both forms compile to the same integer.
  * The native lookup does not bounds-check script_id before reading
  * script_table[script_id], so it must name a valid slot for the selected
@@ -1360,7 +1320,7 @@ void WaitFrames(MaryFrameCount frame_count);
  * ABI function call: it accepts no user arguments and returns no value.
  *
  * 调用所选 ROM 有序脚本表中的另一个槽位。
- * 参数：script_id 为 mary_scripts.mary.h 中的 SCRIPT_* 符号或精确数字脚本 ID；
+ * 参数：script_id 为 fomt_scripts.mary.h 中的 SCRIPT_* 符号或精确数字脚本 ID；
  * 两种形式编译为同一个整数。
  * 原生查表在读取 script_table[script_id] 前不会检查上界，因此该值必须是所选
  * 目标中的有效槽位。解析出的 RIFF／脚本会交给当前事件运行器，并把运行状态
@@ -1579,46 +1539,46 @@ MaryBool IsPlayerHeldItemWrapped(void);
 /*
  * Returns the food ID of the held object.
  * Parameters: none.
- * Return value: FOOD_* or the original food ID; FOOD_NOT_PRESENT when the held
+ * Return value: ITEM_FOOD_* or the original food ID; ITEM_FOOD_NOT_PRESENT when the held
  * object is absent or is not food. The FoMT-US native wrapper checks both the
  * empty state and held category before extracting Food::GetId; either failed
  * check returns -1 to the VM.
  *
  * 返回当前手持食品的 ID。
  * 参数：无。
- * 返回值：FOOD_* 或原始食品 ID；当前对象不存在或不是食品时为
- * FOOD_NOT_PRESENT。FoMT-US 原生包装器会先检查空状态和手持类别，再读取
+ * 返回值：ITEM_FOOD_* 或原始食品 ID；当前对象不存在或不是食品时为
+ * ITEM_FOOD_NOT_PRESENT。FoMT-US 原生包装器会先检查空状态和手持类别，再读取
  * Food::GetId；任一检查失败都会向 VM 返回 -1。
  */
-MaryFoodId GetPlayerHeldFoodId(void);
+MaryItemFoodId GetPlayerHeldFoodId(void);
 
 /*
  * Returns the article ID of the held object.
  * Parameters: none.
- * Return value: ARTICLE_* or the original article ID; ARTICLE_NOT_PRESENT when
+ * Return value: ITEM_ARTICLE_* or the original article ID; ITEM_ARTICLE_NOT_PRESENT when
  * the held object is absent or is not an article. The FoMT-US wrapper performs
  * both checks before Article::GetId and returns -1 on either failure.
  *
  * 返回当前手持物品的 ID。
  * 参数：无。
- * 返回值：ARTICLE_* 或原始物品 ID；当前对象不存在或不是物品时为
- * ARTICLE_NOT_PRESENT。FoMT-US 包装器在读取 Article::GetId 前执行两项检查，
+ * 返回值：ITEM_ARTICLE_* 或原始物品 ID；当前对象不存在或不是物品时为
+ * ITEM_ARTICLE_NOT_PRESENT。FoMT-US 包装器在读取 Article::GetId 前执行两项检查，
  * 任一失败都会返回 -1。
  */
-MaryArticleId GetPlayerHeldArticleId(void);
+MaryItemArticleId GetPlayerHeldArticleId(void);
 
 /*
  * Returns the chicken-record slot represented by the held object.
  * Parameters: none.
- * Return value: CHICKEN_SLOT_1 through CHICKEN_SLOT_8 for a held chicken, or
- * CHICKEN_SLOT_NONE when the held object is not a valid chicken record.
+ * Return value: ANIMAL_CHICKEN_SLOT_1 through ANIMAL_CHICKEN_SLOT_8 for a held chicken, or
+ * ANIMAL_CHICKEN_SLOT_NONE when the held object is not a valid chicken record.
  *
  * 返回当前手持鸡所对应的鸡记录槽位。
  * 参数：无。
- * 返回值：手持有效鸡记录时为 CHICKEN_SLOT_1 至 CHICKEN_SLOT_8；当前手持物
- * 不是有效鸡记录时为 CHICKEN_SLOT_NONE。
+ * 返回值：手持有效鸡记录时为 ANIMAL_CHICKEN_SLOT_1 至 ANIMAL_CHICKEN_SLOT_8；当前手持物
+ * 不是有效鸡记录时为 ANIMAL_CHICKEN_SLOT_NONE。
  */
-MaryChickenSlotIndex GetPlayerHeldChickenId(void);
+MaryAnimalChickenSlotIndex GetPlayerHeldChickenId(void);
 
 /*
  * Runs the player's normal context-sensitive action for the current held
@@ -1655,50 +1615,50 @@ void ClearPlayerHeldItem(void);
  * and starts the engine's held-object transition (player action state 0x19).
  * The native wrapper converts the argument through the target's compact Food
  * representation; it does not provide a script-level range error.
- * Parameter: food_id is FOOD_* or the exact original valid food ID.
+ * Parameter: food_id is ITEM_FOOD_* or the exact original valid food ID.
  *
  * 构造食品对象，将其装备为玩家的未包装手持物，并启动引擎的手持物切换流程
  * （玩家动作状态 0x19）。原生包装函数会把参数转换为目标版本的紧凑 Food
  * 结构，不会提供脚本层的越界错误。
- * 参数：food_id 为 FOOD_* 或精确原始有效食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始有效食品 ID。
  */
-void SetPlayerHeldFood(MaryFoodId food_id);
+void SetPlayerHeldFood(MaryItemFoodId food_id);
 
 /*
  * Constructs an article object, equips it as the player's unwrapped held
  * object, and starts the same held-object transition as SetPlayerHeldFood.
  * The native wrapper stores the article selector through its compact byte
  * representation; it does not provide a script-level range error.
- * Parameter: article_id is ARTICLE_* or the exact original valid article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original valid article ID.
  *
  * 构造物品对象，将其装备为玩家的未包装手持物，并启动与
  * SetPlayerHeldFood 相同的手持物切换流程。原生包装函数通过紧凑字节结构保存
  * 物品选择值，不会提供脚本层的越界错误。
- * 参数：article_id 为 ARTICLE_* 或精确原始有效物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始有效物品 ID。
  */
-void SetPlayerHeldArticle(MaryArticleId article_id);
+void SetPlayerHeldArticle(MaryItemArticleId article_id);
 
 /*
  * Performs the same food construction and held-object transition as
  * SetPlayerHeldFood, with the native wrapped flag set to one.
- * Parameter: food_id is FOOD_* or the exact original valid food ID.
+ * Parameter: food_id is ITEM_FOOD_* or the exact original valid food ID.
  *
  * 执行与 SetPlayerHeldFood 相同的食品构造和手持物切换流程，但把原生包装标志
  * 设为 1。
- * 参数：food_id 为 FOOD_* 或精确原始有效食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始有效食品 ID。
  */
-void SetPlayerHeldWrappedFood(MaryFoodId food_id);
+void SetPlayerHeldWrappedFood(MaryItemFoodId food_id);
 
 /*
  * Performs the same article construction and held-object transition as
  * SetPlayerHeldArticle, with the native wrapped flag set to one.
- * Parameter: article_id is ARTICLE_* or the exact original valid article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original valid article ID.
  *
  * 执行与 SetPlayerHeldArticle 相同的物品构造和手持物切换流程，但把原生包装
  * 标志设为 1。
- * 参数：article_id 为 ARTICLE_* 或精确原始有效物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始有效物品 ID。
  */
-void SetPlayerHeldWrappedArticle(MaryArticleId article_id);
+void SetPlayerHeldWrappedArticle(MaryItemArticleId article_id);
 
 /*
  * Tests whether the player is holding an Article whose native
@@ -1750,7 +1710,7 @@ void ThrowPlayerHeldItem(void);
 /*
  * Returns the tool ID of the held object.
  * Parameters: none.
- * Return value: TOOL_* or the original tool ID; TOOL_NOT_PRESENT when the held
+ * Return value: ITEM_TOOL_* or the original tool ID; ITEM_TOOL_NOT_PRESENT when the held
  * tool stack is empty. The FoMT-US native wrapper initializes the result to
  * -1 and replaces it only after ToolStack::IsEmpty returns false; the retail
  * scripts use that sentinel before giving the fishing rod. MFoMT-US/JP call
@@ -1758,31 +1718,31 @@ void ThrowPlayerHeldItem(void);
  *
  * 返回当前手持工具的 ID。
  * 参数：无。
- * 返回值：TOOL_* 或原始工具 ID；手持工具堆为空时为 TOOL_NOT_PRESENT。
+ * 返回值：ITEM_TOOL_* 或原始工具 ID；手持工具堆为空时为 ITEM_TOOL_NOT_PRESENT。
  * FoMT-US 原生包装器先把结果初始化为 -1，仅在 ToolStack::IsEmpty 为假时才
  * 写入工具 ID；原版脚本会在赠送钓竿前使用该哨兵。MFoMT-US/JP 调用点使用
  * 相同约定。
  */
-MaryToolId GetPlayerHeldToolId(void);
+MaryItemToolId GetPlayerHeldToolId(void);
 
 /*
  * Returns the number of copies in the player's held tool stack. This is an
  * inventory stack count, not a tool charge, upgrade level, or durability.
  * Parameters: none.
  * Return value: 1-99 for a nonempty stack, or
- * HELD_TOOL_STACK_NOT_PRESENT when no valid held tool stack exists.
+ * ITEM_TOOL_STACK_NOT_PRESENT when no valid held tool stack exists.
  *
  * 返回玩家当前手持工具堆中的数量。该字段是背包堆叠数量，不是工具蓄力、
  * 升级等级或耐久度。
  * 参数：无。
  * 返回值：非空堆为 1-99；不存在有效手持工具堆时为
- * HELD_TOOL_STACK_NOT_PRESENT。
+ * ITEM_TOOL_STACK_NOT_PRESENT。
  */
-MaryHeldToolStackCount GetPlayerHeldToolStackCount(void);
+MaryItemToolStackCount GetPlayerHeldToolStackCount(void);
 
 /*
  * Sets the player's held object to a tool.
- * Parameters: tool_id is TOOL_* or the exact original tool ID; stack_count is
+ * Parameters: tool_id is ITEM_TOOL_* or the exact original tool ID; stack_count is
  * the inventory quantity stored with that tool. The native ToolStack
  * constructor converts zero to one and clamps values greater than 99 to 99.
  * Its comparison is unsigned, so negative VM integers also become 99; scripts
@@ -1790,13 +1750,13 @@ MaryHeldToolStackCount GetPlayerHeldToolStackCount(void);
  * Applying the stack uses the player's normal held-tool transition path.
  *
  * 将玩家手持物设置为工具。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID；stack_count 为与工具一同保存的
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID；stack_count 为与工具一同保存的
  * 背包堆叠数量。原生 ToolStack 构造函数会把 0 转成 1，并把大于 99 的值
  * 限制为 99。其比较采用无符号数，因此负的 VM 整数也会变成 99；脚本应使用
  * 声明的 1-99 取值域，不应依赖该回退行为。应用工具堆时会进入玩家通常的
  * 手持工具切换路径。
  */
-void SetPlayerHeldTool(MaryToolId tool_id, MaryRequestedToolStackCount stack_count);
+void SetPlayerHeldTool(MaryItemToolId tool_id, MaryItemToolRequestedStackCount stack_count);
 
 /*
  * Constructs an empty ToolStack and applies it through the same player
@@ -1811,27 +1771,27 @@ void ClearPlayerHeldTool(void);
 
 /*
  * Finds a food in the rucksack.
- * Parameter: food_id is FOOD_* or the exact original food ID.
+ * Parameter: food_id is ITEM_FOOD_* or the exact original food ID.
  * Return value: the zero-based item slot, or RUCKSACK_SLOT_NOT_FOUND when the
  * requested food is absent.
  *
  * 在背包中查找食品。
- * 参数：food_id 为 FOOD_* 或精确原始食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始食品 ID。
  * 返回值：从零开始的物品槽位；没有该食品时返回 RUCKSACK_SLOT_NOT_FOUND。
  */
-MaryRucksackSlotIndex FindFoodInRucksack(MaryFoodId food_id);
+MaryRucksackSlotIndex FindFoodInRucksack(MaryItemFoodId food_id);
 
 /*
  * Finds an article in the rucksack.
- * Parameter: article_id is ARTICLE_* or the exact original article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original article ID.
  * Return value: the zero-based item slot, or RUCKSACK_SLOT_NOT_FOUND when the
  * requested article is absent.
  *
  * 在背包中查找物品。
- * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始物品 ID。
  * 返回值：从零开始的物品槽位；没有该物品时返回 RUCKSACK_SLOT_NOT_FOUND。
  */
-MaryRucksackSlotIndex FindArticleInRucksack(MaryArticleId article_id);
+MaryRucksackSlotIndex FindArticleInRucksack(MaryItemArticleId article_id);
 
 /*
  * Clears one rucksack item slot.
@@ -1875,7 +1835,7 @@ MaryRucksackSlotIndex GetFirstFreeRucksackItemSlot(void);
 
 /*
  * Attempts to add an article stack to the rucksack.
- * Parameters: article_id is ARTICLE_* or the exact original article ID;
+ * Parameters: article_id is ITEM_ARTICLE_* or the exact original article ID;
  * requested_count is a nonnegative number of copies to add. Each article
  * occupies one item slot. The native routine treats the quantity as u32 and
  * does not reject negative Mary-C values.
@@ -1883,20 +1843,20 @@ MaryRucksackSlotIndex GetFirstFreeRucksackItemSlot(void);
  * full request fit in the currently unlocked item slots.
  *
  * 尝试向背包加入一组物品。
- * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID；requested_count 为请求
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始物品 ID；requested_count 为请求
  * 加入的非负份数。每份物品占用一个物品槽。原生例程把数量视为 u32，不会
  * 拒绝 Mary-C 负值。
  * 返回值：未能加入背包的剩余份数；返回 0 表示请求数量全部装入当前已解锁
  * 的物品槽。
  */
-MaryUnaddedItemCount AddArticleToRucksack(
-    MaryArticleId article_id,
+MaryItemUnaddedCount AddArticleToRucksack(
+    MaryItemArticleId article_id,
     MaryRequestedInventoryCount requested_count
 );
 
 /*
  * Attempts to add a food stack to the rucksack.
- * Parameters: food_id is FOOD_* or the exact original food ID;
+ * Parameters: food_id is ITEM_FOOD_* or the exact original food ID;
  * requested_count is a nonnegative number of copies to add. Each food occupies
  * one item slot. The native routine treats the quantity as u32 and does not
  * reject negative Mary-C values.
@@ -1904,21 +1864,21 @@ MaryUnaddedItemCount AddArticleToRucksack(
  * full request fit in the currently unlocked item slots.
  *
  * 尝试向背包加入一组食品。
- * 参数：food_id 为 FOOD_* 或精确原始食品 ID；requested_count 为请求加入的
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始食品 ID；requested_count 为请求加入的
  * 非负份数。每份食品占用一个物品槽。原生例程把数量视为 u32，不会拒绝
  * Mary-C 负值。
  * 返回值：未能加入背包的剩余份数；返回 0 表示请求数量全部装入当前已解锁
  * 的物品槽。
  */
-MaryUnaddedItemCount AddFoodToRucksack(
-    MaryFoodId food_id,
+MaryItemUnaddedCount AddFoodToRucksack(
+    MaryItemFoodId food_id,
     MaryRequestedInventoryCount requested_count
 );
 
 /*
  * Attempts to add a quantity of one tool ID to the rucksack. Existing stacks
  * of the same tool are filled first and each tool stack holds at most 99.
- * Parameters: tool_id is TOOL_* or the exact original tool ID;
+ * Parameters: tool_id is ITEM_TOOL_* or the exact original tool ID;
  * requested_count is the nonnegative inventory quantity to add. The native
  * routine treats it as u32 and does not reject negative Mary-C values.
  * Return value: the quantity that could not be added. Zero means the full
@@ -1926,31 +1886,31 @@ MaryUnaddedItemCount AddFoodToRucksack(
  *
  * 尝试向背包加入指定数量的同一种工具。引擎会先填充已有的同 ID 工具堆，
  * 每个工具堆最多保存 99 个。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID；requested_count 为请求加入的
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID；requested_count 为请求加入的
  * 非负背包数量。原生例程把它视为 u32，不会拒绝 Mary-C 负值。
  * 返回值：未能加入背包的剩余数量；返回 0 表示请求数量全部装入当前已解锁
  * 的工具槽。
  */
-MaryUnaddedItemCount AddToolToRucksack(
-    MaryToolId tool_id,
+MaryItemUnaddedCount AddToolToRucksack(
+    MaryItemToolId tool_id,
     MaryRequestedInventoryCount requested_count
 );
 
 /*
  * Makes the player actor visibly hold or present a tool.
- * Parameter: tool_id is TOOL_* or the exact original tool ID. This is used
+ * Parameter: tool_id is ITEM_TOOL_* or the exact original tool ID. This is used
  * when receiving tools, presenting the Blue Feather, showing a blessed tool,
  * and receiving the Goddess, Kappa, or Truth Gem.
  * The native routine invokes the player's presentation callback and changes
  * the event/player action state to 0x19; it does not add the tool to storage.
  *
  * 让玩家角色以可见方式手持或展示工具。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID。获得工具、展示蓝色羽毛、
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID。获得工具、展示蓝色羽毛、
  * 展示解除诅咒后的工具，以及取得女神、河童或真实之玉时都会调用它。
  * 原生例程会调用玩家的展示回调，并把事件／玩家动作状态切换为 0x19；它不会
  * 把工具加入任何存储容器。
  */
-void ShowPlayerHoldingTool(MaryToolId tool_id);
+void ShowPlayerHoldingTool(MaryItemToolId tool_id);
 
 /*
  * Applies signed changes to player stamina and fatigue.
@@ -2004,50 +1964,50 @@ MaryBool IsPlayerHoldingTool(void);
 /*
  * Tests whether the specified tool is currently held, present in the
  * rucksack, or stored in the tool chest.
- * Parameter: tool_id is TOOL_* or the exact original tool ID.
+ * Parameter: tool_id is ITEM_TOOL_* or the exact original tool ID.
  * Return value: nonzero when owned; zero otherwise.
  *
  * 判断指定工具是否正被手持、位于背包或存放在工具箱中。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID。
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID。
  * 返回值：拥有时为非零，否则为零。
  */
-MaryBool PlayerOwnsTool(MaryToolId tool_id);
+MaryBool PlayerOwnsTool(MaryItemToolId tool_id);
 
 /* Tests whether the player owns a specific food in the held-item slot,
  * rucksack, or refrigerator.
- * Parameter: food_id is FOOD_* or the exact
+ * Parameter: food_id is ITEM_FOOD_* or the exact
  * original food ID. Return value: nonzero when owned; zero otherwise.
  *
  * 判断手持物槽、背包或冰箱中是否拥有指定食品。
- * 参数：food_id 为 FOOD_* 或精确原始食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始食品 ID。
  * 返回值：拥有时为非零，否则为零。
  */
-MaryBool PlayerOwnsFood(MaryFoodId food_id);
+MaryBool PlayerOwnsFood(MaryItemFoodId food_id);
 
 /*
  * Tests whether the specified article is currently held, present in the
  * rucksack, or stored on the shelf.
- * Parameter: article_id is ARTICLE_* or the exact original article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original article ID.
  * Return value: nonzero when owned; zero otherwise.
  *
  * 判断指定物品是否正被手持、位于背包或存放在置物架中。
- * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始物品 ID。
  * 返回值：拥有时为非零，否则为零。
  */
-MaryBool PlayerOwnsArticle(MaryArticleId article_id);
+MaryBool PlayerOwnsArticle(MaryItemArticleId article_id);
 
 /*
  * Removes every copy of an article from the current held-object slot, all
  * currently unlocked rucksack item slots, and every shelf slot. Wrapped and
  * unwrapped copies are both matched by article ID. Other containers and item
  * categories are not affected.
- * Parameter: article_id is ARTICLE_* or the exact original valid article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original valid article ID.
  *
  * 从当前手持物槽、所有已解锁背包物品槽以及全部置物架槽中移除指定物品的每份
  * 副本。已包装和未包装副本都会按物品 ID 匹配；其他容器和物品类别不受影响。
- * 参数：article_id 为 ARTICLE_* 或精确原始有效物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始有效物品 ID。
  */
-void RemoveAllOwnedArticles(MaryArticleId article_id);
+void RemoveAllOwnedArticles(MaryItemArticleId article_id);
 
 /*
  * Gives the player one Power Berry and runs the engine's acquisition action.
@@ -2260,44 +2220,44 @@ MaryBool IsPresentedItemGiftWrapped(void);
 /* Tests whether the held-tool slot, rucksack, or tool chest can accept a tool.
  * An empty held-tool slot accepts it; a nonempty held stack accepts only the
  * same tool ID while its amount is below 99.
- * Parameter: tool_id is TOOL_* or the exact original tool ID.
+ * Parameter: tool_id is ITEM_TOOL_* or the exact original tool ID.
  * Return value: nonzero when at least one applicable destination can accept
  * the tool; zero when all applicable destinations are full.
  *
  * 判断手持工具槽、背包或工具箱能否容纳指定工具。手持工具槽为空时可以接收；
  * 非空时只有同 ID 且数量小于 99 的工具堆可以继续接收。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID。
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID。
  * 返回值：至少一个适用位置能够容纳时为非零；所有适用位置均已满时为零。
  */
-MaryBool CanReceiveTool(MaryToolId tool_id);
+MaryBool CanReceiveTool(MaryItemToolId tool_id);
 
 /*
  * Tests whether a food item can be received without being lost.
- * Parameter: food_id is FOOD_* or the exact original food ID.
+ * Parameter: food_id is ITEM_FOOD_* or the exact original food ID.
  * Return value: nonzero when the empty held-item slot, an unlocked rucksack
  * item slot, or the refrigerator can accept the food; zero when all
  * applicable destinations are full.
  * Shop scripts call this after the price check and before granting the item.
  *
  * 判断食品能否被玩家接收且不会丢失。
- * 参数：food_id 为 FOOD_* 或精确原始食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始食品 ID。
  * 返回值：空手持物槽、已解锁背包物品槽或冰箱中至少一处能够容纳该食品时为
  * 非零；所有适用存放位置均已满时为零。商店脚本会在检查价格之后、交付商品
  * 之前调用它。
  */
-MaryBool CanReceiveFood(MaryFoodId food_id);
+MaryBool CanReceiveFood(MaryItemFoodId food_id);
 
 /* Tests whether the empty held-item slot, an unlocked rucksack item slot, or
  * the shelf can accept an article.
- * Parameter: article_id is ARTICLE_* or the exact original article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original article ID.
  * Return value: nonzero when at least one applicable destination can accept
  * the article; zero when all applicable destinations are full.
  *
  * 判断空手持物槽、已解锁背包物品槽或置物架能否容纳指定物品。
- * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始物品 ID。
  * 返回值：至少一个适用位置能够容纳时为非零；所有适用位置均已满时为零。
  */
-MaryBool CanReceiveArticle(MaryArticleId article_id);
+MaryBool CanReceiveArticle(MaryItemArticleId article_id);
 
 /*
  * Gives the basket to the player.
@@ -2350,33 +2310,6 @@ MaryRucksackUpgradeLevel GetRucksackUpgradeLevel(void);
  * 跳过常规移动及动画选择更新，零则恢复。它不会暂停脚本引擎或对话系统。
  */
 void SetPlayerActorUpdateSuspended(MaryBool suspended);
-#if defined(MARY_MFOMT)
-/*
- * Returns the female protagonist's current outfit color from the low three
- * bits of the saved outfit-state byte.
- * Parameters: none.
- * Return value: one of the six MaryOutfitColor values (0 through 5).
- *
- * 从服装状态存档字节的低三位返回女主角当前的服装颜色。
- * 参数：无。
- * 返回值：六个 MaryOutfitColor 值之一（0 到 5）。
- */
-MaryOutfitColor GetPlayerOutfitColor(void);
-
-/*
- * Changes the female protagonist's outfit color.
- * Parameters: color is an OUTFIT_COLOR_* value.
- * Values outside 0 through 5 are ignored. A valid change preserves the upper
- * state bits and sets bit 3, which marks the outfit state for refresh; writing
- * the already selected color has no effect.
- *
- * 更改女主角的服装颜色。
- * 参数：color 为 OUTFIT_COLOR_*。
- * 0 到 5 以外的值会被忽略。有效变更会保留高位状态并设置 bit 3，标记服装状态
- * 需要刷新；再次写入当前颜色不会产生效果。
- */
-void SetPlayerOutfitColor(MaryOutfitColor color);
-#endif
 /*
  * Reads the selected milestone bit from the local link-data record. Normal
  * event scripts set these bits when relationship or farm milestones are met;
@@ -2616,7 +2549,7 @@ void SetCharacterLove(MaryCharacterId character_id, MaryCharacterLoveValue love)
 /*
  * Assigns an event script to a live scene entity.
  * Parameters: entity_id selects the scene entity; script_id is a symbol from
- * mary_scripts.mary.h or the exact target-specific script-table ID.
+ * fomt_scripts.mary.h or the exact target-specific script-table ID.
  * entity_id uses MaryEntityId (ENTITY_*), not MaryCharacterId (CHARACTER_*):
  * it addresses a live scene entity rather than the character-name table.
  * For NPC entities, stores the low 16 bits as a script override, without
@@ -2628,7 +2561,7 @@ void SetCharacterLove(MaryCharacterId character_id, MaryCharacterLoveValue love)
  * an empty-slot check is not an out-of-range index check.
  *
  * 为当前场景中的实体绑定事件脚本。
- * 参数：entity_id 选择场景实体；script_id 为 mary_scripts.mary.h 中的符号或
+ * 参数：entity_id 选择场景实体；script_id 为 fomt_scripts.mary.h 中的符号或
  * 目标版本脚本表的精确 ID。entity_id 使用 MaryEntityId（ENTITY_*），
  * 而不是 MaryCharacterId（CHARACTER_*）；它指向运行时场景实体，并非人物名称表。
  * 对 NPC 实体，将脚本 ID 的低 16 位保存为覆盖值，不会立即执行该脚本。
@@ -3134,9 +3067,9 @@ MaryBool RecordPlayerHasAlbum(void);
  * Return value: for a valid album, the article ID represented by the previous
  * stored album index. When an album was already present, this is the ejected
  * album. When the player inserts the first album into an empty record player,
- * the native object still returns ARTICLE_ALBUM_1 from its initialized index;
+ * the native object still returns ITEM_ARTICLE_ALBUM_1 from its initialized index;
  * the vanilla script intentionally ignores that return on the empty branch.
- * A non-album input leaves the player unchanged and returns ARTICLE_NONE.
+ * A non-album input leaves the player unchanged and returns ITEM_ARTICLE_NONE.
  * The occupied branch removes the held article first, then gives the returned
  * prior album back to the player.
  *
@@ -3145,11 +3078,11 @@ MaryBool RecordPlayerHasAlbum(void);
  * 参数：article_id 为手持物品 ID，正常取值为唱片 1 至唱片 15。
  * 返回值：合法唱片会返回原先保存的唱片索引所代表的物品 ID。原本已有唱片时，
  * 这就是被弹出的唱片；唱片机为空且首次放入唱片时，原生对象仍会从初始化为零的
- * 旧索引返回 ARTICLE_ALBUM_1，原版脚本在空分支有意忽略该返回值。传入非唱片
- * 不会改变唱片机，并返回 ARTICLE_NONE。已有唱片的分支会先移除手持物，再把
+ * 旧索引返回 ITEM_ARTICLE_ALBUM_1，原版脚本在空分支有意忽略该返回值。传入非唱片
+ * 不会改变唱片机，并返回 ITEM_ARTICLE_NONE。已有唱片的分支会先移除手持物，再把
  * 返回的旧唱片交还给玩家。
  */
-MaryArticleId SwapRecordPlayerAlbum(MaryArticleId article_id);
+MaryItemArticleId SwapRecordPlayerAlbum(MaryItemArticleId article_id);
 
 /*
  * Removes the album currently inserted in the farmhouse record player.
@@ -3163,7 +3096,7 @@ MaryArticleId SwapRecordPlayerAlbum(MaryArticleId article_id);
  * 返回值：取出的唱片物品 ID；没有唱片时返回引擎使用的空物品槽值。交互脚本
  * 会把该返回值作为玩家新拿起的物品。
  */
-MaryArticleId RemoveRecordPlayerAlbum(void);
+MaryItemArticleId RemoveRecordPlayerAlbum(void);
 
 /*
  * Attempts to light the fireplace associated with a map. The matching four-ROM
@@ -3200,32 +3133,32 @@ MaryBool IsFireplaceLitAtLocation(MaryMapId map_id);
 
 /*
  * Places an article in the farmhouse vase and initializes its vase lifespan.
- * Parameter: article_id is normally one of ARTICLE_FLOWER_*; passing the exact
+ * Parameter: article_id is normally one of ITEM_ARTICLE_FLOWER_*; passing the exact
  * integer remains supported for byte-identical compilation. Vase interaction
  * scripts obtain this value from the held article and pair this operation with
  * GetVaseArticleId.
  *
  * 将物品放入农舍花瓶，并初始化该物品在花瓶中的保存期限。
- * 参数：article_id 通常为 ARTICLE_FLOWER_*；也可继续传入精确整数，编译字节
+ * 参数：article_id 通常为 ITEM_ARTICLE_FLOWER_*；也可继续传入精确整数，编译字节
  * 保持一致。花瓶交互脚本从手持物品取得该值，并与 GetVaseArticleId 配合使用。
  */
-void SetVaseArticleId(MaryArticleId article_id);
+void SetVaseArticleId(MaryItemArticleId article_id);
 
 /*
  * Gets the article currently placed in the farmhouse vase.
  * Parameters: none.
- * Return value: ARTICLE_* or the exact article ID; ARTICLE_NOT_PRESENT when
+ * Return value: ITEM_ARTICLE_* or the exact article ID; ITEM_ARTICLE_NOT_PRESENT when
  * the vase is empty. The FoMT-US native wrapper compares FarmHouse's physical
- * ARTICLE_NONE value and maps it to -1 before returning to the VM; the MFoMT
+ * ITEM_ARTICLE_NONE value and maps it to -1 before returning to the VM; the MFoMT
  * wrapper and both regional script sets use the same script-facing sentinel.
  *
  * 获取农舍花瓶中当前放置的物品。
  * 参数：无。
- * 返回值：ARTICLE_* 或精确物品 ID；花瓶为空时返回 ARTICLE_NOT_PRESENT。
- * FoMT-US 原生包装器会比较 FarmHouse 的物理 ARTICLE_NONE，并在返回 VM 前
+ * 返回值：ITEM_ARTICLE_* 或精确物品 ID；花瓶为空时返回 ITEM_ARTICLE_NOT_PRESENT。
+ * FoMT-US 原生包装器会比较 FarmHouse 的物理 ITEM_ARTICLE_NONE，并在返回 VM 前
  * 映射成 -1；MFoMT 包装器及两个地区的脚本使用同一个脚本侧哨兵。
  */
-MaryArticleId GetVaseArticleId(void);
+MaryItemArticleId GetVaseArticleId(void);
 
 /*
  * Tests whether a chicken-coop feed trough is already filled.
@@ -3242,7 +3175,7 @@ MaryArticleId GetVaseArticleId(void);
  * 的地图图块刷新。饲料箱检查脚本会将其与
  * FillChickenFeedTrough 配对使用。
  */
-MaryBool IsChickenFeedTroughFilled(MaryChickenFeedTroughIndex trough_index);
+MaryBool IsChickenFeedTroughFilled(MaryChickenCoopFeedTroughIndex trough_index);
 
 /*
  * Fills a chicken-coop feed trough.
@@ -3263,12 +3196,12 @@ MaryBool IsChickenFeedTroughFilled(MaryChickenFeedTroughIndex trough_index);
  * 均用原始槽位编号索引 X 坐标表，没有独立容量检查。必须传入有效编号，不可依赖
  * 越界输入会安全地不执行任何操作。
  */
-void FillChickenFeedTrough(MaryChickenFeedTroughIndex trough_index);
+void FillChickenFeedTrough(MaryChickenCoopFeedTroughIndex trough_index);
 
 /*
  * Begins egg incubation in the selected coop incubator.
- * Parameter: incubator_index uses CHICKEN_INCUBATOR_SOUTH or
- * CHICKEN_INCUBATOR_NORTH. Only the south incubator exists before the upgrade.
+ * Parameter: incubator_index uses CHICKEN_COOP_INCUBATOR_SOUTH or
+ * CHICKEN_COOP_INCUBATOR_NORTH. Only the south incubator exists before the upgrade.
  * Check IsIncubatorOccupied before calling when replacement is not intended.
  * The four native storage setters mark the incubator occupied and set its
  * countdown to 3, even if it was already occupied. Egg validation and removal
@@ -3278,31 +3211,31 @@ void FillChickenFeedTrough(MaryChickenFeedTroughIndex trough_index);
  * incubator index; the storage guard is not a whole-call no-op guarantee.
  *
  * 在选定的鸡舍孵化箱中开始孵化鸡蛋。
- * 参数：incubator_index 使用 CHICKEN_INCUBATOR_SOUTH 或
- * CHICKEN_INCUBATOR_NORTH；扩建前只有南侧孵化箱存在。不希望覆盖时，应先调用
+ * 参数：incubator_index 使用 CHICKEN_COOP_INCUBATOR_SOUTH 或
+ * CHICKEN_COOP_INCUBATOR_NORTH；扩建前只有南侧孵化箱存在。不希望覆盖时，应先调用
  * IsIncubatorOccupied 检查。
  * 四个版本的原生存储函数都会设置占用标记，并将倒计时设为 3；已经占用时
  * 也会重置。鸡蛋检查与扣除由外围脚本负责，不由该存储函数完成。
  * 超出当前容量的编号会跳过存储写入，但外层上下文方法仍将该编号传给刷新
  * 回调。应使用有效孵化箱编号，不能将存储层保护等同于整个调用毫无影响。
  */
-void BeginEggIncubation(MaryChickenIncubatorIndex incubator_index);
+void BeginEggIncubation(MaryChickenCoopIncubatorIndex incubator_index);
 
 /*
  * Tests whether a chicken-coop incubator is occupied.
- * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
- * CHICKEN_INCUBATOR_NORTH.
+ * Parameter: incubator_index selects CHICKEN_COOP_INCUBATOR_SOUTH or
+ * CHICKEN_COOP_INCUBATOR_NORTH.
  * Return value: TRUE when occupied; FALSE when empty or outside current
  * incubator capacity. FALSE alone does not prove that an index is usable.
  * Incubator inspection scripts use indices 0 and 1.
  *
  * 判断鸡舍中的指定孵化器是否已被占用。
- * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
- * CHICKEN_INCUBATOR_NORTH。
+ * 参数：incubator_index 选择 CHICKEN_COOP_INCUBATOR_SOUTH 或
+ * CHICKEN_COOP_INCUBATOR_NORTH。
  * 返回值：已占用时为 TRUE；为空或超出当前孵化箱容量时均返回 FALSE，
  * 所以仅凭 FALSE 不能认定编号可用。孵化器检查脚本使用索引 0 和 1。
  */
-MaryBool IsIncubatorOccupied(MaryChickenIncubatorIndex incubator_index);
+MaryBool IsIncubatorOccupied(MaryChickenCoopIncubatorIndex incubator_index);
 
 /*
  * Gets the number of usable incubators in the current chicken coop.
@@ -3317,25 +3250,25 @@ MaryBool IsIncubatorOccupied(MaryChickenIncubatorIndex incubator_index);
  * 该函数读取鸡舍的一位扩建等级，不统计已占用或空闲孵化箱。四个原生版本使用
  * 相同规则。
  */
-MaryIncubatorCapacity GetIncubatorCapacity(void);
+MaryChickenCoopIncubatorCapacity GetIncubatorCapacity(void);
 
 /*
  * Tests whether the egg in an incubator has reached its hatch day.
- * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
- * CHICKEN_INCUBATOR_NORTH and is checked against the current capacity.
+ * Parameter: incubator_index selects CHICKEN_COOP_INCUBATOR_SOUTH or
+ * CHICKEN_COOP_INCUBATOR_NORTH and is checked against the current capacity.
  * Return value: nonzero when ready to hatch; zero otherwise.
  *
  * 判断指定孵化箱中的鸡蛋是否已经到达孵化日。
- * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
- * CHICKEN_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
+ * 参数：incubator_index 选择 CHICKEN_COOP_INCUBATOR_SOUTH 或
+ * CHICKEN_COOP_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
  * 返回值：可以孵化时为非零，否则为零。
  */
-MaryBool IsEggReadyToHatch(MaryChickenIncubatorIndex incubator_index);
+MaryBool IsEggReadyToHatch(MaryChickenCoopIncubatorIndex incubator_index);
 
 /*
  * Hatches a ready egg and inserts the new chick into the chicken-coop roster.
- * Parameter: incubator_index selects CHICKEN_INCUBATOR_SOUTH or
- * CHICKEN_INCUBATOR_NORTH and is checked against the current capacity.
+ * Parameter: incubator_index selects CHICKEN_COOP_INCUBATOR_SOUTH or
+ * CHICKEN_COOP_INCUBATOR_NORTH and is checked against the current capacity.
  * Return value: the new chicken's roster slot, or -1 if hatching fails.
  * All four targets clear incubator occupancy before inserting the chick.
  * A later insertion failure does not restore the egg. The readiness check
@@ -3345,15 +3278,15 @@ MaryBool IsEggReadyToHatch(MaryChickenIncubatorIndex incubator_index);
  * so this is also the newborn's initial total. This is not an event-state ID.
  *
  * 孵化已经到期的鸡蛋，并将新生小鸡加入鸡舍动物列表。
- * 参数：incubator_index 选择 CHICKEN_INCUBATOR_SOUTH 或
- * CHICKEN_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
+ * 参数：incubator_index 选择 CHICKEN_COOP_INCUBATOR_SOUTH 或
+ * CHICKEN_COOP_INCUBATOR_NORTH，并按当前一个或两个孵化箱的容量校验。
  * 返回值：新生小鸡的列表槽位；孵化失败时为 -1。
  * 四个版本都先清除孵化箱占用状态，再将小鸡插入列表；之后插入失败不会
  * 恢复鸡蛋。孵化条件要求孵化箱处于占用状态，且倒计时为零。
  * 四个版本都在构造小鸡后、插入列表前增加 rand() % 10 的好感度（0-9 点）。
  * 构造时好感度初始化为零，因此这也是小鸡的初始总好感度，不是事件状态编号。
  */
-MaryChickenSlotIndex AttemptEggHatch(MaryChickenIncubatorIndex incubator_index);
+MaryAnimalChickenSlotIndex AttemptEggHatch(MaryChickenCoopIncubatorIndex incubator_index);
 
 /*
  * Tests whether a barn feed trough is already filled.
@@ -3433,7 +3366,7 @@ void StartShipmentBoxDepositAnimation(void);
  * 该函数读取畜舍的一位扩建等级，不统计已占用或空闲妊娠栏。四个原生版本使用
  * 相同规则。
  */
-MaryPregnancyStallCapacity GetPregnancyStallCapacity(void);
+MaryBarnPregnancyStallCapacity GetPregnancyStallCapacity(void);
 
 /*
  * Tests whether the cow or sheep in a pregnancy stall is ready to give birth.
@@ -3787,31 +3720,31 @@ MaryFestivalContestResult RunChickenFestivalContest(void);
 
 /*
  * Runs the horse-race interface.
- * Parameter: race_mode is HORSE_RACE_MODE_*.
+ * Parameter: race_mode is FESTIVAL_HORSE_RACE_MODE_*.
  * Return value: -1 when the interface is cancelled, 0 when it exits without a
  * race result, 1 when the player horse wins, or 2 when it loses.
  *
- * 运行赛马界面。参数 race_mode 为 HORSE_RACE_MODE_*。
- * 参数：race_mode 为 HORSE_RACE_MODE_*。
+ * 运行赛马界面。参数 race_mode 为 FESTIVAL_HORSE_RACE_MODE_*。
+ * 参数：race_mode 为 FESTIVAL_HORSE_RACE_MODE_*。
  * 返回值：取消界面时为
  * -1；未产生比赛结果而退出时为 0；玩家的马获胜时为 1，落败时为 2。
  */
-MaryHorseRaceInterfaceResult RunHorseRace(MaryHorseRaceMode race_mode);
+MaryFestivalHorseRaceInterfaceResult RunHorseRace(MaryFestivalHorseRaceMode race_mode);
 
 /*
  * Rebuilds the horse-race entry records, including the randomized NPC horse
  * identifiers and race attributes.
  * Parameter: entry_mode is
- * HORSE_RACE_ENTRIES_*; INCLUDE_PLAYER_HORSE marks the player's horse as an
+ * FESTIVAL_HORSE_RACE_ENTRIES_*; INCLUDE_PLAYER_HORSE marks the player's horse as an
  * entrant, while NPC_ONLY prepares a field without it. The invitation scripts
  * select INCLUDE_PLAYER_HORSE only after the player accepts participation.
  *
  * 重新生成赛马参赛记录，包括随机化的 NPC 马匹编号及比赛属性。
- * 参数：entry_mode 为 HORSE_RACE_ENTRIES_*；INCLUDE_PLAYER_HORSE 将玩家的马
+ * 参数：entry_mode 为 FESTIVAL_HORSE_RACE_ENTRIES_*；INCLUDE_PLAYER_HORSE 将玩家的马
  * 标记为参赛，NPC_ONLY 则生成不含玩家马匹的阵容。邀请事件只在玩家同意参赛后
  * 使用 INCLUDE_PLAYER_HORSE。
  */
-void PrepareHorseRaceEntries(MaryHorseRaceEntryMode entry_mode);
+void PrepareHorseRaceEntries(MaryFestivalHorseRaceEntryMode entry_mode);
 
 /*
  * Opens the horse-race medal exchange interface and waits until it closes.
@@ -3824,26 +3757,26 @@ void OpenHorseRaceMedalExchange(void);
 
 /*
  * Runs the dog-frisbee interface.
- * Parameter: game_mode is FRISBEE_MODE_*.
+ * Parameter: game_mode is FESTIVAL_FRISBEE_MODE_*.
  * Return value is FESTIVAL_CONTEST_RESULT_*; contest scripts store it directly
  * in VAR_FRISBEE_TOURNAMENT_RESULT, while practice scripts may ignore it.
  * Return value: FESTIVAL_CONTEST_RESULT_* for the completed interface result.
  *
  * 运行爱犬飞盘界面。
- * 参数：game_mode 为 FRISBEE_MODE_*。
+ * 参数：game_mode 为 FESTIVAL_FRISBEE_MODE_*。
  * 返回值：引擎的飞盘结果 FESTIVAL_CONTEST_RESULT_*；比赛脚本会将其直接写入
  * VAR_FRISBEE_TOURNAMENT_RESULT，自由练习脚本可以忽略该值。
  */
-MaryFestivalContestResult RunFrisbeeGame(MaryFrisbeeMode game_mode);
+MaryFestivalContestResult RunFrisbeeGame(MaryFestivalFrisbeeMode game_mode);
 
 /* Runs the Frisbee Tournament round entered from the beach-rules sign while
  * the tournament state is active. Normal-day practice uses
- * RunFrisbeeGame(FRISBEE_MODE_PRACTICE) instead. The tournament path creates
+ * RunFrisbeeGame(FESTIVAL_FRISBEE_MODE_PRACTICE) instead. The tournament path creates
  * its own modal task in every ROM (MFoMT-US kind 0x28; JP kind 0x27).
  * Parameters: none.
  *
  * 在飞盘大会状态生效时，从海滩规则牌入口运行大会回合。普通日期的练习改走
- * RunFrisbeeGame(FRISBEE_MODE_PRACTICE)。四个 ROM 的大会路径都会创建独立的
+ * RunFrisbeeGame(FESTIVAL_FRISBEE_MODE_PRACTICE)。四个 ROM 的大会路径都会创建独立的
  * 模态任务（MFoMT-US 类型 0x28，JP 类型 0x27）。
  * 参数：无。
  */
@@ -4433,7 +4366,7 @@ MaryBool DoesAnimalExist(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_
  * Parameters: skip_creation must be FALSE to perform creation; any nonzero
  * value returns without creating the horse. The reachable initial facing is
  * therefore always zero (down), not a selectable direction. age_stage is a
- * MaryHorseAgeStage whose value is converted to age_stage * 120 days and
+ * MaryAnimalHorseAgeStage whose value is converted to age_stage * 120 days and
  * stored in a ten-bit age field. Noncanonical values wrap rather than clamp
  * to a growth stage (for example, 128 becomes zero days);
  * map_id is the initial MaryMapId; x and y are absolute map coordinates.
@@ -4446,7 +4379,7 @@ MaryBool DoesAnimalExist(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_
  * 创建并登记农场的马，随后创建其运行时实体。
  * 参数：skip_creation 必须为 FALSE 才执行创建，任何非零值都会直接返回、不创建马。
  * 因此实际可达的初始朝向固定为零（向下），不是可选朝向。age_stage 为
- * MaryHorseAgeStage，引擎会将其
+ * MaryAnimalHorseAgeStage，引擎会将其
  * 换算为 age_stage * 120 天后存入 10 位年龄字段。非标准值会截断回绕，
  * 而非限制到有效成长阶段（例如 128 会变成零天）。
  * map_id 为初始 MaryMapId；x、y 为绝对地图坐标。
@@ -4456,7 +4389,7 @@ MaryBool DoesAnimalExist(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_
  */
 void CreateFarmHorse(
     MaryBool skip_creation,
-    MaryHorseAgeStage age_stage,
+    MaryAnimalHorseAgeStage age_stage,
     MaryMapId map_id,
     MaryMapSpaceX x,
     MaryMapSpaceY y);
@@ -4745,16 +4678,16 @@ MaryAnimalAffectionValue GetAnimalAffection(
  * sheep, and chicken use it to resolve a family-local record. An invalid kind,
  * a missing horse, or an unresolved livestock slot returns zero. When
  * animal_kind is a statically known symbol, the decompiler uses
- * MaryPetGrowthStage, MaryCowGrowthStage, MarySheepGrowthStage, or
- * MaryChickenGrowthStage as appropriate.
+ * MaryAnimalPetGrowthStage, MaryAnimalCowGrowthStage, MaryAnimalSheepGrowthStage, or
+ * MaryAnimalChickenGrowthStage as appropriate.
  *
  * 返回指定动物的成长阶段值。
  * 参数：animal_kind 为 ANIMAL_KIND_*；animal_index 为该类别内从 0 开始的槽位。
  * 返回值：由 animal_kind 选择的马、牛、羊、鸡或狗的引擎成长阶段值。马和狗
  * 忽略 animal_index；牛、羊、鸡用它解析各自类别内的记录。动物类别无效、马
  * 不存在或家畜槽无法解析时返回零。当 animal_kind 是静态可知的符号时，反编译器
- * 会按物种选用 MaryPetGrowthStage、MaryCowGrowthStage、MarySheepGrowthStage
- * 或 MaryChickenGrowthStage。
+ * 会按物种选用 MaryAnimalPetGrowthStage、MaryAnimalCowGrowthStage、MaryAnimalSheepGrowthStage
+ * 或 MaryAnimalChickenGrowthStage。
  */
 int GetAnimalGrowthStage(MaryAnimalKind animal_kind, MaryAnimalSlotIndex animal_index);
 
@@ -5003,7 +4936,7 @@ MaryBool IsCaughtFishKing(void);
 
 /*
  * Selects the partner index used by the upcoming Moon-Viewing Festival.
- * Parameters: none. Return value: MOON_VIEWING_PARTNER_*.
+ * Parameters: none. Return value: FESTIVAL_MOON_VIEWING_PARTNER_*.
  *
  * A married player gets the spouse. Otherwise, each standard spouse candidate
  * is eligible while their rival-event count is at most 4. The selector starts
@@ -5014,7 +4947,7 @@ MaryBool IsCaughtFishKing(void);
  * and MFoMT falls back to Rick.
  *
  * 选择即将举行的赏月节所使用的同行对象索引。
- * 参数：无。返回值：MOON_VIEWING_PARTNER_*。
+ * 参数：无。返回值：FESTIVAL_MOON_VIEWING_PARTNER_*。
  *
  * 玩家已婚时返回配偶。未婚时，标准结婚候选人的情敌事件计数不超过 4 才能
  * 参选。选择器以 30000 爱情度为初值，只有严格大于当前值才会替换结果，因此
@@ -5022,51 +4955,32 @@ MaryBool IsCaughtFishKing(void);
  * 随机性，但并不是在全部同分候选人之间作均匀随机选择。无人满足条件时，FoMT
  * 固定回退到 Popuri，MFoMT 固定回退到 Rick。
  */
-MaryMoonViewingPartner SelectMoonViewingPartner(void);
-#if defined(MARY_MFOMT)
-/*
- * Duplicate callable-table alias of SelectMoonViewingPartner. MFoMT-US and
- * MFoMT-JP dispatch slots 0x122 and 0x123 to the exact same native handler;
- * neither ROM adds a wrapper or changes its return convention. Prefer
- * SelectMoonViewingPartner in new source. This alias exists so raw bytecode
- * containing the second ID can be represented without losing that ID.
- * Parameters: none.
- * Return value: MOON_VIEWING_PARTNER_*, identical to SelectMoonViewingPartner.
- *
- * SelectMoonViewingPartner 的 callable 表重复别名。MFoMT-US 与 MFoMT-JP 的
- * 0x122、0x123 两个槽都直接指向完全相同的原生处理器，不存在额外包装，也没有
- * 改变返回约定。新脚本应优先使用 SelectMoonViewingPartner；保留该别名是为了
- * 让含第二个 ID 的原始字节码能够表达并保持原 ID，不发生信息丢失。
- * 参数：无。
- * 返回值：MOON_VIEWING_PARTNER_*，与 SelectMoonViewingPartner 完全一致。
- */
-MaryMoonViewingPartner SelectMoonViewingPartnerAlias(void);
-#endif
+MaryFestivalMoonViewingPartner SelectMoonViewingPartner(void);
 /*
  * Rates the food currently held by the player for the active Cooking Festival
  * theme.
- * Parameters: none. Return value: COOKING_FESTIVAL_DISH_RATING_*.
+ * Parameters: none. Return value: FESTIVAL_COOKING_DISH_RATING_*.
  * Ratings excellent and great win in the vanilla result script; ineligible
  * means the held food is invalid or does not match the year's category.
  * For eligible food, score = stamina gain - fatigue gain, including the
  * food instance's signed bonuses. Each theme uses its own four thresholds;
  * a rating requires strictly exceeding its threshold, not merely equaling it.
  * Also updates VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID: empty/non-food hands
- * record FOOD_NONE; a valid held food records its ID before category/rating
+ * record ITEM_FOOD_NONE; a valid held food records its ID before category/rating
  * evaluation, even if that dish subsequently receives an ineligible rating.
  *
  * 按当前料理祭主题评价玩家手中持有的料理。
  * 参数：无。
- * 返回值：COOKING_FESTIVAL_DISH_RATING_*。
+ * 返回值：FESTIVAL_COOKING_DISH_RATING_*。
  * 原版结果脚本中“优秀”和“很棒”会获胜；“不合格”表示手持料理无效或不符合当年类别。
  * 对符合类别的食品，分数为体力回复量减去疲劳变化量，包含该食品实例的有符号
  * 附加修正值。每种主题有各自的四档阈值；必须严格大于阈值才能进入该档，
  * 恰好等于阈值时进入下一档。
  * 同时更新 VAR_COOKING_FESTIVAL_PLAYER_DISH_FOOD_ID：空手或非食品时记录
- * FOOD_NONE；有效的手持食品在类别及评分判断前便记录其 ID，即使随后评分
- * 为不合格，也不代表该变量会恢复为 FOOD_NONE。
+ * ITEM_FOOD_NONE；有效的手持食品在类别及评分判断前便记录其 ID，即使随后评分
+ * 为不合格，也不代表该变量会恢复为 ITEM_FOOD_NONE。
  */
-MaryCookingFestivalDishRating GetCookingFestivalDishRating(void);
+MaryFestivalCookingDishRating GetCookingFestivalDishRating(void);
 
 /*
  * Selects the weighted mineral gift for Thomas's Winter 25 stocking event.
@@ -5093,7 +5007,7 @@ MaryThomasStockingGift SelectThomasStockingGift(void);
  * Draws one article ID from the weighted gift table used by post-marriage
  * spouse-present events.
  * Parameters: none. Return value: the selected
- * MaryArticleId, suitable for SetPlayerHeldArticle or its wrapped variant.
+ * MaryItemArticleId, suitable for SetPlayerHeldArticle or its wrapped variant.
  * All four targets use the same table. Exact counts out of 256 are:
  * Amethyst 126, Topaz 43, Ruby 43, Diamond 43, and Pink Diamond 1. The
  * selector only draws and returns the article ID; it does not inspect or
@@ -5101,21 +5015,21 @@ MaryThomasStockingGift SelectThomasStockingGift(void);
  *
  * 从婚后配偶赠礼事件使用的加权礼物表中抽取一个物品 ID。
  * 参数：无。
- * 返回值：选中的 MaryArticleId，可直接传给 SetPlayerHeldArticle
+ * 返回值：选中的 MaryItemArticleId，可直接传给 SetPlayerHeldArticle
  * 或其包装物品版本。
  * 四个版本使用相同的表。按 256 种输入精确计算，紫水晶占 126，黄玉占 43，
  * 红宝石占 43，钻石占 43，粉红钻石占 1。选择器只抽取并返回物品 ID，不检查
  * 或修改背包、包装、婚姻状态或事件状态。
  */
-MaryArticleId GetRandomSpouseGiftArticleId(void);
+MaryItemArticleId GetRandomSpouseGiftArticleId(void);
 
 /*
  * Unlocks the next Van-shop music album made available by GameCube link
  * progress.
  * Parameters: none. Return value: 1 when the unlocked-album count
  * was increased, or 0 when all ten link albums were already unlocked. The
- * engine table maps these ten entries directly to ARTICLE_ALBUM_1 through
- * ARTICLE_ALBUM_10. The native state stores the unlocked prefix length at
+ * engine table maps these ten entries directly to ITEM_ARTICLE_ALBUM_1 through
+ * ITEM_ARTICLE_ALBUM_10. The native state stores the unlocked prefix length at
  * offset 0x16 and the per-album removed/sold bitmap at offset 0x14. This
  * callable only increments the prefix length; it does not clear or restore
  * any album's bitmap state.
@@ -5123,7 +5037,7 @@ MaryArticleId GetRandomSpouseGiftArticleId(void);
  * 根据 GameCube 联动进度，解锁 Van 商店中下一张可出售的音乐唱片。
  * 参数：无。
  * 返回值：成功增加已解锁唱片数量时为 1；十张联动唱片均已解锁时为 0。
- * 引擎表会将这十项直接映射到 ARTICLE_ALBUM_1 至 ARTICLE_ALBUM_10。原生状态
+ * 引擎表会将这十项直接映射到 ITEM_ARTICLE_ALBUM_1 至 ITEM_ARTICLE_ALBUM_10。原生状态
  * 在偏移 0x16 保存已解锁前缀长度，在偏移 0x14 保存逐唱片移除／售出位图。
  * 本函数只增加前缀长度，不会清除或恢复任何唱片的位图状态。
  */
@@ -5296,8 +5210,8 @@ void EnableShootingStarShippingBonus(void);
 /*
  * Returns the cumulative shipped count for a product.
  * Parameter: product_id is the target-specific MaryProductId. This is the
- * complete ShippingBin table domain 0x00..0x66, not MaryFoodId or
- * MaryArticleId. Values above 0x66 return zero. The native comparison is
+ * complete ShippingBin table domain 0x00..0x66, not MaryItemFoodId or
+ * MaryItemArticleId. Values above 0x66 return zero. The native comparison is
  * signed and does not reject negative raw integers, which can index before
  * the table; callers must therefore use MaryProductId rather than treating
  * this as a generally range-safe integer API.
@@ -5307,7 +5221,7 @@ void EnableShootingStarShippingBonus(void);
  *
  * 返回指定产品的累计出货量。
  * 参数：product_id 为目标版本完整的 ShippingBin 表编号域 0x00..0x66；它不是
- * MaryFoodId 或 MaryArticleId。大于 0x66 的值返回零。原生比较使用有符号条件，
+ * MaryItemFoodId 或 MaryItemArticleId。大于 0x66 的值返回零。原生比较使用有符号条件，
  * 不会拒绝负的原始整数，负值可能索引到表之前；调用方必须使用 MaryProductId，
  * 不能把它当作对任意整数都安全的接口。
  * 返回值：显示标志已启用时返回该表项的 31 位累计出货量，否则返回零。出货时
@@ -5488,19 +5402,19 @@ void DescendMineFloor(void);
  * Returns whether the selected cursed tool's curse is still active. The
  * engine maps the six cursed tool IDs to six dedicated curse-state records
  * in sickle, hoe, axe, hammer, watering-can, and fishing-rod order.
- * Parameter: tool_id is one of the six cursed TOOL_* IDs. Return value:
+ * Parameter: tool_id is one of the six cursed ITEM_TOOL_* IDs. Return value:
  * nonzero while that tool remains cursed; zero otherwise.
  * Passing any other raw integer is unsafe: the native mapper falls back to
  * the cursed-hoe record instead of reporting an invalid ID.
  *
  * 返回所选诅咒农具的诅咒是否仍然生效。引擎会把六种诅咒农具 ID 映射到六个
  * 独立的诅咒状态记录，顺序为镰刀、锄头、斧头、锤子、洒水壶、钓竿。
- * 参数：tool_id 为六种诅咒 TOOL_* ID 之一。
+ * 参数：tool_id 为六种诅咒 ITEM_TOOL_* ID 之一。
  * 返回值：仍受诅咒时为非零，否则为零。
  * 传入其他原始整数并不安全：原生映射器会回落到诅咒锄头记录，而不是报告
  * 无效 ID。
  */
-MaryBool IsToolCursed(MaryToolId tool_id);
+MaryBool IsToolCursed(MaryItemToolId tool_id);
 
 /*
  * Advances the consecutive-equipped-day lift condition for the cursed sickle
@@ -5509,7 +5423,7 @@ MaryBool IsToolCursed(MaryToolId tool_id);
  * returns TRUE. All other cursed tools return FALSE without advancing their
  * own lift condition. The sleeping script calls this once after a completed
  * night, and uses TRUE to present the curse-lift sequence.
- * Parameter: tool_id must be TOOL_SICKLE_CURSED or TOOL_HAMMER_CURSED.
+ * Parameter: tool_id must be ITEM_TOOL_SICKLE_CURSED or ITEM_TOOL_HAMMER_CURSED.
  * Return value: TRUE exactly when this call completes the tenth-day lift;
  * FALSE otherwise.
  *
@@ -5517,10 +5431,10 @@ MaryBool IsToolCursed(MaryToolId tool_id);
  * 加一；第十次会清除诅咒生效字节、标记工具已祝福并返回 TRUE。其他诅咒农具
  * 返回 FALSE，且不会推进各自的解除条件。睡眠脚本在完成一夜后调用一次，并以
  * TRUE 结果播放解除诅咒演出。
- * 参数：tool_id 必须为 TOOL_SICKLE_CURSED 或 TOOL_HAMMER_CURSED。
+ * 参数：tool_id 必须为 ITEM_TOOL_SICKLE_CURSED 或 ITEM_TOOL_HAMMER_CURSED。
  * 返回值：本次调用恰好完成第十天解除条件时为 TRUE，否则为 FALSE。
  */
-MaryBool AdvanceCursedToolLiftProgress(MaryToolId tool_id);
+MaryBool AdvanceCursedToolLiftProgress(MaryItemToolId tool_id);
 
 /*
  * Applies one paid church/confessional removal visit to the cursed hoe or
@@ -5529,7 +5443,7 @@ MaryBool AdvanceCursedToolLiftProgress(MaryToolId tool_id);
  * sickle or hammer instead has its consecutive-equipped-day counter reset to
  * zero; axe and fishing rod are unchanged. Other paths return FALSE. The
  * confessional script calls this only after accepting and charging the fee.
- * Parameter: tool_id is one of the six cursed TOOL_* IDs.
+ * Parameter: tool_id is one of the six cursed ITEM_TOOL_* IDs.
  * Return value: TRUE exactly when this visit completes the hoe or watering-can
  * lift; FALSE for the reset, no-change, and incomplete paths.
  *
@@ -5537,11 +5451,11 @@ MaryBool AdvanceCursedToolLiftProgress(MaryToolId tool_id);
  * 清除诅咒生效字节、标记工具已祝福并返回 TRUE。若传入诅咒镰刀或诅咒锤子，
  * 则把其连续装备天数计数清零；斧头和钓竿不变，其余路径返回 FALSE。忏悔室
  * 脚本只在确认并扣除费用后调用本函数。
- * 参数：tool_id 为六种诅咒 TOOL_* ID 之一。
+ * 参数：tool_id 为六种诅咒 ITEM_TOOL_* ID 之一。
  * 返回值：本次访问恰好完成锄头或洒水壶解除时为 TRUE；重置、无变化及尚未完成
  * 路径均为 FALSE。
  */
-MaryBool AttemptChurchCursedToolRemoval(MaryToolId tool_id);
+MaryBool AttemptChurchCursedToolRemoval(MaryItemToolId tool_id);
 
 /*
  * Creates a temporary event icon in an event-local scene slot. Coordinates
@@ -5589,46 +5503,46 @@ void RemoveEventIcon(MaryEventIconSlot slot);
 
 /*
  * Maps a food ID to the icon used by menus and message presentation.
- * Parameter: food_id is FOOD_* or the exact original food ID.
+ * Parameter: food_id is ITEM_FOOD_* or the exact original food ID.
  * Return value: the engine icon ID associated with that food. Valid IDs are
  * 0x00-0xAA on all four targets. An invalid ID returns icon 428 in FoMT and
  * icon 439 in MFoMT; it does not report an error or return zero.
  *
  * 将食品 ID 映射为菜单与消息显示使用的图标。
- * 参数：food_id 为 FOOD_* 或精确原始食品 ID。
+ * 参数：food_id 为 ITEM_FOOD_* 或精确原始食品 ID。
  * 返回值：该食品关联的引擎图标 ID。四个目标的有效 ID 均为 0x00～0xAA。
  * 无效 ID 在 FoMT 返回图标 428，在 MFoMT 返回图标 439；不会报错或返回零。
  */
-MaryEventIconId GetFoodIconId(MaryFoodId food_id);
+MaryEventIconId GetFoodIconId(MaryItemFoodId food_id);
 
 /*
  * Maps an article ID to the icon used by menus and event presentation.
- * Parameter: article_id is ARTICLE_* or the exact original article ID.
+ * Parameter: article_id is ITEM_ARTICLE_* or the exact original article ID.
  * Return value: the engine icon ID associated with that article. FoMT accepts
  * 0x00-0x5E and falls back to icon 457; MFoMT accepts 0x00-0x69 and falls
  * back to icon 468. Invalid IDs do not report an error or return zero.
  *
  * 将物品 ID 映射为菜单与事件显示使用的图标。
- * 参数：article_id 为 ARTICLE_* 或精确原始物品 ID。
+ * 参数：article_id 为 ITEM_ARTICLE_* 或精确原始物品 ID。
  * 返回值：该物品关联的引擎图标 ID。FoMT 接受 0x00～0x5E，无效时返回
  * 图标 457；MFoMT 接受 0x00～0x69，无效时返回图标 468。无效 ID 不会
  * 报错或返回零。
  */
-MaryEventIconId GetArticleIconId(MaryArticleId article_id);
+MaryEventIconId GetArticleIconId(MaryItemArticleId article_id);
 
 /*
  * Maps a tool ID to the icon used by menus and event presentation.
- * Parameter: tool_id is TOOL_* or the exact original tool ID.
+ * Parameter: tool_id is ITEM_TOOL_* or the exact original tool ID.
  * Return value: the engine icon ID associated with that tool. Valid IDs are
  * 0x00-0x50 on all four targets. An invalid ID returns icon 457 in FoMT and
  * icon 468 in MFoMT; it does not report an error or return zero.
  *
  * 将工具 ID 映射为菜单与事件显示使用的图标。
- * 参数：tool_id 为 TOOL_* 或精确原始工具 ID。
+ * 参数：tool_id 为 ITEM_TOOL_* 或精确原始工具 ID。
  * 返回值：该工具关联的引擎图标 ID。四个目标的有效 ID 均为 0x00～0x50。
  * 无效 ID 在 FoMT 返回图标 457，在 MFoMT 返回图标 468；不会报错或返回零。
  */
-MaryEventIconId GetToolIconId(MaryToolId tool_id);
+MaryEventIconId GetToolIconId(MaryItemToolId tool_id);
 
 /*
  * Verified retail no-op retained by the farming-tutorial bytecode. The VM
@@ -5693,14 +5607,12 @@ void NoOpTutorialEggSelection(int unused_operand);
  * Puts the player into the scripted state for holding an actor graphic above
  * their head and waits for the transition.
  * Parameter: animation_id selects a target-specific MaryAnimationId graphic
- * animation. Canonical semantic names are preferred; ANIMATION_ID_* remains
- * accepted only as a compatibility spelling for a physical slot that has an
- * alias. Chicken tutorials call this after removing the live chicken entity;
+ * animation by its single canonical constant name. Chicken tutorials call
+ * this after removing the live chicken entity;
  * FoMT and MFoMT use different physical IDs for ANIMATION_CHICKEN_HELD.
  *
  * 让玩家进入把角色图形举在头顶的脚本状态，并等待状态转场完成。
- * 参数：animation_id 选择目标版本的 MaryAnimationId 图形动画。规范源码优先使用
- * 已证实的语义名称；ANIMATION_ID_* 只作为已有别名所对应物理槽的兼容写法。
+ * 参数：animation_id 通过唯一规范常量名选择目标版本的 MaryAnimationId 图形动画。
  * 养鸡教程会在删除活动鸡实体后调用本函数；FoMT 与 MFoMT 的
  * ANIMATION_CHICKEN_HELD 使用不同物理编号。
  */
@@ -5780,140 +5692,3 @@ int GetEventContextValue(void);
  * 工具。
  */
 void CycleBackwardToNonCursedTool(void);
-#if defined(MARY_MFOMT)
-/*
- * Tests whether the Mayonnaise Maker has been installed in the expanded Coop.
- * Parameters: none. Return value: the persistent installation flag. The native
- * blacksmith-order completion path sets this exact flag when order 35
- * (BLACKSMITH_ORDER_MAYONNAISE_MAKER) finishes. This is not an incubator-slot
- * occupancy query: actual incubator occupancy is stored in each indexed record.
- *
- * 判断扩建后的鸡舍是否已经安装蛋黄酱加工机。
- * 参数：无。返回值：持久安装标记。原生锻冶屋订单完成路径会在编号 35
- *（BLACKSMITH_ORDER_MAYONNAISE_MAKER）完成时设置这个准确状态位。它并非
- * 孵化箱槽位占用查询；真正的占用状态保存在每个带索引的记录中。
- */
-MaryBool IsMayonnaiseMakerInstalled(void);
-
-/*
- * Tests whether the Cheese Maker has been installed in the expanded Barn.
- * Parameters: none. Return value: the persistent installation flag. The native
- * blacksmith-order completion path sets this exact flag when order 36
- * (BLACKSMITH_ORDER_CHEESE_MAKER) finishes. It does not inspect either indexed
- * pregnancy-stall link.
- *
- * 判断扩建后的畜棚是否已经安装奶酪加工机。
- * 参数：无。返回值：持久安装标记。原生锻冶屋订单完成路径会在编号 36
- *（BLACKSMITH_ORDER_CHEESE_MAKER）完成时设置这个准确状态位。它不会检查
- * 任一带索引的妊娠隔间链接。
- */
-MaryBool IsCheeseMakerInstalled(void);
-
-/*
- * Tests whether the Yarn Maker has been installed in the expanded Barn.
- * Parameters: none. Return value: the persistent installation flag. The native
- * blacksmith-order completion path sets this exact flag when order 37
- * (BLACKSMITH_ORDER_YARN_MAKER) finishes. It does not inspect either indexed
- * pregnancy-stall link.
- *
- * 判断扩建后的畜棚是否已经安装毛线团加工机。
- * 参数：无。返回值：持久安装标记。原生锻冶屋订单完成路径会在编号 37
- *（BLACKSMITH_ORDER_YARN_MAKER）完成时设置这个准确状态位。它不会检查任一
- * 带索引的妊娠隔间链接。
- */
-MaryBool IsYarnMakerInstalled(void);
-
-/*
- * Returns the accumulated catch count from one MFoMT fishing-record slot.
- * Parameter: record_id is FISHING_RECORD_* in the complete 59-slot domain.
- * Return value: the first 32-bit field of the selected eight-byte record.
- * MFoMT-US and MFoMT-JP use the same layout; IDs 53-58 are River Kings.
- * The native leaf performs no bounds check before indexing record_id * 8;
- * callers must stay within the declared 0-58 domain.
- *
- * 返回 MFoMT 指定钓鱼记录槽中的累计捕获数量。
- * 参数：record_id 为完整 59 槽域中的 FISHING_RECORD_*。
- * 返回值：所选八字节记录的第一个 32 位字段。MFoMT-US 与 MFoMT-JP 使用相同
- * 布局；编号 53-58 为鱼王。
- * 原生叶函数在按 record_id * 8 索引前不做边界检查；调用方必须使用声明的
- * 0-58 域内值。
- */
-MaryFishCount GetFishCatchCount(MaryFishingRecordId record_id);
-
-/*
- * Returns the largest recorded size from one MFoMT fishing-record slot.
- * Parameter: record_id is FISHING_RECORD_* in the complete 59-slot domain.
- * Return value: the second 32-bit field of the selected eight-byte record, in
- * whole centimeters. Both regional fishing-record screens divide it by 100
- * for meters and use the remainder for centimeters. The native leaf performs
- * no bounds check before indexing record_id * 8.
- *
- * 返回 MFoMT 指定钓鱼记录槽中的最大捕获尺寸。
- * 参数：record_id 为完整 59 槽域中的 FISHING_RECORD_*。
- * 返回值：所选八字节记录的第二个 32 位字段，单位为整厘米。两个地区版的
- * 钓鱼记录界面都将其除以 100 显示米数，并以除以 100 的余数显示厘米数。
- * 原生叶函数在按 record_id * 8 索引前不做边界检查。
- */
-MaryFishSize GetLargestCaughtFishSize(MaryFishingRecordId record_id);
-
-/*
- * Returns whether map_id exists in MFoMT's initialized map-metadata registry.
- * Both regional ROMs search a counted array of 20-byte records by the first
- * 16-bit field. The constructor folds 117 static map descriptors into 108
- * unique map records. This reports registry membership only; it does not mean
- * that story access to the map is currently unlocked.
- * Parameter: map_id is a MAP_* value for the selected MFoMT target.
- * Return value: TRUE when the ID is registered; FALSE otherwise.
- *
- * 返回 map_id 是否存在于 MFoMT 初始化后的地图元数据注册表。两套地区 ROM 均按
- * 首个 16 位字段搜索一组带计数的 20 字节记录；构造器会把 117 条静态地图描述
- * 合并成 108 个唯一地图记录。本函数只报告注册表成员关系，不表示剧情上已经
- * 解锁或当前能够进入该地图。
- * 参数：map_id 为当前 MFoMT 目标的 MAP_* 值。
- * 返回值：该 ID 已注册时为 TRUE，否则为 FALSE。
- */
-MaryBool IsMapRegistered(MaryMapId map_id);
-
-/*
- * Returns the accumulated 16-bit use experience for one of the six standard
- * tools.
- * Parameter: tool_kind is TOOL_KIND_* in the public sickle/hoe/axe/
- * hammer/watering-can/fishing-rod order. Invalid kinds return zero.
- * Return value: the tool's unsigned 16-bit accumulated experience, or zero
- * for an invalid kind.
- *
- * 返回六种标准农具之一累计的 16 位使用经验。
- * 参数：tool_kind 使用 TOOL_KIND_*，对外顺序为镰刀、锄头、斧头、锤子、
- * 洒水壶、钓竿。无效类别返回零。
- * 返回值：该农具累计的无符号 16 位经验；类别无效时为零。
- */
-MaryToolExperienceValue GetToolExperience(MaryToolKind tool_kind);
-
-/*
- * Returns the number of animals in the selected family whose festival-winner
- * bit is set among the currently present animals, not the total number of
- * historical festival victories. Cow and sheep slots are filtered by their
- * stored animal type; empty slots are excluded. Barn/coop capacity is 8/16
- * and 4/8 respectively, depending on the corresponding upgrade bit.
- * Parameter: animal_kind is ANIMAL_KIND_* in horse, cow, sheep,
- * chicken, and dog order. Only kinds 0-4 are valid. An invalid kind exits the
- * native dispatcher without pushing a result onto the VM stack; it does not
- * produce a script-visible zero and must not be used.
- * Both MFoMT regions also have a native horse-branch defect: when a horse
- * exists but its winner bit is clear, no result is pushed. No horse produces
- * zero; a winning horse produces one (subject to VM stack capacity).
- * Return value: the number of currently present winning animals for valid
- * inputs, subject to the documented horse defect.
- *
- * 返回当前仍存在、且已设置祭典优胜标志的指定类别动物数量，不是历史获奖次数。
- * 牛羊按栏位中保存的动物类型筛选，空栏位不计数。畜棚容量为8/16、鸡舍为4/8，
- * 分别由对应设施的升级位决定。
- * 参数：animal_kind 使用 ANIMAL_KIND_*，顺序为马、牛、羊、鸡、狗；仅0-4有效。
- * 无效类别直接退出原生分派器，不向虚拟栈压入返回值；并不会在脚本中返回零，
- * 不应使用。
- * 女孩版两区还存在马分支的原生缺陷：马存在但优胜位未设置时不压入结果。
- * 无马时得到零，获奖马得到一（仍受虚拟栈容量限制）。
- * 返回值：有效输入下当前仍存在的获奖动物数；马类别受上述原生缺陷影响。
- */
-MaryFestivalWinningAnimalCount CountFestivalWinningAnimals(MaryAnimalKind animal_kind);
-#endif

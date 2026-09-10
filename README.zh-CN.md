@@ -35,52 +35,54 @@ cargo build --release
 
 ## Mary-C 工作流
 
-Mary-C 是新的 C 形标准前端。文件使用 `.mary.c` 和 `.mary.h` 后缀，编辑器可以直接提供 C 语法高亮，同时后缀也明确表示其中的 `mary_` 扩展必须交给本编译器。完整语法见 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.md)（[English](docs/MARY_C_LANGUAGE.en.md)）。
+Mary-C 是新的 C 形标准前端。文件使用 `.mary.c` 和 `.mary.h` 后缀，编辑器可以直接提供 C 语法高亮，同时后缀也明确表示其中的 `mary_` 扩展必须交给本编译器。完整语法见 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.zh-CN.md)（[English](docs/MARY_C_LANGUAGE.md)）。
 
 以 FoMT 日版为例，批量反编译全部脚本：
 
 ```console
-mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
+mary decompile rom/fomtjp.gba goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap.txt -o decompiled_text/fomt_jp
 ```
 
-输出目录按指针表的每个槽生成 `.mary.c`，空指针槽也会生成明确标注 `NULL`、不含伪造脚本正文的占位文件；此外还会生成本地 `mary_constants.mary.h`、`mary_callables.mary.h`、`mary_scripts.mary.h`。`.mary.sym` 只供反编译命名使用，不会被复制或 include，空槽同时以 `NULL` 保留在脚本表中。单脚本 Mary-C 反编译写入文件时也会把固定常量头和 callable 头复制到输出文件旁；提供脚本符号表或脚本表时，还会一并生成本地脚本表头。
+输出目录按指针表的每个槽生成 `.mary.c`，空指针槽也会生成明确标注 `NULL`、不含伪造脚本正文的占位文件；此外还会生成本地 `fomt_constants.mary.h`、`fomt_callables.mary.h`、`fomt_scripts.mary.h`。`.mary.sym` 只供反编译命名使用，不会被复制或 include，空槽同时以 `NULL` 保留在脚本表中。单脚本 Mary-C 反编译写入文件时也会把固定常量头和 callable 头复制到输出文件旁；提供脚本符号表或脚本表时，还会一并生成本地脚本表头。
 
 每个生成脚本都会显式选择 ROM 目标：
 
 ```c
 #define MARY_FOMT_JP
-#include "mary_callables.mary.h"
-#include "mary_scripts.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
 ```
 
 因此，只要把单独脚本与两个头文件放在一起，就可以独立回编：
 
 ```console
-mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt --binary -o EventScript_0867.riff
+mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
 ```
 
-可用目标为 `MARY_FOMT_US`、`MARY_MFOMT_US`、`MARY_FOMT_JP` 和 `MARY_MFOMT_JP`。callable 表和 script 表只写一次公共槽位，只有实际差异的位置才在表内部使用条件分支。
+可用目标为 `MARY_FOMT_US`、`MARY_MFOMT_US`、`MARY_FOMT_JP` 和 `MARY_MFOMT_JP`。FoMT 使用 `fomt_*` 表，MFoMT 使用 `mfomt_*` 表；每个作品表内部只维护自己的 US/JP 本地化差异，不再把男女版差异很大的物理 ID 序列交织在同一文件中。
 
 ## 命令行用法
 
 ### 解包全部脚本
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
+mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT_DIRECTORY
 ```
+
+MFoMT 请改用 `goodies/mfomt_callables.mary.h` 与 `goodies/mfomt_scripts_text.mary.sym`，输出头文件也相应使用 `mfomt_*.mary.h`。
 
 `--all` 按指针表槽位输出 `.mary.c`；有语义名的文件使用脚本名，空指针生成明确占位文件，后续脚本 ID 不会偏移。
 
 ### 解包单个脚本
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --script-id ID --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
+mary decompile ROM goodies/fomt_callables.mary.h --script-id ID --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
 ```
 
 也可以从任意二进制偏移读取 RIFF：
 
 ```console
-mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
+mary decompile BINARY goodies/fomt_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
 ```
 
 `--script-id` 和 `--offset` 不能同时使用。
@@ -91,19 +93,19 @@ mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D 
 生成可嵌入 C 工程的数据定义：
 
 ```console
-mary compile INPUT.mary.c --mary-c --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
 ```
 
 直接生成单个 RIFF 二进制：
 
 ```console
-mary compile INPUT.mary.c --mary-c --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --binary --charmap charmap.txt -o OUTPUT.riff
 ```
 
 二进制模式只允许一个脚本。不使用 `--binary` 时输出可供 C 工程嵌入的数据定义；这只是输出容器，不表示 `.mary.c` 能交给普通 C 编译器。Mary-C 会读取源码中的本地 `#include`，无需外部 `cpp`。
 
 ```console
-mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap.txt -o OUTPUT.c
 ```
 
 `--print-ir` 在文本形式的反编译源码或 C 字节数组定义中附加虚拟栈 IR 审计注释，不参与回编。`--binary` 输出是纯 RIFF 字节流，无法容纳注释，因此不要把两者组合使用。
@@ -112,7 +114,7 @@ mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o OUTPUT
 
 ## 字符码表
 
-所有普通文本，包括美版英文和日版 Shift-JIS 文本，都通过可替换的 UTF-8 文件 `charmap_jp.txt` 转换。
+所有普通文本，包括美版英文和日版 Shift-JIS 文本，都通过可替换的 UTF-8 文件 `charmap.txt` 转换。
 
 ```text
 HEX=文本或控制符
@@ -188,9 +190,9 @@ const MESSAGE_13 =
 
 ## callable、常量与脚本语法
 
-统一的 [Mary-C callable 表](goodies/mary_callables.mary.h) 按四个目标选择真实物理 ID，并为已确认的原生函数声明返回值、参数类型和中英文用途。固定编号位于 `mary_constants.mary.h`；脚本槽由生成的 `mary_scripts.mary.h` 按顺序决定。符号与原始整数会生成相同 VM 字节。
+按作品拆分的 [FoMT callable 表](goodies/fomt_callables.mary.h) 与 [MFoMT callable 表](goodies/mfomt_callables.mary.h) 分别定义各自的真实物理 ID 序列，并为已确认的原生函数声明返回值、参数类型和中英文用途。固定编号和生成脚本表也使用对应的作品前缀。符号与原始整数会生成相同 VM 字节。
 
-Mary-C 支持的 C 子集、未支持语法的等价改写建议，以及 `mary_nodisc`、`mary_switch_compact`、`mary_implicit_default`、`mary_dead_jump`、`mary_break_switch` 等无损专用语法，统一以 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.md) 为准。打印器若残留低级 `ir` 或 `jump next` 会报错，不会伪装成高级语言成功。
+Mary-C 支持的 C 子集、未支持语法的等价改写建议，以及 `mary_nodisc`、`mary_switch_compact`、`mary_implicit_default`、`mary_dead_jump`、`mary_break_switch` 等无损专用语法，统一以 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.zh-CN.md) 为准。打印器若残留低级 `ir` 或 `jump next` 会报错，不会伪装成高级语言成功。
 
 ## 验证
 
@@ -217,7 +219,7 @@ rom/fomtjp.gba
 rom/mfomtjp.gba
 ```
 
-ROM 和解包输出目录均由 Git 忽略。Mary-C 测试直接使用仓库内统一的 `goodies/mary_callables.mary.h`、`mary_constants.mary.h` 与 `mary_scripts_text.mary.sym`，不需要设置环境变量。运行：
+ROM 和解包输出目录均由 Git 忽略。Mary-C 测试直接使用仓库内 FoMT/MFoMT 两套表，不需要设置环境变量。运行：
 
 ```console
 cargo test --all-targets --features test_with_roms

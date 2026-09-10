@@ -532,7 +532,7 @@ fn mary_c_cli_rejects_unstructured_ir_instead_of_emitting_fake_source() {
             .args([
                 "decompile",
                 input.to_str().unwrap(),
-                "goodies/mary_callables.mary.h",
+                "goodies/fomt_callables.mary.h",
                 "--mary-c",
                 "-D",
                 "MARY_FOMT_US",

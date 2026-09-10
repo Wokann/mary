@@ -35,52 +35,54 @@ The release executable is written to `target/release/mary.exe`.
 
 ## Mary-C workflow
 
-Mary-C is the canonical C-shaped frontend. Files use `.mary.c` and `.mary.h`, so editors provide C highlighting while the names still make it clear that Mary extensions require this compiler. See the [Mary-C language reference](docs/MARY_C_LANGUAGE.en.md) ([中文](docs/MARY_C_LANGUAGE.md)).
+Mary-C is the canonical C-shaped frontend. Files use `.mary.c` and `.mary.h`, so editors provide C highlighting while the names still make it clear that Mary extensions require this compiler. See the [Mary-C language reference](docs/MARY_C_LANGUAGE.md) ([简体中文](docs/MARY_C_LANGUAGE.zh-CN.md)).
 
 Decompile all scripts from a Japanese FoMT ROM:
 
 ```console
-mary decompile rom/fomtjp.gba goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap_jp.txt -o decompiled_text/fomt_jp
+mary decompile rom/fomtjp.gba goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap.txt -o decompiled_text/fomt_jp
 ```
 
-The output directory contains one `.mary.c` per pointer-table slot, including an explicit `NULL` placeholder with no fabricated script body for every empty pointer, plus local `mary_constants.mary.h`, `mary_callables.mary.h`, and `mary_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null slots also remain `NULL` in the generated script table. A single-script Mary-C decompile written to a file also copies the fixed constants and callable headers beside that file; when script symbols or a script table are supplied, it generates the local script-table header as well.
+The output directory contains one `.mary.c` per pointer-table slot, including an explicit `NULL` placeholder with no fabricated script body for every empty pointer, plus local `fomt_constants.mary.h`, `fomt_callables.mary.h`, and `fomt_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null slots also remain `NULL` in the generated script table. A single-script Mary-C decompile written to a file also copies the fixed constants and callable headers beside that file; when script symbols or a script table are supplied, it generates the local script-table header as well.
 
 Each generated source explicitly selects its ROM target:
 
 ```c
 #define MARY_FOMT_JP
-#include "mary_callables.mary.h"
-#include "mary_scripts.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
 ```
 
 This makes an extracted script independently compilable after copying it together with the two headers:
 
 ```console
-mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap_jp.txt --binary -o EventScript_0867.riff
+mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
 ```
 
-Available targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. The callable and script tables keep common slots once and use conditional branches only where a target differs.
+Available targets are `MARY_FOMT_US`, `MARY_MFOMT_US`, `MARY_FOMT_JP`, and `MARY_MFOMT_JP`. FoMT uses the `fomt_*` tables and MFoMT uses the `mfomt_*` tables. Each family table contains only its own US/JP localization branches; the different FoMT/MFoMT physical ID layouts are no longer interleaved in one file.
 
 ## Command-line usage
 
 ### Decompile every script
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --all --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT_DIRECTORY
+mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT_DIRECTORY
 ```
+
+For MFoMT, use `goodies/mfomt_callables.mary.h` and `goodies/mfomt_scripts_text.mary.sym`; generated headers are correspondingly named `mfomt_*.mary.h`.
 
 `--all` writes one `.mary.c` per pointer-table slot. Named scripts use their semantic symbol; null pointers become explicit placeholders, so later IDs never shift.
 
 ### Decompile one script
 
 ```console
-mary decompile ROM goodies/mary_callables.mary.h --script-id ID --mary-c --symbols goodies/mary_scripts_text.mary.sym -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
+mary decompile ROM goodies/fomt_callables.mary.h --script-id ID --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
 ```
 
 An arbitrary RIFF offset can also be decoded:
 
 ```console
-mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap_jp.txt -o OUTPUT.mary.c
+mary decompile BINARY goodies/fomt_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
 ```
 
 `--script-id` and `--offset` are mutually exclusive.
@@ -91,19 +93,19 @@ mary decompile BINARY goodies/mary_callables.mary.h --offset OFFSET --mary-c -D 
 Generate C data definitions:
 
 ```console
-mary compile INPUT.mary.c --mary-c --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
 ```
 
 Generate one binary RIFF directly:
 
 ```console
-mary compile INPUT.mary.c --mary-c --binary --charmap charmap_jp.txt -o OUTPUT.riff
+mary compile INPUT.mary.c --mary-c --binary --charmap charmap.txt -o OUTPUT.riff
 ```
 
 Binary mode accepts exactly one script. Omitting `--binary` emits a C data definition for embedding; that output choice does not make `.mary.c` ordinary C. Mary-C reads supported local `#include` files itself, so no external `cpp` pass is needed.
 
 ```console
-mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap_jp.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap.txt -o OUTPUT.c
 ```
 
 `--print-ir` appends stack-VM IR audit comments to textual decompiler output or C byte-array definitions; those comments do not participate in recompilation. A `--binary` result is a raw RIFF byte stream and cannot contain comments, so do not combine the two options.
@@ -112,7 +114,7 @@ Use `mary compile --help` and `mary decompile --help` for all options.
 
 ## Character map
 
-All ordinary text—including US English and Japanese Shift-JIS text—is converted through the replaceable UTF-8 `charmap_jp.txt` file.
+All ordinary text—including US English and Japanese Shift-JIS text—is converted through the replaceable UTF-8 `charmap.txt` file.
 
 ```text
 HEX=text or control token
@@ -188,9 +190,9 @@ Table length is determined from pointer validity and RIFF data, not by dropping 
 
 ## Callables, constants, and script syntax
 
-The unified [Mary-C callable table](goodies/mary_callables.mary.h) selects the physical IDs of all four targets and documents each verified native function's return value, parameter types, and purpose in English and Chinese. Fixed domains live in `mary_constants.mary.h`; generated `mary_scripts.mary.h` order defines script slots. Symbols and raw integers compile to identical VM bytes.
+The family-specific [FoMT callable table](goodies/fomt_callables.mary.h) and [MFoMT callable table](goodies/mfomt_callables.mary.h) define their independent physical ID sequences and document each verified native function's return value, parameter types, and purpose in English and Chinese. The matching constants files hold fixed domains; generated family script-table order defines script slots. Symbols and raw integers compile to identical VM bytes.
 
-The [Mary-C language reference](docs/MARY_C_LANGUAGE.en.md) is authoritative for the supported C subset, recommended rewrites for unsupported syntax, and the lossless `mary_nodisc`, `mary_switch_compact`, `mary_implicit_default`, `mary_dead_jump`, and `mary_break_switch` forms. The printer rejects residual low-level `ir` or `jump next` rather than reporting false high-level success.
+The [Mary-C language reference](docs/MARY_C_LANGUAGE.md) is authoritative for the supported C subset, recommended rewrites for unsupported syntax, and the lossless `mary_nodisc`, `mary_switch_compact`, `mary_implicit_default`, `mary_dead_jump`, and `mary_break_switch` forms. The printer rejects residual low-level `ir` or `jump next` rather than reporting false high-level success.
 
 ## Verification
 
@@ -217,7 +219,7 @@ rom/fomtjp.gba
 rom/mfomtjp.gba
 ```
 
-The ROM and decompiled-output directories are ignored by Git. Mary-C tests read the unified tracked `goodies/mary_callables.mary.h`, `mary_constants.mary.h`, and `mary_scripts_text.mary.sym` directly; no environment variables are required. Run:
+The ROM and decompiled-output directories are ignored by Git. Mary-C tests read the tracked FoMT and MFoMT table families directly; no environment variables are required. Run:
 
 ```console
 cargo test --all-targets --features test_with_roms

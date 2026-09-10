@@ -130,36 +130,6 @@ pub fn parse_constant_header(
             }
             continue;
         }
-        if let Some(rest) = text.strip_prefix("mary_const_alias(") {
-            if current_type.is_some() {
-                return malformed(line, "cannot declare a constant alias inside an enum");
-            }
-            let Some(arguments) = rest.strip_suffix(");") else {
-                return malformed(line, "mary_const_alias must end with ');'");
-            };
-            let arguments = arguments.split(',').map(str::trim).collect::<Vec<_>>();
-            if arguments.len() != 2 || arguments.iter().any(|name| !is_identifier(name)) {
-                return malformed(
-                    line,
-                    "mary_const_alias expects an alias and a canonical constant name",
-                );
-            }
-            let Some(value) = scope.const_int_value(arguments[1]) else {
-                return malformed(line, "mary_const_alias references an unknown constant");
-            };
-            let Some(crate::ir::ValueType::UserType(type_id)) =
-                scope.constant_value_type(arguments[1])
-            else {
-                return malformed(
-                    line,
-                    "mary_const_alias target is not a typed integer constant",
-                );
-            };
-            if !scope.add_typed_int_alias(arguments[0].to_owned(), value, type_id) {
-                return malformed(line, "mary_const_alias redeclares an existing name");
-            }
-            continue;
-        }
         if let Some(rest) = text.strip_prefix("mary_callable_return_type_when(") {
             if current_type.is_some() {
                 return malformed(
@@ -428,7 +398,7 @@ pub fn parse_constant_header(
         let Some(type_name) = current_type.as_deref() else {
             return malformed(
                 line,
-                "expected 'typedef enum', 'typedef int', 'mary_const_alias', 'mary_type_subset', 'mary_typed_identity', 'mary_var_type', 'mary_callable_return_type_when', 'mary_callable_return_type_when_callable', or 'mary_callable_parameter_type_when'",
+                "expected 'typedef enum', 'typedef int', 'mary_type_subset', 'mary_typed_identity', 'mary_var_type', 'mary_callable_return_type_when', 'mary_callable_return_type_when_callable', or 'mary_callable_parameter_type_when'",
             );
         };
         if awaiting_enum_brace {
@@ -568,44 +538,6 @@ PORTRAIT_TARGET = 3,
     }
 
     #[test]
-    fn constant_aliases_compile_but_do_not_replace_the_canonical_output_name() {
-        let source = r#"
-typedef enum MaryAudioSequenceId {
-AUDIO_BGM_WEDDING = 6,
-} MaryAudioSequenceId;
-mary_const_alias(AUDIO_SEQUENCE_006, AUDIO_BGM_WEDDING);
-"#;
-        let scope = parse_constant_header(source, &Options::default()).unwrap();
-        let ty = scope.user_type("MaryAudioSequenceId").unwrap();
-        assert_eq!(scope.const_int_value("AUDIO_SEQUENCE_006"), Some(6));
-        assert_eq!(
-            scope.constant_value_type("AUDIO_SEQUENCE_006"),
-            Some(crate::ir::ValueType::UserType(ty))
-        );
-        assert_eq!(scope.typed_int_const_name(ty, 6), Some("AUDIO_BGM_WEDDING"));
-    }
-
-    #[test]
-    fn constant_aliases_reject_unknown_targets_and_duplicate_names() {
-        let unknown = parse_constant_header(
-            "mary_const_alias(OLD_NAME, MISSING_NAME);\n",
-            &Options::default(),
-        )
-        .unwrap_err();
-        assert!(unknown.to_string().contains("unknown constant"));
-
-        let duplicate = parse_constant_header(
-            "typedef enum MaryId {\nVALUE = 1,\n} MaryId;\n\
-             mary_const_alias(VALUE, VALUE);\n",
-            &Options::default(),
-        )
-        .unwrap_err();
-        assert!(duplicate
-            .to_string()
-            .contains("redeclares an existing name"));
-    }
-
-    #[test]
     fn binds_a_game_variable_to_its_semantic_value_type() {
         let source = r#"
 typedef enum MaryVarId {
@@ -700,13 +632,13 @@ mary_var_type(VAR_RACE_RESULT, MaryBool);
 typedef enum MaryAnimalKind {
 ANIMAL_KIND_COW = 1,
 } MaryAnimalKind;
-typedef enum MaryCowGrowthStage {
-COW_GROWTH_STAGE_ADULT = 2,
-} MaryCowGrowthStage;
-mary_callable_return_type_when(GetGrowthStage, 0, ANIMAL_KIND_COW, MaryCowGrowthStage);
+typedef enum MaryAnimalCowGrowthStage {
+ANIMAL_COW_GROWTH_STAGE_ADULT = 2,
+} MaryAnimalCowGrowthStage;
+mary_callable_return_type_when(GetGrowthStage, 0, ANIMAL_KIND_COW, MaryAnimalCowGrowthStage);
 "#;
         let scope = parse_constant_header(source, &Options::default()).unwrap();
-        let cow_growth_type = scope.user_type("MaryCowGrowthStage").unwrap();
+        let cow_growth_type = scope.user_type("MaryAnimalCowGrowthStage").unwrap();
         assert_eq!(
             scope.dependent_callable_return_type("GetGrowthStage", 0, 1),
             Some(crate::ir::ValueType::UserType(cow_growth_type))
@@ -723,13 +655,13 @@ mary_callable_return_type_when(GetGrowthStage, 0, ANIMAL_KIND_COW, MaryCowGrowth
 typedef enum MaryHeldItemKind {
 HELD_ITEM_KIND_FOOD = 0,
 } MaryHeldItemKind;
-typedef enum MaryFoodId {
-FOOD_TURNIP = 0,
-} MaryFoodId;
-mary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_FOOD, MaryFoodId);
+typedef enum MaryItemFoodId {
+ITEM_FOOD_TURNIP = 0,
+} MaryItemFoodId;
+mary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_FOOD, MaryItemFoodId);
 "#;
         let scope = parse_constant_header(source, &Options::default()).unwrap();
-        let food_type = scope.user_type("MaryFoodId").unwrap();
+        let food_type = scope.user_type("MaryItemFoodId").unwrap();
         assert_eq!(
             scope.related_callable_return_types("GetPresentedItemKind", 0),
             vec![(

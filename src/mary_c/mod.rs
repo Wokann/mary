@@ -41,19 +41,19 @@ impl Options {
         match name {
             "MARY_FOMT_US" => {
                 self.defines.insert("MARY_FOMT".into(), "1".into());
-                self.defines.insert("MARY_US".into(), "1".into());
+                self.defines.insert("REGION_US".into(), "1".into());
             }
             "MARY_MFOMT_US" => {
                 self.defines.insert("MARY_MFOMT".into(), "1".into());
-                self.defines.insert("MARY_US".into(), "1".into());
+                self.defines.insert("REGION_US".into(), "1".into());
             }
             "MARY_FOMT_JP" => {
                 self.defines.insert("MARY_FOMT".into(), "1".into());
-                self.defines.insert("MARY_JP".into(), "1".into());
+                self.defines.insert("REGION_JP".into(), "1".into());
             }
             "MARY_MFOMT_JP" => {
                 self.defines.insert("MARY_MFOMT".into(), "1".into());
-                self.defines.insert("MARY_JP".into(), "1".into());
+                self.defines.insert("REGION_JP".into(), "1".into());
             }
             _ => {}
         }

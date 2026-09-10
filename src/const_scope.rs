@@ -121,17 +121,6 @@ impl ConstScope {
         self.typed_constants.insert((type_id, value), name);
     }
 
-    /// Adds an input-compatible alias without replacing the canonical name
-    /// selected when an integer of this type is decorated during decompilation.
-    pub fn add_typed_int_alias(&mut self, name: String, value: i64, type_id: usize) -> bool {
-        if self.constants.contains_key(&name) {
-            return false;
-        }
-        self.constants.insert(name.clone(), ConstVal::Int(value));
-        self.constant_value_types.insert(name, type_id);
-        true
-    }
-
     pub fn typed_int_const_name(&self, type_id: usize, value: i64) -> Option<&str> {
         self.typed_constants
             .get(&(type_id, value))

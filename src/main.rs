@@ -419,6 +419,7 @@ fn main_error() -> Result<(), Error> {
                     "Mary-C decompile requires exactly one MARY_* target",
                 ));
             }
+            let mary_headers = mary_target.map(mary_header_names);
             let mut script_table_include = script_table
                 .as_ref()
                 .map(|path| path.to_string_lossy().into_owned());
@@ -439,7 +440,8 @@ fn main_error() -> Result<(), Error> {
             let named_scripts = symbol_scripts.as_ref().or(input_scripts.as_ref());
             let constants_path = input_library
                 .parent()
-                .map(|directory| directory.join("mary_constants.mary.h"))
+                .zip(mary_headers)
+                .map(|(directory, headers)| directory.join(headers.constants))
                 .filter(|path| path.is_file());
             let mut local_single_headers = false;
             if mary_c && !all {
@@ -448,22 +450,17 @@ fn main_error() -> Result<(), Error> {
                         .parent()
                         .unwrap_or_else(|| std::path::Path::new("."));
                     fs::create_dir_all(directory)?;
-                    fs::write(
-                        directory.join("mary_callables.mary.h"),
-                        fs::read(&input_library)?,
-                    )?;
+                    let headers = mary_headers.expect("Mary-C target checked above");
+                    fs::write(directory.join(headers.callables), fs::read(&input_library)?)?;
                     if let Some(scripts) = named_scripts {
                         fs::write(
-                            directory.join("mary_scripts.mary.h"),
+                            directory.join(headers.scripts),
                             render_script_table(scripts),
                         )?;
-                        script_table_include = Some("mary_scripts.mary.h".into());
+                        script_table_include = Some(headers.scripts.into());
                     }
                     if let Some(constants) = constants_path.as_ref() {
-                        fs::write(
-                            directory.join("mary_constants.mary.h"),
-                            fs::read(constants)?,
-                        )?;
+                        fs::write(directory.join(headers.constants), fs::read(constants)?)?;
                     }
                     local_single_headers = true;
                 }
@@ -517,13 +514,13 @@ fn main_error() -> Result<(), Error> {
                         rom_info::ScriptTableEntry::Empty { .. } => {
                             if mary_c {
                                 let library_include = if local_single_headers {
-                                    std::borrow::Cow::Borrowed("mary_callables.mary.h")
+                                    std::borrow::Cow::Borrowed(mary_headers.unwrap().callables)
                                 } else {
                                     input_library.to_string_lossy()
                                 };
                                 let constants_include = constants_path.as_ref().map(|path| {
                                     if local_single_headers {
-                                        std::borrow::Cow::Borrowed("mary_constants.mary.h")
+                                        std::borrow::Cow::Borrowed(mary_headers.unwrap().constants)
                                     } else {
                                         path.to_string_lossy()
                                     }
@@ -645,13 +642,13 @@ fn main_error() -> Result<(), Error> {
             };
 
             let library_path_for_include = if local_single_headers {
-                std::borrow::Cow::Borrowed("mary_callables.mary.h")
+                std::borrow::Cow::Borrowed(mary_headers.unwrap().callables)
             } else {
                 input_library.to_string_lossy()
             };
             let constants_path_for_include = constants_path.as_ref().map(|path| {
                 if local_single_headers {
-                    std::borrow::Cow::Borrowed("mary_constants.mary.h")
+                    std::borrow::Cow::Borrowed(mary_headers.unwrap().constants)
                 } else {
                     path.to_string_lossy()
                 }
@@ -722,9 +719,11 @@ fn decompile_all_scripts(
     use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
 
     let library_code = fs::read_to_string(input_library)?;
+    let headers = mary_target.map(mary_header_names);
     let constants_path = input_library
         .parent()
-        .map(|directory| directory.join("mary_constants.mary.h"))
+        .zip(headers)
+        .map(|(directory, headers)| directory.join(headers.constants))
         .filter(|path| path.is_file());
     let mut library_scope = if mary_c {
         let constants = constants_path
@@ -749,16 +748,14 @@ fn decompile_all_scripts(
     }
     fs::create_dir_all(output_dir)?;
     if mary_c {
-        fs::write(output_dir.join("mary_callables.mary.h"), &library_code)?;
+        let headers = headers.expect("Mary-C target checked by caller");
+        fs::write(output_dir.join(headers.callables), &library_code)?;
         if let Some(constants) = constants_path.as_ref() {
-            fs::write(
-                output_dir.join("mary_constants.mary.h"),
-                fs::read(constants)?,
-            )?;
+            fs::write(output_dir.join(headers.constants), fs::read(constants)?)?;
         }
     }
     let library_path_for_include = if mary_c {
-        std::borrow::Cow::Borrowed("mary_callables.mary.h")
+        std::borrow::Cow::Borrowed(headers.unwrap().callables)
     } else {
         input_library.to_string_lossy()
     };
@@ -787,7 +784,9 @@ fn decompile_all_scripts(
         let mut table = String::from("mary_script_table\n{\n");
         for entry in &entries {
             match entry {
-                rom_info::ScriptTableEntry::Empty { .. } => table.push_str("    NULL,\n"),
+                rom_info::ScriptTableEntry::Empty { id, .. } => {
+                    table.push_str(&format!("    /* 0x{id:04X} */ NULL,\n"));
+                }
                 rom_info::ScriptTableEntry::Script { id, .. } => {
                     let base_name = named_scripts
                         .and_then(|scripts| scripts.name(*id))
@@ -796,12 +795,12 @@ fn decompile_all_scripts(
                     let name = text_names
                         .and_then(|symbols| symbols.script_name(*id))
                         .unwrap_or(&base_name);
-                    table.push_str(&format!("    {name},\n"));
+                    table.push_str(&format!("    /* 0x{id:04X} */ {name},\n"));
                 }
             }
         }
         table.push_str("};\n");
-        fs::write(output_dir.join("mary_scripts.mary.h"), table)?;
+        fs::write(output_dir.join(headers.unwrap().scripts), table)?;
     }
 
     for entry in entries {
@@ -828,6 +827,7 @@ fn decompile_all_scripts(
                     script_id,
                     mary_target.unwrap_or("MARY_TARGET_REQUIRED"),
                     constants_path.is_some(),
+                    headers.unwrap(),
                 )?;
             }
             rom_info::ScriptTableEntry::Empty { .. } => print_empty_script_slot(
@@ -890,8 +890,8 @@ fn decompile_all_scripts(
                     charmap,
                     mary_c,
                     mary_target,
-                    mary_c.then_some("mary_scripts.mary.h"),
-                    constants_path.as_ref().map(|_| "mary_constants.mary.h"),
+                    mary_c.then_some(headers.unwrap().scripts),
+                    constants_path.as_ref().map(|_| headers.unwrap().constants),
                 )?;
                 writer.flush()?;
             }
@@ -906,14 +906,15 @@ fn print_empty_mary_c_slot(
     script_id: usize,
     mary_target: &str,
     include_constants: bool,
+    headers: MaryHeaderNames,
 ) -> io::Result<()> {
     let mut writer = BufWriter::new(File::create(output_path)?);
     writeln!(writer, "#define {mary_target}")?;
     if include_constants {
-        writeln!(writer, "#include \"mary_constants.mary.h\"")?;
+        writeln!(writer, "#include \"{}\"", headers.constants)?;
     }
-    writeln!(writer, "#include \"mary_callables.mary.h\"")?;
-    writeln!(writer, "#include \"mary_scripts.mary.h\"")?;
+    writeln!(writer, "#include \"{}\"", headers.callables)?;
+    writeln!(writer, "#include \"{}\"", headers.scripts)?;
     writeln!(writer)?;
     writeln!(
         writer,
@@ -1152,13 +1153,38 @@ fn selected_mary_target(options: &mary::mary_c::Options) -> Option<&str> {
     selected.next().is_none().then_some(first)
 }
 
+#[derive(Clone, Copy)]
+struct MaryHeaderNames {
+    constants: &'static str,
+    callables: &'static str,
+    scripts: &'static str,
+}
+
+fn mary_header_names(target: &str) -> MaryHeaderNames {
+    if target.starts_with("MARY_MFOMT_") {
+        MaryHeaderNames {
+            constants: "mfomt_constants.mary.h",
+            callables: "mfomt_callables.mary.h",
+            scripts: "mfomt_scripts.mary.h",
+        }
+    } else {
+        MaryHeaderNames {
+            constants: "fomt_constants.mary.h",
+            callables: "fomt_callables.mary.h",
+            scripts: "fomt_scripts.mary.h",
+        }
+    }
+}
+
 fn render_script_table(table: &mary::mary_c::ScriptTable) -> String {
     let mut source = String::from("mary_script_table\n{\n");
-    for slot in table.slots() {
+    for (id, slot) in table.slots().iter().enumerate() {
         match slot {
-            mary::mary_c::ScriptSlot::Empty => source.push_str("    NULL,\n"),
+            mary::mary_c::ScriptSlot::Empty => {
+                source.push_str(&format!("    /* 0x{id:04X} */ NULL,\n"));
+            }
             mary::mary_c::ScriptSlot::Script(name) => {
-                source.push_str(&format!("    {name},\n"));
+                source.push_str(&format!("    /* 0x{id:04X} */ {name},\n"));
             }
         }
     }
@@ -1215,17 +1241,17 @@ mod tests {
             Some(output.clone()),
             0,
             "MARY_FOMT_US",
-            "mary_callables.mary.h",
-            Some("mary_scripts.mary.h"),
-            Some("mary_constants.mary.h"),
+            "fomt_callables.mary.h",
+            Some("fomt_scripts.mary.h"),
+            Some("fomt_constants.mary.h"),
         )
         .unwrap();
 
         let source = fs::read_to_string(&output).unwrap();
         assert!(source.starts_with("#define MARY_FOMT_US\n"));
-        assert!(source.contains("#include \"mary_constants.mary.h\"\n"));
-        assert!(source.contains("#include \"mary_callables.mary.h\"\n"));
-        assert!(source.contains("#include \"mary_scripts.mary.h\"\n"));
+        assert!(source.contains("#include \"fomt_constants.mary.h\"\n"));
+        assert!(source.contains("#include \"fomt_callables.mary.h\"\n"));
+        assert!(source.contains("#include \"fomt_scripts.mary.h\"\n"));
         assert!(source.contains("NULL script pointer-table slot 0"));
         assert!(!source.contains("void EventScript_"));
 

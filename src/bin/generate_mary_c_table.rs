@@ -48,10 +48,10 @@ fn scope_entries(scope: &ConstScope) -> Vec<Entry> {
     out
 }
 
-fn slot(out: &mut dyn Write, entry: &Entry) -> io::Result<()> {
+fn slot(out: &mut dyn Write, id: usize, entry: &Entry) -> io::Result<()> {
     match &entry.name {
-        Some(name) => writeln!(out, "    {name},"),
-        None => writeln!(out, "    NULL,"),
+        Some(name) => writeln!(out, "    /* 0x{id:03X} */ {name},"),
+        None => writeln!(out, "    /* 0x{id:03X} */ NULL,"),
     }
 }
 
@@ -83,95 +83,29 @@ fn prototype(out: &mut dyn Write, entry: &Entry) -> io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args_os().collect();
     if args.len() != 4 {
-        return Err("usage: generate_mary_c_table LEGACY_FOMT LEGACY_MFOMT OUTPUT".into());
+        return Err("usage: generate_mary_c_table LEGACY_LIBRARY fomt|mfomt OUTPUT".into());
     }
-    let boy = entries(Path::new(&args[1]))?;
-    let girl = entries(Path::new(&args[2]))?;
-
-    let mut dp = vec![vec![0usize; girl.len() + 1]; boy.len() + 1];
-    for i in (0..boy.len()).rev() {
-        for j in (0..girl.len()).rev() {
-            dp[i][j] = if boy[i].name.is_some() && boy[i] == girl[j] {
-                dp[i + 1][j + 1] + 1
-            } else {
-                dp[i + 1][j].max(dp[i][j + 1])
-            };
-        }
-    }
-    let mut pairs = Vec::new();
-    let (mut i, mut j) = (0, 0);
-    while i < boy.len() && j < girl.len() {
-        if boy[i].name.is_some() && boy[i] == girl[j] {
-            pairs.push((i, j));
-            i += 1;
-            j += 1;
-        } else if dp[i + 1][j] >= dp[i][j + 1] {
-            i += 1;
-        } else {
-            j += 1;
-        }
-    }
-    pairs.push((boy.len(), girl.len()));
+    let family = args[2].to_string_lossy();
+    let family_upper = match family.as_ref() {
+        "fomt" => "FOMT",
+        "mfomt" => "MFOMT",
+        _ => return Err("family must be fomt or mfomt".into()),
+    };
+    let family_entries = entries(Path::new(&args[1]))?;
 
     let mut out = Vec::new();
     writeln!(
         out,
-        "/* Shared ordered callable IDs. Select one MARY_* target in the .mary.c source. */"
-    )?;
-    writeln!(
-        out,
-        "#if !(defined(MARY_FOMT_US) || defined(MARY_MFOMT_US) || defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))\n#error Select exactly one MARY_* target\n#endif"
-    )?;
-    writeln!(
-        out,
-        "#if (defined(MARY_FOMT_US) && (defined(MARY_MFOMT_US) || defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))) || (defined(MARY_MFOMT_US) && (defined(MARY_FOMT_JP) || defined(MARY_MFOMT_JP))) || (defined(MARY_FOMT_JP) && defined(MARY_MFOMT_JP))\n#error Select exactly one MARY_* target\n#endif"
-    )?;
-    writeln!(
-        out,
-        "#if defined(MARY_FOMT_US)\n#define MARY_FOMT\n#define MARY_US\n#elif defined(MARY_MFOMT_US)\n#define MARY_MFOMT\n#define MARY_US\n#elif defined(MARY_FOMT_JP)\n#define MARY_FOMT\n#define MARY_JP\n#elif defined(MARY_MFOMT_JP)\n#define MARY_MFOMT\n#define MARY_JP\n#endif"
+        "/* {family_upper} ordered callable IDs. Region differences use REGION_US/REGION_JP. */"
     )?;
     writeln!(out, "mary_callable_table\n{{")?;
-    let (mut bi, mut gi) = (0, 0);
-    for (bc, gc) in pairs {
-        if bi < bc || gi < gc {
-            if boy[bi..bc] == girl[gi..gc] {
-                for entry in &boy[bi..bc] {
-                    slot(&mut out, entry)?;
-                }
-            } else if bi == bc {
-                writeln!(out, "#if defined(MARY_MFOMT)")?;
-                for entry in &girl[gi..gc] {
-                    slot(&mut out, entry)?;
-                }
-                writeln!(out, "#endif")?;
-            } else if gi == gc {
-                writeln!(out, "#if defined(MARY_FOMT)")?;
-                for entry in &boy[bi..bc] {
-                    slot(&mut out, entry)?;
-                }
-                writeln!(out, "#endif")?;
-            } else {
-                writeln!(out, "#if defined(MARY_FOMT)")?;
-                for entry in &boy[bi..bc] {
-                    slot(&mut out, entry)?;
-                }
-                writeln!(out, "#elif defined(MARY_MFOMT)")?;
-                for entry in &girl[gi..gc] {
-                    slot(&mut out, entry)?;
-                }
-                writeln!(out, "#endif")?;
-            }
-        }
-        if bc < boy.len() {
-            slot(&mut out, &boy[bc])?;
-            bi = bc + 1;
-            gi = gc + 1;
-        }
+    for (id, entry) in family_entries.iter().enumerate() {
+        slot(&mut out, id, entry)?;
     }
     writeln!(out, "}};\n")?;
 
     let mut prototypes = BTreeMap::new();
-    for entry in boy.iter().chain(&girl) {
+    for entry in &family_entries {
         if let Some(name) = &entry.name {
             prototypes
                 .entry(name.clone())

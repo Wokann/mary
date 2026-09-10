@@ -1,3 +1,5 @@
+mod common;
+
 use std::{collections::HashMap, fs, path::Path};
 
 use mary::{
@@ -11,8 +13,90 @@ use mary::{
 };
 
 #[test]
+fn text_symbols_are_unique_to_one_script_slot_per_target() {
+    let source = common::symbols_source();
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let symbols = parse_text_name_table(&source, &options).unwrap();
+        let mut owners = HashMap::<String, usize>::new();
+        for script_id in 0..1416 {
+            for name in symbols
+                .names(script_id, symbols.text_count(script_id))
+                .into_iter()
+                .flatten()
+            {
+                if let Some(previous) = owners.insert(name.clone(), script_id) {
+                    assert_eq!(
+                        previous, script_id,
+                        "{target}: {name} is shared by script slots {previous:04} and {script_id:04}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn text_symbols_follow_their_owning_event_scope_per_target() {
+    let source = common::symbols_source();
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let symbols = parse_text_name_table(&source, &options).unwrap();
+        for script_id in 0..1416 {
+            let Some(script_name) = symbols.script_name(script_id) else {
+                continue;
+            };
+            if script_name
+                .strip_prefix("EventScript_")
+                .is_some_and(|suffix| suffix.bytes().all(|byte| byte.is_ascii_digit()))
+            {
+                continue;
+            }
+            let event_scope = script_name.strip_prefix("EventScript_").unwrap();
+            let components = event_scope.split('_').collect::<Vec<_>>();
+            let numbered_relationship_stage = components
+                .get(2)
+                .is_some_and(|component| component.bytes().all(|byte| byte.is_ascii_digit()));
+            let scope_depth = if matches!(
+                components.first().copied(),
+                Some("LoveEvent" | "RivalEvent")
+            ) && numbered_relationship_stage
+            {
+                4
+            } else {
+                2
+            }
+            .min(components.len());
+            let required_scope = components[..scope_depth].join("_");
+            let exact_text_name = format!("gText_{required_scope}");
+            let text_prefix = format!("gText_{required_scope}_");
+            for name in symbols
+                .names(script_id, symbols.text_count(script_id))
+                .into_iter()
+                .flatten()
+            {
+                assert!(
+                    name == exact_text_name || name.starts_with(&text_prefix),
+                    "{target}: script {script_id:04} {script_name} owns unscoped text {name}; expected {exact_text_name} or {text_prefix}*"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn semantic_script_and_text_names_do_not_end_in_duplicate_ordinals() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut offenders = source
         .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
         .filter(|token| token.starts_with("EventScript_") || token.starts_with("gText_"))
@@ -36,7 +120,7 @@ fn semantic_script_and_text_names_do_not_end_in_duplicate_ordinals() {
 
 #[test]
 fn every_text_bearing_script_has_an_event_level_semantic_name() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
@@ -66,7 +150,7 @@ fn every_text_bearing_script_has_an_event_level_semantic_name() {
 
 #[test]
 fn tv_shopping_phone_order_texts_use_stable_role_names_for_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let required_roles = [
         "PendingOrderAwaitingDelivery",
         "PhoneInspection",
@@ -121,7 +205,7 @@ fn tv_shopping_phone_order_texts_use_stable_role_names_for_all_targets() {
 
 #[test]
 fn church_confessional_texts_distinguish_choices_forgiveness_and_rejection() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_LocationInteraction_ChurchConfessional_";
     let common_roles = [
         "ChoiceConfessInsufficientSleep",
@@ -186,7 +270,7 @@ fn church_confessional_texts_distinguish_choices_forgiveness_and_rejection() {
 
 #[test]
 fn fomt_player_condition_messages_name_their_trigger_and_purpose() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_SystemEvent_PlayerConditionTimeAndWeatherMessages_";
     let common_roles = [
         "HighFatigueRestAdvice",
@@ -242,7 +326,7 @@ fn fomt_player_condition_messages_name_their_trigger_and_purpose() {
 
 #[test]
 fn tool_experience_requirements_parse_for_all_four_targets() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -253,10 +337,10 @@ fn tool_experience_requirements_parse_for_all_four_targets() {
         parse_constant_header(&header, &options).unwrap();
     }
     for declaration in [
-        "TOOL_EXPERIENCE_REQUIRED_FOR_COPPER = 6000",
-        "TOOL_EXPERIENCE_REQUIRED_FOR_SILVER = 18000",
-        "TOOL_EXPERIENCE_REQUIRED_FOR_GOLD = 36000",
-        "TOOL_EXPERIENCE_REQUIRED_FOR_MYSTRILE_OR_MYTHIC = 65535",
+        "ITEM_TOOL_EXPERIENCE_REQUIRED_FOR_COPPER = 6000",
+        "ITEM_TOOL_EXPERIENCE_REQUIRED_FOR_SILVER = 18000",
+        "ITEM_TOOL_EXPERIENCE_REQUIRED_FOR_GOLD = 36000",
+        "ITEM_TOOL_EXPERIENCE_REQUIRED_FOR_MYSTRILE_OR_MYTHIC = 65535",
     ] {
         assert!(header.contains(declaration), "missing {declaration}");
     }
@@ -264,7 +348,7 @@ fn tool_experience_requirements_parse_for_all_four_targets() {
 
 #[test]
 fn jeff_dialogue_roles_follow_location_friendship_and_version_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Jeff_DialogueAndGiftResponses_";
     let shared_location_roles = [
         "SupermarketBackRoomAfterClosing",
@@ -341,7 +425,7 @@ fn jeff_dialogue_roles_follow_location_friendship_and_version_control_flow() {
 
 #[test]
 fn fomt_karen_spouse_dialogue_roles_follow_family_and_love_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let pregnancy_roles = [
         "PlayerSpouseFarmhousePregnancyEarlyFirstConversation",
@@ -452,7 +536,7 @@ fn fomt_karen_spouse_dialogue_roles_follow_family_and_love_control_flow() {
 
 #[test]
 fn fomt_karen_non_spouse_dialogue_roles_follow_marriage_and_love_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let rival_spouse_roles = [
         "RivalSpouseFirstConversation",
@@ -535,7 +619,7 @@ fn fomt_karen_non_spouse_dialogue_roles_follow_marriage_and_love_control_flow() 
 
 #[test]
 fn fomt_karen_entry_birthday_blue_feather_and_starry_night_roles_follow_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let ordered_roles = [
         "Introduction",
@@ -583,7 +667,7 @@ fn fomt_karen_entry_birthday_blue_feather_and_starry_night_roles_follow_control_
 
 #[test]
 fn fomt_karen_location_dialogue_roles_preserve_region_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let fixed_location_roles = [
         "UnmarriedNorthSideTownSunnyAfternoonConversation",
@@ -662,7 +746,7 @@ fn fomt_karen_location_dialogue_roles_preserve_region_text_reuse() {
 
 #[test]
 fn mfomt_karen_dialogue_roles_follow_marriage_and_friendship_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let married_rick_roles = [
         "PlayerMarriedRickLowFriendshipFirstConversation",
@@ -751,7 +835,7 @@ fn mfomt_karen_dialogue_roles_follow_marriage_and_friendship_control_flow() {
 
 #[test]
 fn mfomt_karen_location_dialogue_roles_preserve_region_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Karen_DialogueAndGiftResponses_";
     let shared_roles = [
         "NonRivalSpouseNorthSideTownSunnyAfternoonConversation",
@@ -830,7 +914,7 @@ fn mfomt_karen_location_dialogue_roles_preserve_region_text_reuse() {
 
 #[test]
 fn sasha_dialogue_roles_preserve_family_specific_middle_slots_and_shared_matrix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Sasha_DialogueAndGiftResponses_";
     let leading_roles = [
         "Introduction",
@@ -931,7 +1015,7 @@ fn sasha_dialogue_roles_preserve_family_specific_middle_slots_and_shared_matrix(
 
 #[test]
 fn doug_dialogue_roles_preserve_family_specific_marriage_and_link_slots() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Doug_DialogueAndGiftResponses_";
     let leading_roles = [
         "Introduction",
@@ -1039,7 +1123,7 @@ fn doug_dialogue_roles_preserve_family_specific_marriage_and_link_slots() {
 
 #[test]
 fn ann_introduction_birthday_proposal_and_starry_night_roles_follow_family_rules() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ann_DialogueAndGiftResponses_";
 
     for (target, script_id, leading, proposal) in [
@@ -1177,7 +1261,7 @@ fn ann_introduction_birthday_proposal_and_starry_night_roles_follow_family_rules
 
 #[test]
 fn fomt_ann_player_spouse_lifecycle_and_heart_dialogue_roles_are_ordered() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ann_DialogueAndGiftResponses_";
     let lifecycle = [
         "PlayerSpousePregnancyStage1FirstConversation",
@@ -1263,7 +1347,7 @@ fn fomt_ann_player_spouse_lifecycle_and_heart_dialogue_roles_are_ordered() {
 
 #[test]
 fn ann_rival_spouse_and_player_married_other_inn_matrices_preserve_shared_slots() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ann_DialogueAndGiftResponses_";
     let rival_spouse_matrix = [
         "RivalSpouseInnFriendship0To24FirstConversation",
@@ -1335,7 +1419,7 @@ fn ann_rival_spouse_and_player_married_other_inn_matrices_preserve_shared_slots(
 
 #[test]
 fn ann_unmarried_inn_matrix_preserves_region_specific_greeting_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ann_DialogueAndGiftResponses_";
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
@@ -1426,7 +1510,7 @@ fn ann_unmarried_inn_matrix_preserves_region_specific_greeting_reuse() {
 
 #[test]
 fn ann_location_roles_preserve_jp_anniversary_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ann_DialogueAndGiftResponses_";
     let shared_locations = [
         "RivalSpouseInnBackRoomFirstConversation",
@@ -1496,7 +1580,7 @@ fn ann_location_roles_preserve_jp_anniversary_text_reuse() {
 
 #[test]
 fn lou_or_ruby_gamecube_recipe_and_inn_roles_match_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let recipes = [
         "GameCubeRecipe01WildGrapeJuice",
         "GameCubeRecipe02CornFlakes",
@@ -1597,7 +1681,7 @@ fn lou_or_ruby_gamecube_recipe_and_inn_roles_match_all_targets() {
 
 #[test]
 fn fomt_slot_1022_is_van_not_lou_or_ruby() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let event = "EventScript_NPCEvent_Van_DialogueGiftAndGameCubeAlbumUnlock";
     let prefix = "gText_NPCEvent_Van_DialogueGiftAndGameCubeAlbumUnlock_";
 
@@ -1631,7 +1715,7 @@ fn fomt_slot_1022_is_van_not_lou_or_ruby() {
 
 #[test]
 fn inventory_and_mine_scripts_do_not_use_text_placeholders_as_event_names() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "EventScript_LocationInteraction_InspectStoredLumber",
@@ -1665,7 +1749,7 @@ fn inventory_and_mine_scripts_do_not_use_text_placeholders_as_event_names() {
 
 #[test]
 fn mfomt_non_silent_dialogue_is_not_named_as_a_pause() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_NPCEvent_Popuri_IntroductionReturnChickenChoice_PopuriProtestsThatChickensAreCute",
@@ -1692,7 +1776,7 @@ fn mfomt_non_silent_dialogue_is_not_named_as_a_pause() {
 
 #[test]
 fn mfomt_cliff_original_dead_branch_is_named_without_hiding_its_reachability() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_NPCEvent_Cliff_DialogueAndGiftResponses_UnreachableRivalProgress_AnnTreatsCliffKindly",
@@ -1714,7 +1798,7 @@ fn mfomt_cliff_original_dead_branch_is_named_without_hiding_its_reachability() {
 
 #[test]
 fn spouse_nickname_player_name_values_are_not_called_placeholders() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for spouse in [
         "Karen", "Popuri", "Ann", "Mary", "Elli", "Rick", "Kai", "Cliff", "Gray", "Doctor",
@@ -1730,7 +1814,7 @@ fn spouse_nickname_player_name_values_are_not_called_placeholders() {
 
 #[test]
 fn us_japanese_residual_texts_name_their_runtime_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_NPCEvent_Zack_DialogueAndGiftResponses_FarmHighFriendshipRepeatConversation_UntranslatedJapaneseLeadIn",
@@ -1756,7 +1840,7 @@ fn us_japanese_residual_texts_name_their_runtime_roles() {
 
 #[test]
 fn date_chicken_and_tv_templates_use_roles_instead_of_var_numbers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_SystemMenu_ClockCalendarDisplay_CurrentDate",
@@ -1790,7 +1874,7 @@ fn date_chicken_and_tv_templates_use_roles_instead_of_var_numbers() {
 
 #[test]
 fn interpolated_animal_item_and_mail_texts_use_runtime_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_FestivalEvent_ChickenFestival_PostTournamentDialogue_Rick_PraisesSelectedChickenStrength",
@@ -1813,7 +1897,7 @@ fn interpolated_animal_item_and_mail_texts_use_runtime_roles() {
 
 #[test]
 fn mfomt_van_texts_name_special_offer_link_and_inn_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_NPCEvent_Van_DialogueAndGiftResponses_SpecialOfferIntroduction",
@@ -1856,7 +1940,7 @@ fn mfomt_van_texts_name_special_offer_link_and_inn_roles() {
 
 #[test]
 fn horse_race_betting_help_is_named_as_an_instruction_role() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for required in [
         "gText_FestivalEvent_HorseRaceAndAnimalContestReceptionChoice_BettingScreenSelectButtonInstructions",
@@ -1869,7 +1953,7 @@ fn horse_race_betting_help_is_named_as_an_instruction_role() {
 
 #[test]
 fn debug_editor_numeric_labels_use_value_display_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     assert_eq!(
         source
@@ -1891,7 +1975,7 @@ fn debug_editor_numeric_labels_use_value_display_roles() {
 
 #[test]
 fn mfomt_village_girls_cooking_request_texts_follow_control_flow_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -1964,7 +2048,7 @@ fn mfomt_village_girls_cooking_request_texts_follow_control_flow_roles() {
 
 #[test]
 fn location_entry_locked_texts_follow_dispatch_or_access_guard_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for location in [
         "ZackHouse",
         "KaiRestaurant",
@@ -2009,7 +2093,7 @@ fn location_entry_locked_texts_follow_dispatch_or_access_guard_roles() {
 
 #[test]
 fn church_exit_names_event_cleanup_and_music_festival_guard_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let script =
         "EventScript_LocationTransition_ExitChurchWithEventStateCleanupAndMusicFestivalGuard";
     let text = "gText_LocationTransition_ExitChurchWithEventStateCleanupAndMusicFestivalGuard_CarterBlocksExitDuringMusicFestival";
@@ -2032,7 +2116,7 @@ fn church_exit_names_event_cleanup_and_music_festival_guard_roles() {
 
 #[test]
 fn hot_spring_and_inn_back_room_denials_follow_their_control_flow_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, hot_spring_id, inn_back_room_id) in [
         ("MARY_FOMT_US", 85, 271),
         ("MARY_FOMT_JP", 85, 271),
@@ -2061,7 +2145,7 @@ fn hot_spring_and_inn_back_room_denials_follow_their_control_flow_roles() {
 
 #[test]
 fn cleanup_only_location_exits_are_not_named_as_event_dispatchers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let fomt_ids = [188, 206, 238, 273, 306, 440];
     let mfomt_ids = [197, 215, 247, 282, 315, 449];
     let locations = [
@@ -2130,7 +2214,7 @@ fn cleanup_only_location_exits_are_not_named_as_event_dispatchers() {
 
 #[test]
 fn beach_cottage_transition_names_festival_exit_guards_and_cleanup() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let script =
         "EventScript_LocationTransition_EnterBeachCottageWithFestivalExitGuardAndEventStateCleanup";
     for (target, id, festival) in [
@@ -2156,7 +2240,7 @@ fn beach_cottage_transition_names_festival_exit_guards_and_cleanup() {
 
 #[test]
 fn blacksmith_collection_texts_follow_product_and_delivery_outcomes() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected = [
         "CompletedToolOrAccessoryCollected",
         "CompletedMakerReady",
@@ -2200,7 +2284,7 @@ fn blacksmith_collection_texts_follow_product_and_delivery_outcomes() {
 
 #[test]
 fn orange_rival_event_mom_lines_follow_speakers_and_regional_slot_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, rick_karen_id, popuri_kai_id, jp) in [
         ("MARY_FOMT_US", 876, 894, false),
         ("MARY_FOMT_JP", 876, 894, true),
@@ -2245,7 +2329,7 @@ fn orange_rival_event_mom_lines_follow_speakers_and_regional_slot_reuse() {
 
 #[test]
 fn moon_viewing_and_music_festival_reactions_follow_character_and_participation_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -2320,7 +2404,7 @@ fn retired_external_tree_is_not_cited_as_evidence() {
 
 #[test]
 fn semantic_state_variables_are_typed_or_explicitly_documented() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let typed = header
         .lines()
         .filter_map(|line| {
@@ -2371,7 +2455,7 @@ fn semantic_state_variables_are_typed_or_explicitly_documented() {
 
 #[test]
 fn unknown_variable_inventory_matches_the_published_audit_counts() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let mut inventories = HashMap::new();
     for (target, expected) in [
         ("MARY_FOMT_US", 24),
@@ -2386,7 +2470,7 @@ fn unknown_variable_inventory_matches_the_published_audit_counts() {
             .filter_map(|id| {
                 constants
                     .typed_int_const_name(variable_type, id)
-                    .filter(|name| name.starts_with("VAR_UNKNOWN_SLOT_"))
+                    .filter(|name| name.starts_with("VAR_UNKNOWN_"))
                     .map(|name| (id, name))
             })
             .collect::<Vec<_>>();
@@ -2395,17 +2479,6 @@ fn unknown_variable_inventory_matches_the_published_audit_counts() {
             expected,
             "{target}: unknown-variable inventory changed: {unknown:?}"
         );
-        for (id, name) in &unknown {
-            let named_id = name
-                .strip_prefix("VAR_UNKNOWN_SLOT_")
-                .unwrap()
-                .parse::<i64>()
-                .unwrap();
-            assert_eq!(
-                *id, named_id,
-                "{target}: {name} is bound to physical variable slot {id}"
-            );
-        }
         inventories.insert(
             target,
             unknown
@@ -2440,12 +2513,49 @@ fn unknown_variable_inventory_matches_the_published_audit_counts() {
         [327, 335, 343, 344],
         "FoMT/MFoMT unknown-slot overlap changed: {shared_ids:?}"
     );
+    for (symbol, fomt_id, mfomt_id) in [
+        ("VAR_UNKNOWN_001", 224, 232),
+        ("VAR_UNKNOWN_002", 225, 233),
+        ("VAR_UNKNOWN_003", 236, 244),
+        ("VAR_UNKNOWN_004", 237, 245),
+        ("VAR_UNKNOWN_005", 242, 250),
+        ("VAR_UNKNOWN_006", 276, 284),
+        ("VAR_UNKNOWN_007", 314, 322),
+        ("VAR_UNKNOWN_008", 316, 324),
+        ("VAR_UNKNOWN_009", 317, 325),
+        ("VAR_UNKNOWN_010", 319, 327),
+        ("VAR_UNKNOWN_011", 320, 328),
+        ("VAR_UNKNOWN_012", 327, 335),
+        ("VAR_UNKNOWN_013", 333, 341),
+        ("VAR_UNKNOWN_014", 335, 343),
+        ("VAR_UNKNOWN_015", 336, 344),
+        ("VAR_UNKNOWN_016", 343, 351),
+        ("VAR_UNKNOWN_017", 344, 352),
+        ("VAR_UNKNOWN_018", 381, 411),
+        ("VAR_UNKNOWN_019", 382, 412),
+        ("VAR_UNKNOWN_020", 383, 413),
+        ("VAR_UNKNOWN_021", 385, 415),
+        ("VAR_UNKNOWN_022", 423, 467),
+    ] {
+        assert_eq!(
+            inventories["MARY_FOMT_US"]
+                .iter()
+                .find(|(_, name)| name == symbol),
+            Some(&(fomt_id, symbol.to_owned()))
+        );
+        assert_eq!(
+            inventories["MARY_MFOMT_US"]
+                .iter()
+                .find(|(_, name)| name == symbol),
+            Some(&(mfomt_id, symbol.to_owned()))
+        );
+    }
 }
 
 #[test]
 fn same_numbered_unknown_slots_do_not_share_unproven_types_across_game_families() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let callable_header = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let header = common::constants_source();
+    let callable_header = common::callables_source();
     for (target, is_fomt) in [
         ("MARY_FOMT_US", true),
         ("MARY_FOMT_JP", true),
@@ -2474,13 +2584,27 @@ fn same_numbered_unknown_slots_do_not_share_unproven_types_across_game_families(
             parse_callable_table_with_scope(&callable_header, &options, &constants).unwrap();
         let scripts =
             parse_script_table("mary_script_table { TestUnknown343, };", &options).unwrap();
-        let numeric = parse_named_scripts(
-            "void TestUnknown343(void) { VarSet(VAR_UNKNOWN_SLOT_327, 1); VarSet(VAR_UNKNOWN_SLOT_335, 1); VarSet(VAR_UNKNOWN_SLOT_343, 1); VarSet(VAR_UNKNOWN_SLOT_344, 1); if (VarGet(VAR_UNKNOWN_SLOT_343) == 1) { return; } }",
-            &options,
-            &callables.scope,
-            &scripts,
-        )
-        .unwrap();
+        let variables = if is_fomt {
+            [
+                "VAR_UNKNOWN_012",
+                "VAR_UNKNOWN_014",
+                "VAR_UNKNOWN_016",
+                "VAR_UNKNOWN_017",
+            ]
+        } else {
+            [
+                "VAR_UNKNOWN_010",
+                "VAR_UNKNOWN_012",
+                "VAR_UNKNOWN_014",
+                "VAR_UNKNOWN_015",
+            ]
+        };
+        let numeric_source = format!(
+            "void TestUnknown343(void) {{ VarSet({}, 1); VarSet({}, 1); VarSet({}, 1); VarSet({}, 1); if (VarGet({}) == 1) {{ return; }} }}",
+            variables[0], variables[1], variables[2], variables[3], variables[2]
+        );
+        let numeric =
+            parse_named_scripts(&numeric_source, &options, &callables.scope, &scripts).unwrap();
         let raised =
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestUnknown343")
                 .unwrap();
@@ -2490,10 +2614,10 @@ fn same_numbered_unknown_slots_do_not_share_unproven_types_across_game_families(
             is_fomt,
             "{target}: wrong symbolic output for slot 343: {source}"
         );
-        for id in [327, 335, 344] {
+        for variable in [variables[0], variables[1], variables[3]] {
             assert!(
-                source.contains(&format!("VarSet(VAR_UNKNOWN_SLOT_{id}, 1);")),
-                "{target}: untyped slot {id} did not retain its numeric value: {source}"
+                source.contains(&format!("VarSet({variable}, 1);")),
+                "{target}: untyped {variable} did not retain its numeric value: {source}"
             );
         }
         let rebuilt = parse_named_scripts(&source, &options, &callables.scope, &scripts).unwrap();
@@ -2507,7 +2631,7 @@ fn same_numbered_unknown_slots_do_not_share_unproven_types_across_game_families(
 
 #[test]
 fn fomt_reference_labels_do_not_leak_into_same_numbered_mfomt_slots() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let expected = [
         (53, "VAR_SPOUSE_CONTINUES_FAMILY_WORK"),
         (94, "VAR_ANN_PROPOSAL_EVENT_STATE"),
@@ -2534,11 +2658,17 @@ fn fomt_reference_labels_do_not_leak_into_same_numbered_mfomt_slots() {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&header, &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
-        for (id, _) in expected {
-            let unknown = format!("VAR_UNKNOWN_SLOT_{id:03}");
+        for (id, unknown) in [
+            (53, "VAR_UNKNOWN_SLOT_053"),
+            (94, "VAR_UNKNOWN_SLOT_094"),
+            (322, "VAR_UNKNOWN_007"),
+            (351, "VAR_UNKNOWN_016"),
+            (412, "VAR_UNKNOWN_019"),
+            (415, "VAR_UNKNOWN_021"),
+        ] {
             assert_eq!(
                 constants.typed_int_const_name(variable_type, id),
-                Some(unknown.as_str()),
+                Some(unknown),
                 "{target}: FoMT meaning leaked into unrelated MFoMT variable {id}"
             );
         }
@@ -2547,8 +2677,8 @@ fn fomt_reference_labels_do_not_leak_into_same_numbered_mfomt_slots() {
 
 #[test]
 fn no_op_callable_names_are_a_closed_evidence_backed_inventory() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let expected = [
         "NoOp014",
         "NoOpAnimalEventEntityInitialization",
@@ -2591,17 +2721,10 @@ fn facing_direction_symbols_round_trip_on_all_four_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFacing, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -2643,17 +2766,9 @@ fn facing_direction_symbols_round_trip_on_all_four_targets() {
 #[test]
 fn game_state_variable_constants_are_printed_and_round_trip() {
     let options = Options::default().define("MARY_FOMT_US").unwrap();
-    let constants = parse_constant_header(
-        &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-        &options,
-    )
-    .unwrap();
-    let callables = parse_callable_table_with_scope(
-        &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-        &options,
-        &constants,
-    )
-    .unwrap();
+    let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+    let callables =
+        parse_callable_table_with_scope(&common::callables_source(), &options, &constants).unwrap();
     let script_table =
         parse_script_table("mary_script_table { TestVariable, };\n", &options).unwrap();
     let numeric = parse_named_scripts(
@@ -2703,17 +2818,10 @@ fn indirect_game_state_variable_ids_recover_the_current_value_domain() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestIndirectVariable, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -2773,21 +2881,14 @@ fn horse_race_result_values_are_printed_symbolically_and_round_trip() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestHorseRaceResult, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
-            "void TestHorseRaceResult(void) { if (VarGet(VAR_SPRING_HORSE_RACE_RESULT) == 1) { VarSet(VAR_FALL_HORSE_RACE_RESULT, 0); } }\n",
+            "void TestHorseRaceResult(void) { if (VarGet(VAR_SPRING_FESTIVAL_HORSE_RACE_RESULT) == 1) { VarSet(VAR_FALL_FESTIVAL_HORSE_RACE_RESULT, 0); } }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -2801,11 +2902,15 @@ fn horse_race_result_values_are_printed_symbolically_and_round_trip() {
         .unwrap();
         let source = format_named_script("TestHorseRaceResult", &raised).unwrap();
         assert!(
-            source.contains("VarGet(VAR_SPRING_HORSE_RACE_RESULT) == HORSE_RACE_RESULT_WON"),
+            source.contains(
+                "VarGet(VAR_SPRING_FESTIVAL_HORSE_RACE_RESULT) == FESTIVAL_HORSE_RACE_RESULT_WON"
+            ),
             "{target}: {source}"
         );
         assert!(
-            source.contains("VarSet(VAR_FALL_HORSE_RACE_RESULT, HORSE_RACE_RESULT_NOT_WON)"),
+            source.contains(
+                "VarSet(VAR_FALL_FESTIVAL_HORSE_RACE_RESULT, FESTIVAL_HORSE_RACE_RESULT_NOT_WON)"
+            ),
             "{target}: {source}"
         );
         let symbolic =
@@ -2837,11 +2942,7 @@ fn gender_shifted_choice_and_runtime_event_slots_have_stable_semantic_names() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -2851,7 +2952,7 @@ fn gender_shifted_choice_and_runtime_event_slots_have_stable_semantic_names() {
             );
         }
         assert_eq!(
-            constants.const_int_value("VAR_UNKNOWN_SLOT_086"),
+            constants.const_int_value("VAR_STU_AND_MAY_SCHEDULES_DISABLED"),
             Some(86),
             "{target}: legacy unknown-slot spelling remains a compile-only alias"
         );
@@ -2869,11 +2970,7 @@ fn gender_shifted_choice_and_runtime_event_slots_have_stable_semantic_names() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in fomt_entries {
             assert_eq!(
@@ -2934,17 +3031,10 @@ fn farm_facility_and_storage_variables_round_trip_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFarmVariable, };\n", &options).unwrap();
 
@@ -3006,17 +3096,10 @@ fn spouse_marriage_variables_are_gender_specific_and_round_trip() {
         ("MARY_MFOMT_JP", 159, "VAR_ELLI_DOCTOR_RIVAL_MARRIAGE_STATE"),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestMarriageState, };\n", &options).unwrap();
         let numeric_source = format!(
@@ -3071,17 +3154,10 @@ fn tv_shopping_delivery_variables_follow_gender_specific_tables() {
         ("MARY_MFOMT_JP", 162),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestTVDelivery, };\n", &options).unwrap();
 
@@ -3132,17 +3208,10 @@ fn thomas_request_delivery_variable_follows_gender_specific_slots() {
         ("MARY_MFOMT_JP", 274),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestThomasRequest, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -3241,11 +3310,7 @@ fn special_spouse_family_variables_follow_gender_specific_layouts() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let variables = if target.contains("MFOMT") {
             &mfomt[..]
@@ -3274,11 +3339,7 @@ fn standard_spouse_family_variables_follow_each_games_physical_order() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let (spouses, base) = if target.contains("MFOMT") {
             (&mfomt_spouses, 178)
@@ -3331,11 +3392,7 @@ fn horse_lifecycle_event_variables_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 228 } else { 220 };
         for (offset, symbol) in [
@@ -3382,11 +3439,7 @@ fn first_shared_town_event_variables_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 234 } else { 226 };
         for (offset, symbol) in variables {
@@ -3430,11 +3483,7 @@ fn grape_harvest_and_town_event_variables_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 251 } else { 243 };
         for (offset, symbol) in variables {
@@ -3471,11 +3520,7 @@ fn request_harris_and_ellen_event_variables_follow_the_eight_slot_gender_shift()
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 271 } else { 263 };
         for (offset, symbol) in variables {
@@ -3523,11 +3568,7 @@ fn villager_story_event_variables_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 285 } else { 277 };
         for (offset, symbol) in variables {
@@ -3584,11 +3625,7 @@ fn church_cliff_and_late_town_events_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 296 } else { 288 };
         for (offset, symbol) in variables {
@@ -3606,11 +3643,7 @@ fn church_cliff_and_late_town_events_follow_the_eight_slot_gender_shift() {
 fn village_girls_cooking_request_is_mfomt_only() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, 342),
@@ -3620,11 +3653,7 @@ fn village_girls_cooking_request_is_mfomt_only() {
     }
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_ne!(
             constants.typed_int_const_name(variable_type, 342),
@@ -3643,16 +3672,15 @@ fn first_festival_variables_use_gender_specific_physical_blocks() {
         ("MARY_MFOMT_JP", 414, 435, 436, 439),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in [
             (rice_cake, "VAR_NEW_YEAR_RICE_CAKE_FESTIVAL_EVENT_STATE"),
-            (horse_invitation, "VAR_HORSE_RACE_INVITATION_EVENT_STATE"),
-            (horse_entry, "VAR_HORSE_RACE_PLAYER_ENTRY_SELECTED"),
+            (
+                horse_invitation,
+                "VAR_FESTIVAL_HORSE_RACE_INVITATION_EVENT_STATE",
+            ),
+            (horse_entry, "VAR_FESTIVAL_HORSE_RACE_PLAYER_ENTRY_SELECTED"),
             (
                 cooking_invitation,
                 "VAR_COOKING_FESTIVAL_INVITATION_EVENT_STATE",
@@ -3670,8 +3698,8 @@ fn first_festival_variables_use_gender_specific_physical_blocks() {
 #[test]
 fn fomt_festival_runtime_fields_follow_verified_calendar_dispatchers() {
     let entries = [
-        (393, "VAR_SPRING_HORSE_RACE_FESTIVAL_ACTIVE"),
-        (394, "VAR_SPRING_HORSE_RACE_RESULT"),
+        (393, "VAR_SPRING_FESTIVAL_HORSE_RACE_FESTIVAL_ACTIVE"),
+        (394, "VAR_SPRING_FESTIVAL_HORSE_RACE_RESULT"),
         (396, "VAR_COOKING_FESTIVAL_ACTIVE"),
         (397, "VAR_COOKING_FESTIVAL_DISH_CATEGORY"),
         (398, "VAR_COOKING_FESTIVAL_COMPLETED"),
@@ -3686,9 +3714,9 @@ fn fomt_festival_runtime_fields_follow_verified_calendar_dispatchers() {
         (418, "VAR_MUSIC_FESTIVAL_ACTIVE"),
         (420, "VAR_HARVEST_FESTIVAL_ACTIVE"),
         (422, "VAR_HARVEST_FESTIVAL_SESSION_PHASE"),
-        (423, "VAR_UNKNOWN_SLOT_423"),
-        (428, "VAR_FALL_HORSE_RACE_FESTIVAL_ACTIVE"),
-        (429, "VAR_FALL_HORSE_RACE_RESULT"),
+        (423, "VAR_UNKNOWN_022"),
+        (428, "VAR_FALL_FESTIVAL_HORSE_RACE_FESTIVAL_ACTIVE"),
+        (429, "VAR_FALL_FESTIVAL_HORSE_RACE_RESULT"),
         (432, "VAR_SHEEP_FESTIVAL_ACTIVE"),
         (433, "VAR_SHEEP_FESTIVAL_RESULT"),
         (434, "VAR_PUMPKIN_FESTIVAL_MAY_TREAT_VISIT_STATE"),
@@ -3698,11 +3726,7 @@ fn fomt_festival_runtime_fields_follow_verified_calendar_dispatchers() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -3717,7 +3741,7 @@ fn fomt_festival_runtime_fields_follow_verified_calendar_dispatchers() {
 #[test]
 fn mfomt_festival_runtime_fields_follow_verified_dispatch_and_cleanup_paths() {
     let entries = [
-        (438, "VAR_SPRING_HORSE_RACE_RESULT"),
+        (438, "VAR_SPRING_FESTIVAL_HORSE_RACE_RESULT"),
         (440, "VAR_COOKING_FESTIVAL_ACTIVE"),
         (441, "VAR_COOKING_FESTIVAL_DISH_CATEGORY"),
         (442, "VAR_COOKING_FESTIVAL_COMPLETED"),
@@ -3731,8 +3755,8 @@ fn mfomt_festival_runtime_fields_follow_verified_dispatch_and_cleanup_paths() {
         (458, "VAR_FIREWORKS_FESTIVAL_ACTIVE"),
         (462, "VAR_MUSIC_FESTIVAL_ACTIVE"),
         (464, "VAR_HARVEST_FESTIVAL_ACTIVE"),
-        (472, "VAR_FALL_HORSE_RACE_FESTIVAL_ACTIVE"),
-        (473, "VAR_FALL_HORSE_RACE_RESULT"),
+        (472, "VAR_FALL_FESTIVAL_HORSE_RACE_FESTIVAL_ACTIVE"),
+        (473, "VAR_FALL_FESTIVAL_HORSE_RACE_RESULT"),
         (476, "VAR_SHEEP_FESTIVAL_ACTIVE"),
         (477, "VAR_SHEEP_FESTIVAL_RESULT"),
         (478, "VAR_PUMPKIN_FESTIVAL_MAY_TREAT_VISIT_STATE"),
@@ -3759,11 +3783,7 @@ fn mfomt_festival_runtime_fields_follow_verified_dispatch_and_cleanup_paths() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -3795,11 +3815,7 @@ fn animal_festival_invitation_and_entry_variables_use_gender_specific_blocks() {
     ];
     for (target, ids) in cases {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in ids.into_iter().zip(symbols) {
             assert_eq!(
@@ -3820,17 +3836,10 @@ fn festival_invitation_and_entry_state_symbols_compile_to_original_values() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFestival, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -3869,17 +3878,13 @@ fn music_harvest_moon_and_fall_race_variables_use_gender_specific_blocks() {
         "VAR_HARVEST_FESTIVAL_INVITATION_EVENT_STATE",
         "VAR_HARVEST_FESTIVAL_CONTRIBUTED_INGREDIENT_ACCEPTED",
         "VAR_MOON_VIEWING_FESTIVAL_EVENT_STATE",
-        "VAR_MOON_VIEWING_PARTNER_INDEX",
-        "VAR_FALL_HORSE_RACE_INVITATION_EVENT_STATE",
-        "VAR_FALL_HORSE_RACE_PLAYER_ENTRY_SELECTED",
+        "VAR_FESTIVAL_MOON_VIEWING_PARTNER_INDEX",
+        "VAR_FALL_FESTIVAL_HORSE_RACE_INVITATION_EVENT_STATE",
+        "VAR_FALL_FESTIVAL_HORSE_RACE_PLAYER_ENTRY_SELECTED",
     ];
     for (target, ids) in cases {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in ids.into_iter().zip(symbols) {
             assert_eq!(
@@ -3894,24 +3899,20 @@ fn music_harvest_moon_and_fall_race_variables_use_gender_specific_blocks() {
 #[test]
 fn fireworks_partner_values_and_variable_are_gender_specific() {
     for (target, variable_id, partner_symbol) in [
-        ("MARY_FOMT_US", 415, "FIREWORKS_FESTIVAL_PARTNER_ANN"),
-        ("MARY_FOMT_JP", 415, "FIREWORKS_FESTIVAL_PARTNER_ANN"),
-        ("MARY_MFOMT_US", 459, "FIREWORKS_FESTIVAL_PARTNER_DOCTOR"),
-        ("MARY_MFOMT_JP", 459, "FIREWORKS_FESTIVAL_PARTNER_DOCTOR"),
+        ("MARY_FOMT_US", 415, "FESTIVAL_FIREWORKS_PARTNER_ANN"),
+        ("MARY_FOMT_JP", 415, "FESTIVAL_FIREWORKS_PARTNER_ANN"),
+        ("MARY_MFOMT_US", 459, "FESTIVAL_FIREWORKS_PARTNER_DOCTOR"),
+        ("MARY_MFOMT_JP", 459, "FESTIVAL_FIREWORKS_PARTNER_DOCTOR"),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, variable_id),
             Some("VAR_FIREWORKS_FESTIVAL_PARTNER"),
             "{target}"
         );
-        let partner_type = constants.user_type("MaryFireworksFestivalPartner").unwrap();
+        let partner_type = constants.user_type("MaryFestivalFireworksPartner").unwrap();
         assert_eq!(
             constants.typed_int_const_name(partner_type, 5),
             Some(partner_symbol),
@@ -3970,11 +3971,7 @@ fn thanksgiving_exchange_variables_follow_spouse_candidates_and_gender_layout() 
     ];
     for (target, entries) in cases {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for &(id, candidate) in entries {
             let symbol = format!("VAR_THANKSGIVING_GIFT_EXCHANGED_WITH_{candidate}");
@@ -4007,11 +4004,7 @@ fn fomt_winter_thanksgiving_visit_and_received_gift_states_follow_event_pairs() 
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4024,11 +4017,7 @@ fn fomt_winter_thanksgiving_visit_and_received_gift_states_follow_event_pairs() 
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, fomt_symbol) in entries {
             assert_ne!(
@@ -4052,11 +4041,7 @@ fn mfomt_thanksgiving_gift_interaction_states_follow_character_slots() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, character) in entries {
             let symbol = format!("VAR_THANKSGIVING_GIFT_INTERACTION_STATE_WITH_{character}");
@@ -4079,11 +4064,7 @@ fn gamecube_link_level_and_called_script_argument_follow_gender_layouts() {
     ];
     for (target, link_level_id, script_argument_id) in cases {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, link_level_id),
@@ -4112,11 +4093,7 @@ fn mfomt_seven_ring_collection_states_follow_verified_event_writers() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4132,11 +4109,7 @@ fn mfomt_seven_ring_collection_states_follow_verified_event_writers() {
 fn mfomt_shop_purchase_counter_uses_its_girl_version_slot() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, 688),
@@ -4149,7 +4122,7 @@ fn mfomt_shop_purchase_counter_uses_its_girl_version_slot() {
 #[test]
 fn fomt_starry_night_host_invitation_and_event_states_follow_candidate_order() {
     let entries = [
-        (450, "VAR_STARRY_NIGHT_FESTIVAL_HOST_INDEX"),
+        (450, "VAR_FESTIVAL_STARRY_NIGHT_HOST_INDEX"),
         (451, "VAR_STARRY_NIGHT_POPURI_INVITATION_HANDLED"),
         (452, "VAR_STARRY_NIGHT_ANN_INVITATION_HANDLED"),
         (453, "VAR_STARRY_NIGHT_ELLI_INVITATION_HANDLED"),
@@ -4168,11 +4141,7 @@ fn fomt_starry_night_host_invitation_and_event_states_follow_candidate_order() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4205,11 +4174,7 @@ fn fomt_character_recipe_teaching_states_follow_verified_dialogue_writers() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4241,11 +4206,7 @@ fn fomt_television_program_cursors_follow_daily_update_and_program_readers() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4302,11 +4263,7 @@ fn fomt_gamecube_link_completion_milestone_guards_follow_verified_predicates() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4343,11 +4300,7 @@ fn fomt_gamecube_link_dialogue_recipe_and_introduction_fields_keep_proven_gaps()
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4373,17 +4326,10 @@ fn ruby_reward_dialogues_pending_remains_a_counter_for_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestLouOrRubyCounter, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -4422,7 +4368,7 @@ fn fomt_jewel_of_truth_guards_name_script_and_native_sources() {
         (526, "VAR_JEWEL_OF_TRUTH_FROM_REFRIGERATOR_COLLECTED"),
         (
             527,
-            "VAR_JEWEL_OF_TRUTH_FROM_HORSE_RACE_PRIZE_EXCHANGE_COLLECTED",
+            "VAR_JEWEL_OF_TRUTH_FROM_FESTIVAL_HORSE_RACE_PRIZE_EXCHANGE_COLLECTED",
         ),
         (528, "VAR_JEWEL_OF_TRUTH_PURCHASED_FROM_WON"),
         (529, "VAR_JEWEL_OF_TRUTH_FROM_CALENDAR_COLLECTED"),
@@ -4437,11 +4383,7 @@ fn fomt_jewel_of_truth_guards_name_script_and_native_sources() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -4496,11 +4438,7 @@ fn fomt_awl_bookshelf_profile_levels_follow_menu_and_reference_page_order() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, name) in names {
             let symbol = format!("VAR_GAMECUBE_LINK_AWL_{name}_PROFILE_LEVEL");
@@ -4515,7 +4453,7 @@ fn fomt_awl_bookshelf_profile_levels_follow_menu_and_reference_page_order() {
 
 #[test]
 fn awl_character_profile_menu_uses_official_character_semantics_on_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected = [
         "gText_SystemMenu_GameCubeLinkAWLCharacterProfileBrowser_NoProfilesUnlocked",
         "gText_SystemMenu_GameCubeLinkAWLCharacterProfileBrowser_PreviousPage",
@@ -4590,17 +4528,10 @@ fn awl_profile_progress_levels_print_symbolically_and_round_trip_on_all_targets(
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestAwlProfile, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -4645,7 +4576,7 @@ fn awl_profile_progress_levels_print_symbolically_and_round_trip_on_all_targets(
 
 #[test]
 fn debug_tool_texts_are_scoped_to_their_actual_editor() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, script_name, text_prefix) in [
         (
             "MARY_FOMT_US",
@@ -4715,7 +4646,7 @@ fn debug_tool_texts_are_scoped_to_their_actual_editor() {
 
 #[test]
 fn jewel_of_truth_collectible_texts_follow_their_full_event_identity() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (family, cases) in [
         (
             "FOMT",
@@ -4765,7 +4696,7 @@ fn jewel_of_truth_collectible_texts_follow_their_full_event_identity() {
 
 #[test]
 fn wedding_event_symbols_separate_the_spouse_from_the_event_stage() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (family, script_id, identity) in [
         ("FOMT", 848, "HarvestGoddess_CeremonyAndNicknameSelection"),
         ("MFOMT", 859, "Gourmet_CeremonyAndNicknameSelection"),
@@ -4797,7 +4728,7 @@ fn wedding_event_symbols_separate_the_spouse_from_the_event_stage() {
 
 #[test]
 fn stu_cold_clinic_event_has_an_event_level_name_and_scoped_dialogue() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 776),
         ("MARY_FOMT_JP", 776),
@@ -4865,7 +4796,7 @@ fn stu_cold_clinic_event_has_an_event_level_name_and_scoped_dialogue() {
 
 #[test]
 fn functional_menu_texts_are_scoped_to_their_own_dispatcher() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, script_name, text_prefix) in [
         (
             "MARY_FOMT_US",
@@ -5048,11 +4979,7 @@ fn mfomt_awl_bookshelf_profile_levels_follow_reference_page_ids() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, name) in names {
             let symbol = format!("VAR_GAMECUBE_LINK_AWL_{name}_PROFILE_LEVEL");
@@ -5071,7 +4998,7 @@ fn mfomt_jewels_daily_fields_rival_routes_and_rewards_follow_verified_lifecycles
         (618, "VAR_JEWEL_OF_TRUTH_FROM_REFRIGERATOR_COLLECTED"),
         (
             619,
-            "VAR_JEWEL_OF_TRUTH_FROM_HORSE_RACE_PRIZE_EXCHANGE_COLLECTED",
+            "VAR_JEWEL_OF_TRUTH_FROM_FESTIVAL_HORSE_RACE_PRIZE_EXCHANGE_COLLECTED",
         ),
         (620, "VAR_JEWEL_OF_TRUTH_PURCHASED_FROM_WON"),
         (621, "VAR_JEWEL_OF_TRUTH_FROM_CALENDAR_COLLECTED"),
@@ -5098,17 +5025,13 @@ fn mfomt_jewels_daily_fields_rival_routes_and_rewards_follow_verified_lifecycles
         (676, "VAR_ELLI_AND_DOCTOR_RIVAL_WEDDING_ROUTING_STATE"),
         (677, "VAR_ANN_AND_CLIFF_RIVAL_WEDDING_ROUTING_STATE"),
         (678, "VAR_WEDDING_ANNIVERSARIES_ELAPSED"),
-        (679, "VAR_HORSE_RACE_POWER_BERRY_OBTAINED"),
+        (679, "VAR_FESTIVAL_HORSE_RACE_POWER_BERRY_OBTAINED"),
         (680, "VAR_FRISBEE_TOURNAMENT_POWER_BERRY_OBTAINED"),
         (681, "VAR_ZACK_EMPTY_SHIPPING_BIN_ADVICE_CYCLE"),
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5124,11 +5047,7 @@ fn mfomt_jewels_daily_fields_rival_routes_and_rewards_follow_verified_lifecycles
 fn mfomt_late_event_television_and_fish_pond_variables_use_verified_ids() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let cooking_request_type = constants.user_type("MaryGirlsCookingRequestState").unwrap();
 
@@ -5204,11 +5123,7 @@ fn mfomt_spring_thanksgiving_girl_gift_fields_follow_character_order() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5224,19 +5139,15 @@ fn mfomt_spring_thanksgiving_girl_gift_fields_follow_character_order() {
 fn mfomt_festival_session_fields_follow_us_and_jp_script_lifecycles() {
     let entries = [
         (434, "VAR_THANKSGIVING_GIFT_INTERACTION_STATE_WITH_GOURMET"),
-        (437, "VAR_HORSE_RACE_FESTIVAL_SESSION_STATE"),
+        (437, "VAR_FESTIVAL_HORSE_RACE_FESTIVAL_SESSION_STATE"),
         (448, "VAR_FRISBEE_TOURNAMENT_SESSION_STATE"),
         (449, "VAR_FRISBEE_TOURNAMENT_RESULT"),
         (466, "VAR_HARVEST_FESTIVAL_SESSION_PHASE"),
-        (467, "VAR_UNKNOWN_SLOT_467"),
+        (467, "VAR_UNKNOWN_022"),
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5257,11 +5168,7 @@ fn fomt_cliff_employment_and_cow_festival_fields_follow_us_and_jp_lifecycles() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5277,11 +5184,7 @@ fn fomt_cliff_employment_and_cow_festival_fields_follow_us_and_jp_lifecycles() {
 fn mfomt_cliff_employment_field_follows_the_shifted_event_family() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, 258),
@@ -5300,11 +5203,7 @@ fn cliff_collapse_followup_delay_counter_follows_the_gender_shift() {
         ("MARY_MFOMT_JP", 301),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5317,17 +5216,29 @@ fn cliff_collapse_followup_delay_counter_follows_the_gender_shift() {
 #[test]
 fn ellen_stocking_yarn_gate_uses_its_proven_blocking_behavior() {
     for (target, id, legacy_symbol) in [
-        ("MARY_FOMT_US", 275, "VAR_UNKNOWN_SLOT_275"),
-        ("MARY_FOMT_JP", 275, "VAR_UNKNOWN_SLOT_275"),
-        ("MARY_MFOMT_US", 283, "VAR_UNKNOWN_SLOT_283"),
-        ("MARY_MFOMT_JP", 283, "VAR_UNKNOWN_SLOT_283"),
+        (
+            "MARY_FOMT_US",
+            275,
+            "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+        ),
+        (
+            "MARY_FOMT_JP",
+            275,
+            "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+        ),
+        (
+            "MARY_MFOMT_US",
+            283,
+            "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+        ),
+        (
+            "MARY_MFOMT_JP",
+            283,
+            "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+        ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5341,17 +5252,13 @@ fn ellen_stocking_yarn_gate_uses_its_proven_blocking_behavior() {
 #[test]
 fn daily_reset_only_boolean_slots_stay_explicitly_unknown() {
     for (target, id, symbol) in [
-        ("MARY_FOMT_US", 423, "VAR_UNKNOWN_SLOT_423"),
-        ("MARY_FOMT_JP", 423, "VAR_UNKNOWN_SLOT_423"),
-        ("MARY_MFOMT_US", 467, "VAR_UNKNOWN_SLOT_467"),
-        ("MARY_MFOMT_JP", 467, "VAR_UNKNOWN_SLOT_467"),
+        ("MARY_FOMT_US", 423, "VAR_UNKNOWN_022"),
+        ("MARY_FOMT_JP", 423, "VAR_UNKNOWN_022"),
+        ("MARY_MFOMT_US", 467, "VAR_UNKNOWN_022"),
+        ("MARY_MFOMT_JP", 467, "VAR_UNKNOWN_022"),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5375,11 +5282,7 @@ fn unknown_multibit_fields_do_not_inherit_adjacent_boolean_or_lifecycle_types() 
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         if target.starts_with("MARY_FOMT_") {
             // Physical widths 3/4/4 are known; event semantics are not.
             // A nearby lifecycle enum is not evidence for these fields.
@@ -5401,47 +5304,47 @@ fn unknown_multibit_slots_do_not_acquire_types_from_adjacency() {
         (
             "MARY_FOMT_US",
             &[
-                (224, "VAR_UNKNOWN_SLOT_224"),
-                (225, "VAR_UNKNOWN_SLOT_225"),
-                (236, "VAR_UNKNOWN_SLOT_236"),
-                (237, "VAR_UNKNOWN_SLOT_237"),
-                (242, "VAR_UNKNOWN_SLOT_242"),
-                (276, "VAR_UNKNOWN_SLOT_276"),
-                (316, "VAR_UNKNOWN_SLOT_316"),
-                (317, "VAR_UNKNOWN_SLOT_317"),
-                (319, "VAR_UNKNOWN_SLOT_319"),
-                (320, "VAR_UNKNOWN_SLOT_320"),
+                (224, "VAR_UNKNOWN_001"),
+                (225, "VAR_UNKNOWN_002"),
+                (236, "VAR_UNKNOWN_003"),
+                (237, "VAR_UNKNOWN_004"),
+                (242, "VAR_UNKNOWN_005"),
+                (276, "VAR_UNKNOWN_006"),
+                (316, "VAR_UNKNOWN_008"),
+                (317, "VAR_UNKNOWN_009"),
+                (319, "VAR_UNKNOWN_010"),
+                (320, "VAR_UNKNOWN_011"),
                 (334, "VAR_UNKNOWN_SLOT_334"),
-                (335, "VAR_UNKNOWN_SLOT_335"),
-                (336, "VAR_UNKNOWN_SLOT_336"),
-                (344, "VAR_UNKNOWN_SLOT_344"),
-                (381, "VAR_UNKNOWN_SLOT_381"),
-                (382, "VAR_UNKNOWN_SLOT_382"),
-                (383, "VAR_UNKNOWN_SLOT_383"),
-                (385, "VAR_UNKNOWN_SLOT_385"),
+                (335, "VAR_UNKNOWN_014"),
+                (336, "VAR_UNKNOWN_015"),
+                (344, "VAR_UNKNOWN_017"),
+                (381, "VAR_UNKNOWN_018"),
+                (382, "VAR_UNKNOWN_019"),
+                (383, "VAR_UNKNOWN_020"),
+                (385, "VAR_UNKNOWN_021"),
                 (449, "VAR_UNKNOWN_SLOT_449"),
             ][..],
         ),
         (
             "MARY_MFOMT_US",
             &[
-                (232, "VAR_UNKNOWN_SLOT_232"),
-                (233, "VAR_UNKNOWN_SLOT_233"),
-                (244, "VAR_UNKNOWN_SLOT_244"),
-                (245, "VAR_UNKNOWN_SLOT_245"),
-                (250, "VAR_UNKNOWN_SLOT_250"),
-                (284, "VAR_UNKNOWN_SLOT_284"),
-                (324, "VAR_UNKNOWN_SLOT_324"),
-                (325, "VAR_UNKNOWN_SLOT_325"),
-                (327, "VAR_UNKNOWN_SLOT_327"),
-                (328, "VAR_UNKNOWN_SLOT_328"),
-                (343, "VAR_UNKNOWN_SLOT_343"),
-                (344, "VAR_UNKNOWN_SLOT_344"),
-                (352, "VAR_UNKNOWN_SLOT_352"),
-                (411, "VAR_UNKNOWN_SLOT_411"),
-                (412, "VAR_UNKNOWN_SLOT_412"),
-                (413, "VAR_UNKNOWN_SLOT_413"),
-                (415, "VAR_UNKNOWN_SLOT_415"),
+                (232, "VAR_UNKNOWN_001"),
+                (233, "VAR_UNKNOWN_002"),
+                (244, "VAR_UNKNOWN_003"),
+                (245, "VAR_UNKNOWN_004"),
+                (250, "VAR_UNKNOWN_005"),
+                (284, "VAR_UNKNOWN_006"),
+                (324, "VAR_UNKNOWN_008"),
+                (325, "VAR_UNKNOWN_009"),
+                (327, "VAR_UNKNOWN_010"),
+                (328, "VAR_UNKNOWN_011"),
+                (343, "VAR_UNKNOWN_014"),
+                (344, "VAR_UNKNOWN_015"),
+                (352, "VAR_UNKNOWN_017"),
+                (411, "VAR_UNKNOWN_018"),
+                (412, "VAR_UNKNOWN_019"),
+                (413, "VAR_UNKNOWN_020"),
+                (415, "VAR_UNKNOWN_021"),
             ][..],
         ),
     ];
@@ -5449,11 +5352,7 @@ fn unknown_multibit_slots_do_not_acquire_types_from_adjacency() {
     for (family_target, slots) in expected {
         for target in [family_target, &family_target.replace("_US", "_JP")] {
             let options = Options::default().define(target).unwrap();
-            let constants = parse_constant_header(
-                &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-                &options,
-            )
-            .unwrap();
+            let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
             let variable_type = constants.user_type("MaryVarId").unwrap();
             for (id, symbol) in slots {
                 assert_eq!(
@@ -5480,11 +5379,7 @@ fn harvest_festival_active_state_follows_the_gender_specific_layout() {
         ("MARY_MFOMT_JP", 464),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5503,11 +5398,7 @@ fn new_year_sunrise_write_marker_follows_the_gender_specific_layout() {
         ("MARY_MFOMT_JP", 527),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5526,11 +5417,7 @@ fn gamecube_link_update_marker_follows_the_gender_specific_layout() {
         ("MARY_MFOMT_JP", 593),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
@@ -5554,11 +5441,7 @@ fn fomt_daily_offering_confession_and_farmhouse_fields_follow_event_lifecycle() 
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5579,17 +5462,13 @@ fn fomt_rival_wedding_routing_anniversary_rewards_and_zack_advice_follow_writers
         (584, "VAR_ELLI_AND_DOCTOR_RIVAL_WEDDING_ROUTING_STATE"),
         (585, "VAR_ANN_AND_CLIFF_RIVAL_WEDDING_ROUTING_STATE"),
         (586, "VAR_WEDDING_ANNIVERSARIES_ELAPSED"),
-        (587, "VAR_HORSE_RACE_POWER_BERRY_OBTAINED"),
+        (587, "VAR_FESTIVAL_HORSE_RACE_POWER_BERRY_OBTAINED"),
         (588, "VAR_FRISBEE_TOURNAMENT_POWER_BERRY_OBTAINED"),
         (589, "VAR_ZACK_EMPTY_SHIPPING_BIN_ADVICE_CYCLE"),
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5604,7 +5483,7 @@ fn fomt_rival_wedding_routing_anniversary_rewards_and_zack_advice_follow_writers
 #[test]
 fn mfomt_starry_night_host_invitation_and_event_states_follow_verified_writers() {
     let entries = [
-        (501, "VAR_STARRY_NIGHT_FESTIVAL_HOST_INDEX"),
+        (501, "VAR_FESTIVAL_STARRY_NIGHT_HOST_INDEX"),
         (502, "VAR_STARRY_NIGHT_POPURI_INVITATION_HANDLED"),
         (503, "VAR_STARRY_NIGHT_ANN_INVITATION_HANDLED"),
         (504, "VAR_STARRY_NIGHT_ELLI_INVITATION_HANDLED"),
@@ -5629,11 +5508,7 @@ fn mfomt_starry_night_host_invitation_and_event_states_follow_verified_writers()
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5689,11 +5564,7 @@ fn mfomt_post_starry_night_event_recipe_and_tv_fields_follow_both_regions() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5726,11 +5597,7 @@ fn mfomt_first_gamecube_link_dialogue_family_matches_received_milestones() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5825,7 +5692,7 @@ fn mfomt_gamecube_progress_guards_and_contest_win_counters_follow_writers() {
         (611, "VAR_GAMECUBE_LINK_TEN_FRISBEE_WINS_MILESTONE_RECORDED"),
         (
             612,
-            "VAR_GAMECUBE_LINK_TEN_HORSE_RACE_WINS_MILESTONE_RECORDED",
+            "VAR_GAMECUBE_LINK_TEN_FESTIVAL_HORSE_RACE_WINS_MILESTONE_RECORDED",
         ),
         (
             613,
@@ -5848,7 +5715,7 @@ fn mfomt_gamecube_progress_guards_and_contest_win_counters_follow_writers() {
             "VAR_GAMECUBE_LINK_LOU_OR_RUBY_REWARD_DIALOGUES_PENDING",
         ),
         (682, "VAR_FRISBEE_TOURNAMENT_WINS"),
-        (683, "VAR_HORSE_RACE_WINS"),
+        (683, "VAR_FESTIVAL_HORSE_RACE_WINS"),
         (684, "VAR_CHICKEN_FESTIVAL_WINS"),
         (685, "VAR_COW_FESTIVAL_WINS"),
         (686, "VAR_SHEEP_FESTIVAL_WINS"),
@@ -5856,11 +5723,7 @@ fn mfomt_gamecube_progress_guards_and_contest_win_counters_follow_writers() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         for (id, symbol) in entries {
             assert_eq!(
@@ -5914,11 +5777,7 @@ fn achievement_variables_follow_the_eight_slot_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let base = if target.contains("MFOMT") { 353 } else { 345 };
         for (offset, symbol) in symbols.iter().enumerate() {
@@ -5964,11 +5823,7 @@ fn goddess_kappa_and_town_reward_variables_follow_gender_shift() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let shift = if target.contains("MFOMT") { 8 } else { 0 };
         for &(fomt_id, symbol) in &variables {
@@ -6076,22 +5931,64 @@ fn family_romance_and_pet_variables_round_trip_on_all_targets() {
         (71, "VAR_HORSE_AFFECTION"),
     ];
     let fomt_legacy_bugged_timer_aliases = [
-        (54, "VAR_DAYS_SINCE_KAREN_FINAL_LOVE_EVENT"),
-        (55, "VAR_DAYS_SINCE_POPURI_FINAL_LOVE_EVENT"),
-        (56, "VAR_DAYS_SINCE_MARY_FINAL_LOVE_EVENT"),
-        (57, "VAR_DAYS_SINCE_ELLI_FINAL_LOVE_EVENT"),
-        (58, "VAR_DAYS_SINCE_ANN_FINAL_LOVE_EVENT"),
-        (59, "VAR_DAYS_SINCE_HARVEST_GODDESS_FINAL_LOVE_EVENT"),
+        (
+            54,
+            "VAR_BUGGED_KAREN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            55,
+            "VAR_BUGGED_POPURI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            56,
+            "VAR_BUGGED_MARY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            57,
+            "VAR_BUGGED_ELLI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            58,
+            "VAR_BUGGED_ANN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            59,
+            "VAR_BUGGED_HARVEST_GODDESS_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
     ];
     let mfomt_legacy_bugged_timer_aliases = [
-        (54, "VAR_DAYS_SINCE_RICK_FINAL_LOVE_EVENT"),
-        (55, "VAR_DAYS_SINCE_KAI_FINAL_LOVE_EVENT"),
-        (56, "VAR_DAYS_SINCE_GRAY_FINAL_LOVE_EVENT"),
-        (57, "VAR_DAYS_SINCE_DOCTOR_FINAL_LOVE_EVENT"),
-        (58, "VAR_DAYS_SINCE_CLIFF_FINAL_LOVE_EVENT"),
-        (59, "VAR_DAYS_SINCE_KAPPA_FINAL_LOVE_EVENT"),
-        (60, "VAR_DAYS_SINCE_WON_FINAL_LOVE_EVENT"),
-        (61, "VAR_DAYS_SINCE_GOURMET_FINAL_LOVE_EVENT"),
+        (
+            54,
+            "VAR_BUGGED_RICK_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            55,
+            "VAR_BUGGED_KAI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            56,
+            "VAR_BUGGED_GRAY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            57,
+            "VAR_BUGGED_DOCTOR_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            58,
+            "VAR_BUGGED_CLIFF_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            59,
+            "VAR_BUGGED_KAPPA_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            60,
+            "VAR_BUGGED_WON_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
+        (
+            61,
+            "VAR_BUGGED_GOURMET_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER",
+        ),
     ];
 
     for target in [
@@ -6101,17 +5998,10 @@ fn family_romance_and_pet_variables_round_trip_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFamilyVariable, };\n", &options).unwrap();
         let target_specific = if target.contains("MFOMT") {
@@ -6274,17 +6164,10 @@ fn heart_event_variables_follow_each_games_candidate_layout() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestHeartEvent, };\n", &options).unwrap();
         let variables = if target.contains("MFOMT") {
@@ -6325,17 +6208,10 @@ fn heart_event_variables_follow_each_games_candidate_layout() {
 fn rick_blue_heart_response_uses_its_literal_answer_domain() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestRickBlueHeart, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -6378,17 +6254,10 @@ fn rick_blue_heart_response_uses_its_literal_answer_domain() {
 fn gray_purple_heart_response_uses_its_literal_answer_domain() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestGrayPurpleHeart, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -6434,17 +6303,10 @@ fn gray_purple_heart_response_uses_its_literal_answer_domain() {
 fn mary_purple_heart_response_uses_its_literal_answer_domain() {
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestMaryPurpleHeart, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -6570,17 +6432,10 @@ fn all_two_choice_heart_variables_use_literal_answer_domains() {
         let jp_target = target.replace("_US", "_JP");
         for region_target in [target, jp_target.as_str()] {
             let options = Options::default().define(region_target).unwrap();
-            let constants = parse_constant_header(
-                &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-                &options,
-            )
-            .unwrap();
-            let callables = parse_callable_table_with_scope(
-                &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-                &options,
-                &constants,
-            )
-            .unwrap();
+            let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+            let callables =
+                parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                    .unwrap();
             let script_table =
                 parse_script_table("mary_script_table { TestHeartResponses, };\n", &options)
                     .unwrap();
@@ -6634,17 +6489,10 @@ fn rival_event_variables_follow_the_eight_slot_gender_shift() {
     ] {
         let shift = if target.contains("MFOMT") { 8 } else { 0 };
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestRivalEvent, };\n", &options).unwrap();
 
@@ -6767,17 +6615,10 @@ fn child_and_pet_state_values_compile_to_their_numeric_bytes() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPetState, };\n", &options).unwrap();
         let dog_variable = if target.contains("MFOMT") { 67 } else { 65 };
@@ -6792,7 +6633,7 @@ fn child_and_pet_state_values_compile_to_their_numeric_bytes() {
         .unwrap();
         let symbolic = parse_named_scripts(
             &format!(
-                "void TestPetState(void) {{ if (VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FAMILY_SCENE_AND_INJURY_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FIRST_STEPS_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) < CHILD_AGE_DAYS_SATURATED_MAXIMUM && VarGet(VAR_CHILD_CAN_WALK) == CHILD_WALKING_CAN_WALK && VarGet({dog_variable}) == PET_GROWTH_STAGE_ADULT) {{ return; }} }}\n"
+                "void TestPetState(void) {{ if (VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FAMILY_SCENE_AND_INJURY_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) >= CHILD_AGE_DAYS_FIRST_STEPS_EVENT_START && VarGet(VAR_CHILD_AGE_DAYS) < CHILD_AGE_DAYS_SATURATED_MAXIMUM && VarGet(VAR_CHILD_CAN_WALK) == CHILD_WALKING_CAN_WALK && VarGet({dog_variable}) == ANIMAL_PET_GROWTH_STAGE_ADULT) {{ return; }} }}\n"
             ),
             &options,
             &callables.scope,
@@ -6828,17 +6669,10 @@ fn pregnancy_day_thresholds_compile_and_raise_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPregnancyDays, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -6922,17 +6756,10 @@ fn shop_interface_callables_follow_all_four_target_tables() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         for (name, id) in names.iter().zip(ids) {
             assert_eq!(map[*name].0 .0, id, "{target}: {name}");
@@ -6976,17 +6803,10 @@ fn farmhouse_storage_interfaces_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", [0x09F, 0x0A0, 0x0A1]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         for (name, id) in names.iter().zip(ids) {
             assert_eq!(map[*name].0 .0, id, "{target}: {name}");
@@ -7028,17 +6848,10 @@ fn book_letter_and_cooking_interfaces_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x09C, 0x09D, 0x0A3, 0x0A4),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["OpenBookList"].0 .0, book_id, "{target}");
         assert_eq!(map["OpenLetterList"].0 .0, letter_id, "{target}");
@@ -7085,17 +6898,10 @@ fn calendar_clock_and_gamecube_link_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x09E, 0x0A2, 0x0A5),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["OpenCalendar"].0 .0, calendar_id, "{target}");
         assert_eq!(map["OpenClock"].0 .0, clock_id, "{target}");
@@ -7139,17 +6945,10 @@ fn rucksack_lookup_failure_uses_the_proven_shared_sentinel() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestRucksackLookup, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -7187,7 +6986,7 @@ fn rucksack_lookup_failure_uses_the_proven_shared_sentinel() {
 
         parse_named_scripts(
             "void TestRucksackLookup(void) { \
-             if (FindFoodInRucksack(FOOD_TURNIP) == RUCKSACK_SLOT_NOT_FOUND) { return; } }\n",
+             if (FindFoodInRucksack(ITEM_FOOD_TURNIP) == RUCKSACK_SLOT_NOT_FOUND) { return; } }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -7205,17 +7004,10 @@ fn festival_animal_selector_and_farming_tutorial_use_symbolic_kinds() {
         ("MARY_MFOMT_JP", 0x0AA, 0x0AC),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["SelectFestivalAnimal"].0 .0, selector_id, "{target}");
         assert_eq!(map["OpenFarmingTutorial"].0 .0, tutorial_id, "{target}");
@@ -7240,11 +7032,11 @@ fn festival_animal_selector_and_farming_tutorial_use_symbolic_kinds() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_NONE:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_NONE:"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_8:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_8:"),
             "{target}: {source}"
         );
         assert!(
@@ -7279,7 +7071,7 @@ fn festival_animal_selector_and_farming_tutorial_use_symbolic_kinds() {
         .unwrap();
         let source = format_named_script("TestNegativeSentinel", &raised).unwrap();
         assert!(
-            source.contains("== CHICKEN_SLOT_NONE"),
+            source.contains("== ANIMAL_CHICKEN_SLOT_NONE"),
             "{target}: {source}"
         );
         let rebuilt =
@@ -7301,17 +7093,10 @@ fn horse_race_and_frisbee_interfaces_use_symbolic_modes() {
         ("MARY_MFOMT_JP", 0x0DA, 0x0DB, 0x0DC, 0x0DD, 0x0DF),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["RunHorseRace"].0 .0, race_id, "{target}");
         assert_eq!(map["PrepareHorseRaceEntries"].0 .0, entries_id, "{target}");
@@ -7342,11 +7127,13 @@ fn horse_race_and_frisbee_interfaces_use_symbolic_modes() {
                 .unwrap();
         let source = format_named_script("TestFestivals", &raised).unwrap();
         assert!(
-            source.contains("RunHorseRace(HORSE_RACE_MODE_COMPETE)"),
+            source.contains("RunHorseRace(FESTIVAL_HORSE_RACE_MODE_COMPETE)"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("PrepareHorseRaceEntries(HORSE_RACE_ENTRIES_INCLUDE_PLAYER_HORSE)"),
+            source.contains(
+                "PrepareHorseRaceEntries(FESTIVAL_HORSE_RACE_ENTRIES_INCLUDE_PLAYER_HORSE)"
+            ),
             "{target}: {source}"
         );
         assert!(
@@ -7355,7 +7142,7 @@ fn horse_race_and_frisbee_interfaces_use_symbolic_modes() {
         );
         assert!(
             source.contains(
-                "RunFrisbeeGame(FRISBEE_MODE_PRACTICE) == FESTIVAL_CONTEST_RESULT_NOT_WON"
+                "RunFrisbeeGame(FESTIVAL_FRISBEE_MODE_PRACTICE) == FESTIVAL_CONTEST_RESULT_NOT_WON"
             ),
             "{target}: {source}"
         );
@@ -7376,17 +7163,9 @@ fn horse_race_and_frisbee_interfaces_use_symbolic_modes() {
 #[test]
 fn call_script_id_is_printed_as_the_ordered_script_symbol() {
     let options = Options::default().define("MARY_FOMT_US").unwrap();
-    let constants = parse_constant_header(
-        &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-        &options,
-    )
-    .unwrap();
-    let callables = parse_callable_table_with_scope(
-        &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-        &options,
-        &constants,
-    )
-    .unwrap();
+    let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+    let callables =
+        parse_callable_table_with_scope(&common::callables_source(), &options, &constants).unwrap();
     let script_table = parse_script_table(
         "mary_script_table { EventScript_Opening, NULL, EventScript_Wedding };\n",
         &options,
@@ -7458,13 +7237,13 @@ fn typed_id_constants_are_printed_and_round_trip_to_the_same_bytes() {
 fn typed_callable_return_constants_are_printed_in_comparisons() {
     let options = Options::default().define("MARY_FOMT_US").unwrap();
     let constants = parse_constant_header(
-        "typedef enum MaryArticleId {\nARTICLE_GOLDEN_LUMBER = 90,\n} MaryArticleId;\n",
+        "typedef enum MaryItemArticleId {\nITEM_ARTICLE_GOLDEN_LUMBER = 90,\n} MaryItemArticleId;\n",
         &options,
     )
     .unwrap();
     let callables = parse_callable_table_with_scope(
         "mary_callable_table { GetVaseArticleId, };\n\
-         MaryArticleId GetVaseArticleId(void);\n",
+         MaryItemArticleId GetVaseArticleId(void);\n",
         &options,
         &constants,
     )
@@ -7482,7 +7261,7 @@ fn typed_callable_return_constants_are_printed_in_comparisons() {
         decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestArticle").unwrap();
     let source = format_named_script("TestArticle", &raised).unwrap();
     assert!(
-        source.contains("GetVaseArticleId() == ARTICLE_GOLDEN_LUMBER"),
+        source.contains("GetVaseArticleId() == ITEM_ARTICLE_GOLDEN_LUMBER"),
         "{source}"
     );
     let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
@@ -8283,17 +8062,9 @@ fn inner_shadowed_local_does_not_overwrite_its_live_parent_slot() {
 #[test]
 fn local_variable_ids_remain_exact_beyond_one_byte() {
     let options = Options::default().define("MARY_FOMT_US").unwrap();
-    let constants = parse_constant_header(
-        &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-        &options,
-    )
-    .unwrap();
-    let callables = parse_callable_table_with_scope(
-        &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-        &options,
-        &constants,
-    )
-    .unwrap();
+    let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+    let callables =
+        parse_callable_table_with_scope(&common::callables_source(), &options, &constants).unwrap();
     let script_table =
         parse_script_table("mary_script_table { TestManyLocals, };\n", &options).unwrap();
     let mut input = String::from("void TestManyLocals(void) {\n");
@@ -8327,8 +8098,8 @@ fn local_variable_ids_remain_exact_beyond_one_byte() {
 
 #[test]
 fn calendar_values_are_printed_symbolically_for_all_targets() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -8420,8 +8191,8 @@ fn boolean_callable_results_and_arguments_are_printed_symbolically() {
 
 #[test]
 fn every_declared_boolean_callable_round_trips_true_symbolically() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -8493,8 +8264,8 @@ fn every_declared_boolean_callable_round_trips_true_symbolically() {
 
 #[test]
 fn every_fixed_enum_return_callable_recovers_a_symbol_and_round_trips() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -8586,8 +8357,8 @@ fn every_fixed_enum_return_callable_recovers_a_symbol_and_round_trips() {
 
 #[test]
 fn plain_integer_returns_are_explicitly_numeric_or_dynamically_typed() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let shared_expected = [
         "GetEventContextValue",
         "RandomIntInclusive",
@@ -8633,8 +8404,8 @@ fn plain_integer_returns_are_explicitly_numeric_or_dynamically_typed() {
 
 #[test]
 fn semantic_scalar_returns_keep_distinct_types_without_output_wrappers() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let shared = [
         ("GetNpcFriendship", "MaryNpcFriendshipValue"),
         (
@@ -8642,8 +8413,11 @@ fn semantic_scalar_returns_keep_distinct_types_without_output_wrappers() {
             "MaryDaysSinceNpcConversation",
         ),
         ("GetCharacterLove", "MaryCharacterLoveValue"),
-        ("GetIncubatorCapacity", "MaryIncubatorCapacity"),
-        ("GetPregnancyStallCapacity", "MaryPregnancyStallCapacity"),
+        ("GetIncubatorCapacity", "MaryChickenCoopIncubatorCapacity"),
+        (
+            "GetPregnancyStallCapacity",
+            "MaryBarnPregnancyStallCapacity",
+        ),
         ("GetHarvestSpriteWorkDaysLeft", "MaryHarvestSpriteWorkDays"),
         (
             "GetHarvestSpriteTaskExperience",
@@ -8670,7 +8444,7 @@ fn semantic_scalar_returns_keep_distinct_types_without_output_wrappers() {
     let mfomt_only = [
         ("GetFishCatchCount", "MaryFishCount"),
         ("GetLargestCaughtFishSize", "MaryFishSize"),
-        ("GetToolExperience", "MaryToolExperienceValue"),
+        ("GetToolExperience", "MaryItemToolExperienceValue"),
         (
             "CountFestivalWinningAnimals",
             "MaryFestivalWinningAnimalCount",
@@ -8711,7 +8485,7 @@ fn semantic_scalar_returns_keep_distinct_types_without_output_wrappers() {
 
 #[test]
 fn livestock_building_capacity_returns_use_complete_closed_domains() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
+    let constants_source = &common::constants_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -8722,26 +8496,30 @@ fn livestock_building_capacity_returns_use_complete_closed_domains() {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(constants_source, &options).unwrap();
 
-        let incubator = constants.user_type("MaryIncubatorCapacity").unwrap();
+        let incubator = constants
+            .user_type("MaryChickenCoopIncubatorCapacity")
+            .unwrap();
         assert_eq!(
             constants.typed_int_const_name(incubator, 1),
-            Some("INCUBATOR_CAPACITY_BASIC_COOP")
+            Some("CHICKEN_COOP_INCUBATOR_CAPACITY_BASIC_COOP")
         );
         assert_eq!(
             constants.typed_int_const_name(incubator, 2),
-            Some("INCUBATOR_CAPACITY_EXPANDED_COOP")
+            Some("CHICKEN_COOP_INCUBATOR_CAPACITY_EXPANDED_COOP")
         );
         assert_eq!(constants.typed_int_const_name(incubator, 0), None);
         assert_eq!(constants.typed_int_const_name(incubator, 3), None);
 
-        let pregnancy_stall = constants.user_type("MaryPregnancyStallCapacity").unwrap();
+        let pregnancy_stall = constants
+            .user_type("MaryBarnPregnancyStallCapacity")
+            .unwrap();
         assert_eq!(
             constants.typed_int_const_name(pregnancy_stall, 1),
-            Some("PREGNANCY_STALL_CAPACITY_BASIC_BARN")
+            Some("BARN_PREGNANCY_STALL_CAPACITY_BASIC_BARN")
         );
         assert_eq!(
             constants.typed_int_const_name(pregnancy_stall, 2),
-            Some("PREGNANCY_STALL_CAPACITY_EXPANDED_BARN")
+            Some("BARN_PREGNANCY_STALL_CAPACITY_EXPANDED_BARN")
         );
         assert_eq!(constants.typed_int_const_name(pregnancy_stall, 0), None);
         assert_eq!(constants.typed_int_const_name(pregnancy_stall, 3), None);
@@ -8752,21 +8530,21 @@ fn livestock_building_capacity_returns_use_complete_closed_domains() {
 fn livestock_building_capacity_constants_propagate_through_return_values() {
     let options = Options::default().define("MARY_FOMT_US").unwrap();
     let constants = parse_constant_header(
-        "typedef enum MaryIncubatorCapacity {\n\
-         INCUBATOR_CAPACITY_BASIC_COOP = 1,\n\
-         INCUBATOR_CAPACITY_EXPANDED_COOP = 2,\n\
-         } MaryIncubatorCapacity;\n\
-         typedef enum MaryPregnancyStallCapacity {\n\
-         PREGNANCY_STALL_CAPACITY_BASIC_BARN = 1,\n\
-         PREGNANCY_STALL_CAPACITY_EXPANDED_BARN = 2,\n\
-         } MaryPregnancyStallCapacity;\n",
+        "typedef enum MaryChickenCoopIncubatorCapacity {\n\
+         CHICKEN_COOP_INCUBATOR_CAPACITY_BASIC_COOP = 1,\n\
+         CHICKEN_COOP_INCUBATOR_CAPACITY_EXPANDED_COOP = 2,\n\
+         } MaryChickenCoopIncubatorCapacity;\n\
+         typedef enum MaryBarnPregnancyStallCapacity {\n\
+         BARN_PREGNANCY_STALL_CAPACITY_BASIC_BARN = 1,\n\
+         BARN_PREGNANCY_STALL_CAPACITY_EXPANDED_BARN = 2,\n\
+         } MaryBarnPregnancyStallCapacity;\n",
         &options,
     )
     .unwrap();
     let callables = parse_callable_table_with_scope(
         "mary_callable_table { GetIncubatorCapacity, GetPregnancyStallCapacity, };\n\
-         MaryIncubatorCapacity GetIncubatorCapacity(void);\n\
-         MaryPregnancyStallCapacity GetPregnancyStallCapacity(void);\n",
+         MaryChickenCoopIncubatorCapacity GetIncubatorCapacity(void);\n\
+         MaryBarnPregnancyStallCapacity GetPregnancyStallCapacity(void);\n",
         &options,
         &constants,
     )
@@ -8784,11 +8562,11 @@ fn livestock_building_capacity_constants_propagate_through_return_values() {
         decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestCapacity").unwrap();
     let source = format_named_script("TestCapacity", &raised).unwrap();
     assert!(
-        source.contains("var_0 == INCUBATOR_CAPACITY_EXPANDED_COOP"),
+        source.contains("var_0 == CHICKEN_COOP_INCUBATOR_CAPACITY_EXPANDED_COOP"),
         "{source}"
     );
     assert!(
-        source.contains("GetPregnancyStallCapacity() == PREGNANCY_STALL_CAPACITY_BASIC_BARN"),
+        source.contains("GetPregnancyStallCapacity() == BARN_PREGNANCY_STALL_CAPACITY_BASIC_BARN"),
         "{source}"
     );
     let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
@@ -8800,8 +8578,8 @@ fn livestock_building_capacity_constants_propagate_through_return_values() {
 
 #[test]
 fn plain_integer_parameters_are_an_explicit_audited_allowlist() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let expected = [
         ("NoOp014", 0),
         ("NoOpAnimalEventEntityInitialization", 1),
@@ -8864,8 +8642,8 @@ fn plain_integer_parameters_are_an_explicit_audited_allowlist() {
 
 #[test]
 fn semantic_scalar_parameters_keep_distinct_types_without_output_wrappers() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let expected = [
         ("WaitFrames", &["MaryFrameCount"][..]),
         (
@@ -8921,19 +8699,19 @@ fn semantic_scalar_parameters_keep_distinct_types_without_output_wrappers() {
         ),
         (
             "SetPlayerHeldTool",
-            &["MaryToolId", "MaryRequestedToolStackCount"][..],
+            &["MaryItemToolId", "MaryItemToolRequestedStackCount"][..],
         ),
         (
             "AddArticleToRucksack",
-            &["MaryArticleId", "MaryRequestedInventoryCount"][..],
+            &["MaryItemArticleId", "MaryRequestedInventoryCount"][..],
         ),
         (
             "AddFoodToRucksack",
-            &["MaryFoodId", "MaryRequestedInventoryCount"][..],
+            &["MaryItemFoodId", "MaryRequestedInventoryCount"][..],
         ),
         (
             "AddToolToRucksack",
-            &["MaryToolId", "MaryRequestedInventoryCount"][..],
+            &["MaryItemToolId", "MaryRequestedInventoryCount"][..],
         ),
         (
             "OpenNameEntry",
@@ -8975,8 +8753,10 @@ fn semantic_scalar_parameters_keep_distinct_types_without_output_wrappers() {
         }
 
         assert_ne!(
-            constants.user_type("MaryRequestedToolStackCount").unwrap(),
-            constants.user_type("MaryHeldToolStackCount").unwrap(),
+            constants
+                .user_type("MaryItemToolRequestedStackCount")
+                .unwrap(),
+            constants.user_type("MaryItemToolStackCount").unwrap(),
             "{target}: setter input and getter result domains must remain distinct"
         );
 
@@ -8988,7 +8768,7 @@ fn semantic_scalar_parameters_keep_distinct_types_without_output_wrappers() {
 
 #[test]
 fn open_integer_domain_types_are_an_explicit_audited_inventory() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
+    let constants_source = &common::constants_source();
     let mut actual = constants_source
         .lines()
         .filter_map(|line| {
@@ -8997,6 +8777,8 @@ fn open_integer_domain_types_are_an_explicit_audited_inventory() {
                 .and_then(|line| line.strip_suffix(';'))
         })
         .filter(|name| name.starts_with("Mary"))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
     actual.sort_unstable();
 
@@ -9028,12 +8810,12 @@ fn open_integer_domain_types_are_an_explicit_audited_inventory() {
         "MaryNpcFriendshipValue",
         "MaryProductShippedCount",
         "MaryRequestedInventoryCount",
-        "MaryRequestedToolStackCount",
+        "MaryItemToolRequestedStackCount",
         "MaryRgb5Channel",
         "MaryScriptId",
         "MaryStaminaDelta",
         "MaryTextNumberFieldWidth",
-        "MaryToolExperienceValue",
+        "MaryItemToolExperienceValue",
     ];
     expected.sort_unstable();
 
@@ -9045,8 +8827,8 @@ fn open_integer_domain_types_are_an_explicit_audited_inventory() {
 
 #[test]
 fn every_parameter_dependent_return_rule_recovers_its_declared_domain() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let rules = constants_source
         .lines()
         .filter_map(|line| {
@@ -9170,8 +8952,8 @@ fn every_parameter_dependent_return_rule_recovers_its_declared_domain() {
 
 #[test]
 fn every_parameter_dependent_parameter_rule_recovers_its_declared_domain() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let rules = constants_source
         .lines()
         .filter_map(|line| {
@@ -9314,8 +9096,8 @@ fn every_parameter_dependent_parameter_rule_recovers_its_declared_domain() {
 
 #[test]
 fn every_callable_dependent_return_rule_recovers_its_declared_domain() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     let rules = constants_source
         .lines()
         .filter_map(|line| {
@@ -9450,8 +9232,8 @@ fn every_callable_dependent_return_rule_recovers_its_declared_domain() {
 
 #[test]
 fn every_fixed_enum_parameter_recovers_a_symbol_and_round_trips() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -9575,8 +9357,8 @@ fn every_fixed_enum_parameter_recovers_a_symbol_and_round_trips() {
 
 #[test]
 fn inventory_predicates_and_rucksack_level_use_their_verified_domains() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -9615,15 +9397,15 @@ fn inventory_predicates_and_rucksack_level_use_their_verified_domains() {
         let source = format_named_script("TestInventoryDomains", &raised).unwrap();
 
         assert!(
-            source.contains("PlayerOwnsTool(TOOL_SICKLE_IRON) == FALSE"),
+            source.contains("PlayerOwnsTool(ITEM_TOOL_SICKLE_IRON) == FALSE"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("PlayerOwnsFood(FOOD_TURNIP) == TRUE"),
+            source.contains("PlayerOwnsFood(ITEM_FOOD_TURNIP) == TRUE"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("PlayerOwnsArticle(ARTICLE_FLOWER_MOON_DROP) == FALSE"),
+            source.contains("PlayerOwnsArticle(ITEM_ARTICLE_FLOWER_MOON_DROP) == FALSE"),
             "{target}: {source}"
         );
         assert!(
@@ -9639,7 +9421,7 @@ fn inventory_predicates_and_rucksack_level_use_their_verified_domains() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("AdvanceCursedToolLiftProgress(TOOL_SICKLE_CURSED) == FALSE"),
+            source.contains("AdvanceCursedToolLiftProgress(ITEM_TOOL_SICKLE_CURSED) == FALSE"),
             "{target}: {source}"
         );
         assert!(
@@ -9659,8 +9441,8 @@ fn inventory_predicates_and_rucksack_level_use_their_verified_domains() {
 
 #[test]
 fn minigame_and_horse_race_results_use_their_verified_domains() {
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
 
     for target in [
         "MARY_FOMT_US",
@@ -9709,10 +9491,10 @@ fn minigame_and_horse_race_results_use_their_verified_domains() {
             "{target}: {source}"
         );
         for result in [
-            "HORSE_RACE_INTERFACE_CANCELLED",
-            "HORSE_RACE_INTERFACE_CLOSED_WITHOUT_RESULT",
-            "HORSE_RACE_INTERFACE_PLAYER_WON",
-            "HORSE_RACE_INTERFACE_PLAYER_LOST",
+            "FESTIVAL_HORSE_RACE_INTERFACE_CANCELLED",
+            "FESTIVAL_HORSE_RACE_INTERFACE_CLOSED_WITHOUT_RESULT",
+            "FESTIVAL_HORSE_RACE_INTERFACE_PLAYER_WON",
+            "FESTIVAL_HORSE_RACE_INTERFACE_PLAYER_LOST",
         ] {
             assert!(
                 source.contains(&format!("case {result}:")),
@@ -9773,17 +9555,10 @@ fn project_dynamic_presented_item_kind_prints_and_round_trips() {
         ("MARY_MFOMT_JP", 0x06D, 0x06E, 0x06F),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["GetPresentedItemKind"].0 .0, kind_id, "{target}");
         assert_eq!(map["GetPresentedItemId"].0 .0, item_id, "{target}");
@@ -9833,17 +9608,10 @@ fn presented_item_id_uses_the_kind_branch_domain_and_round_trips() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPresentedId, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -9859,9 +9627,9 @@ fn presented_item_id_uses_the_kind_branch_domain_and_round_trips() {
         let source = format_named_script("TestPresentedId", &raised).unwrap();
         for symbol in [
             "case HELD_ITEM_KIND_FOOD:",
-            "case FOOD_TURNIP:",
+            "case ITEM_FOOD_TURNIP:",
             "case HELD_ITEM_KIND_ARTICLE:",
-            "case ARTICLE_FLOWER_MOON_DROP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
         ] {
             assert!(
                 source.contains(symbol),
@@ -9887,17 +9655,10 @@ fn presented_item_id_does_not_invent_domains_for_uncaptured_kinds() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestPresentedUncapturedKinds, };\n",
             &options,
@@ -9933,7 +9694,11 @@ fn presented_item_id_does_not_invent_domains_for_uncaptured_kinds() {
             4,
             "{target}: an unsupported presented-ID domain replaced a raw integer: {source}"
         );
-        for forbidden in ["FOOD_TURNIP", "ARTICLE_FLOWER_MOON_DROP", "CHICKEN_SLOT_"] {
+        for forbidden in [
+            "ITEM_FOOD_TURNIP",
+            "ITEM_ARTICLE_FLOWER_MOON_DROP",
+            "ANIMAL_CHICKEN_SLOT_",
+        ] {
             assert!(
                 !source.contains(forbidden),
                 "{target}: invented {forbidden} for an uncaptured presented kind: {source}"
@@ -9958,17 +9723,10 @@ fn presented_item_id_refinement_works_in_if_and_else_branches() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPresentedIf, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -9984,9 +9742,9 @@ fn presented_item_id_refinement_works_in_if_and_else_branches() {
         let source = format_named_script("TestPresentedIf", &raised).unwrap();
         for symbol in [
             "HELD_ITEM_KIND_FOOD",
-            "case FOOD_TURNIP:",
+            "case ITEM_FOOD_TURNIP:",
             "HELD_ITEM_KIND_ARTICLE",
-            "case ARTICLE_FLOWER_MOON_DROP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
         ] {
             assert!(
                 source.contains(symbol),
@@ -10012,17 +9770,10 @@ fn presented_item_id_refinement_works_with_direct_discriminator_calls() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPresentedDirect, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10041,9 +9792,9 @@ fn presented_item_id_refinement_works_with_direct_discriminator_calls() {
         let source = format_named_script("TestPresentedDirect", &raised).unwrap();
         for symbol in [
             "HELD_ITEM_KIND_FOOD",
-            "case FOOD_TURNIP:",
+            "case ITEM_FOOD_TURNIP:",
             "HELD_ITEM_KIND_ARTICLE",
-            "case ARTICLE_FLOWER_MOON_DROP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
         ] {
             assert!(
                 source.contains(symbol),
@@ -10056,7 +9807,7 @@ fn presented_item_id_refinement_works_with_direct_discriminator_calls() {
             "{target}: branch-only dependent type leaked beyond its discriminator scope: {source}"
         );
         assert_eq!(
-            source.matches("FOOD_TURNIP").count(),
+            source.matches("ITEM_FOOD_TURNIP").count(),
             6,
             "{target}: {source}"
         );
@@ -10065,7 +9816,9 @@ fn presented_item_id_refinement_works_with_direct_discriminator_calls() {
             "{target}: short-circuit local refinement leaked after the condition: {source}"
         );
         assert_eq!(
-            source.matches("case ARTICLE_FLOWER_MOON_DROP:").count(),
+            source
+                .matches("case ITEM_ARTICLE_FLOWER_MOON_DROP:")
+                .count(),
             2,
             "{target}: {source}"
         );
@@ -10088,17 +9841,10 @@ fn related_callable_type_survives_compound_condition_into_if_body() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestCompoundBody, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10113,7 +9859,7 @@ fn related_callable_type_survives_compound_condition_into_if_body() {
                 .unwrap();
         let source = format_named_script("TestCompoundBody", &raised).unwrap();
         assert_eq!(
-            source.matches("case FOOD_TURNIP:").count(),
+            source.matches("case ITEM_FOOD_TURNIP:").count(),
             3,
             "{target}: compound/negated refinements did not reach every logically constrained branch: {source}"
         );
@@ -10141,21 +9887,18 @@ fn conflicting_related_types_in_one_compound_path_stay_numeric() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         // Test-only metadata makes the wrapping predicate assign the article
         // domain to the same value callable whose item-kind relation assigns
         // the food domain. A true AND path proves both facts, so selecting
         // either domain would depend on traversal order rather than evidence.
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestCompoundConflict, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10176,7 +9919,10 @@ fn conflicting_related_types_in_one_compound_path_stay_numeric() {
             source.contains("case 0:"),
             "{target}: conflicting compound refinements must keep the value numeric: {source}"
         );
-        for forbidden in ["case FOOD_TURNIP:", "case ARTICLE_FLOWER_MOON_DROP:"] {
+        for forbidden in [
+            "case ITEM_FOOD_TURNIP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
+        ] {
             assert!(
                 !source.contains(forbidden),
                 "{target}: compound refinement selected an arbitrary domain ({forbidden}): {source}"
@@ -10201,20 +9947,17 @@ fn boolean_discriminator_truth_paths_refine_related_returns() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         constants_source.push_str(
-            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestBooleanPaths, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10229,12 +9972,14 @@ fn boolean_discriminator_truth_paths_refine_related_returns() {
                 .unwrap();
         let source = format_named_script("TestBooleanPaths", &raised).unwrap();
         assert_eq!(
-            source.matches("case ARTICLE_FLOWER_MOON_DROP:").count(),
+            source
+                .matches("case ITEM_ARTICLE_FLOWER_MOON_DROP:")
+                .count(),
             2,
             "{target}: true boolean paths did not recover the article domain: {source}"
         );
         assert_eq!(
-            source.matches("case FOOD_TURNIP:").count(),
+            source.matches("case ITEM_FOOD_TURNIP:").count(),
             2,
             "{target}: false boolean paths did not recover the food domain: {source}"
         );
@@ -10262,17 +10007,10 @@ fn for_condition_refines_related_returns_only_inside_the_loop() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestForRefinement, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10287,7 +10025,7 @@ fn for_condition_refines_related_returns_only_inside_the_loop() {
                 .unwrap();
         let source = format_named_script("TestForRefinement", &raised).unwrap();
         assert_eq!(
-            source.matches("case FOOD_TURNIP:").count(),
+            source.matches("case ITEM_FOOD_TURNIP:").count(),
             1,
             "{target}: true for-condition did not refine the loop body: {source}"
         );
@@ -10315,17 +10053,14 @@ fn do_while_false_exit_refines_related_returns_after_the_loop() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestDoWhileExit, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10340,7 +10075,7 @@ fn do_while_false_exit_refines_related_returns_after_the_loop() {
                 .unwrap();
         let source = format_named_script("TestDoWhileExit", &raised).unwrap();
         assert!(
-            source.contains("case FOOD_TURNIP:"),
+            source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: false do-while exit did not refine the following path: {source}"
         );
         let rebuilt =
@@ -10362,17 +10097,14 @@ fn for_false_exit_refines_direct_boolean_discriminators_after_the_loop() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestForFalseExit, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10387,7 +10119,7 @@ fn for_false_exit_refines_direct_boolean_discriminators_after_the_loop() {
                 .unwrap();
         let source = format_named_script("TestForFalseExit", &raised).unwrap();
         assert!(
-            source.contains("case FOOD_TURNIP:"),
+            source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: false for-condition exit did not refine the following path: {source}"
         );
         let rebuilt =
@@ -10409,17 +10141,14 @@ fn cross_loop_switch_break_prevents_false_exit_refinement() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestCrossLoopBreak, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10441,7 +10170,7 @@ fn cross_loop_switch_break_prevents_false_exit_refinement() {
             "{target}: a cross-loop switch break incorrectly proved the loop condition false: {source}"
         );
         assert!(
-            !source.contains("case FOOD_TURNIP:"),
+            !source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: false-exit refinement leaked across mary_break_switch: {source}"
         );
         let rebuilt =
@@ -10463,20 +10192,17 @@ fn terminating_condition_branches_refine_the_only_surviving_path() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         constants_source.push_str(
-            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestIfExit, TestIfElseExit, };",
             &options,
@@ -10491,8 +10217,8 @@ fn terminating_condition_branches_refine_the_only_surviving_path() {
         .unwrap();
 
         for (index, name, expected_case) in [
-            (0, "TestIfExit", "case FOOD_TURNIP:"),
-            (1, "TestIfElseExit", "case ARTICLE_FLOWER_MOON_DROP:"),
+            (0, "TestIfExit", "case ITEM_FOOD_TURNIP:"),
+            (1, "TestIfElseExit", "case ITEM_ARTICLE_FLOWER_MOON_DROP:"),
         ] {
             let raised =
                 decompile_script_named(&numeric.scripts[index].2, &callables.scope, name).unwrap();
@@ -10521,17 +10247,14 @@ fn matching_if_else_branch_refinements_survive_the_join() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestMatchingJoin, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10546,7 +10269,7 @@ fn matching_if_else_branch_refinements_survive_the_join() {
                 .unwrap();
         let source = format_named_script("TestMatchingJoin", &raised).unwrap();
         assert!(
-            source.contains("case ARTICLE_FLOWER_MOON_DROP:"),
+            source.contains("case ITEM_ARTICLE_FLOWER_MOON_DROP:"),
             "{target}: identical branch refinements were lost at the if/else join: {source}"
         );
         let rebuilt =
@@ -10568,17 +10291,14 @@ fn matching_switch_exit_refinements_survive_the_join() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestSwitchJoin, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10593,7 +10313,7 @@ fn matching_switch_exit_refinements_survive_the_join() {
                 .unwrap();
         let source = format_named_script("TestSwitchJoin", &raised).unwrap();
         assert!(
-            source.contains("case ARTICLE_FLOWER_MOON_DROP:"),
+            source.contains("case ITEM_ARTICLE_FLOWER_MOON_DROP:"),
             "{target}: identical switch-exit refinements were lost at the join: {source}"
         );
         let rebuilt =
@@ -10615,26 +10335,23 @@ fn compound_boolean_refinements_keep_only_logically_forced_types() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemFoodId);\n",
         );
         constants_source.push_str(
-            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPlayerHoldingNothing, TRUE, MaryFoodId);\n",
+            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPlayerHoldingNothing, TRUE, MaryItemFoodId);\n",
         );
         constants_source.push_str(
-            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryArticleId);\n",
+            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemArticleId);\n",
         );
         constants_source.push_str(
-            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPlayerHoldingNothing, FALSE, MaryArticleId);\n",
+            "mary_callable_return_type_when_callable(GetPresentedItemId, IsPlayerHoldingNothing, FALSE, MaryItemArticleId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestAndTrue, TestOrFalse, TestAndConflict, };",
             &options,
@@ -10652,16 +10369,16 @@ fn compound_boolean_refinements_keep_only_logically_forced_types() {
             (
                 0,
                 "TestAndTrue",
-                "case FOOD_TURNIP:",
-                "case ARTICLE_FLOWER_MOON_DROP:",
+                "case ITEM_FOOD_TURNIP:",
+                "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
             ),
             (
                 1,
                 "TestOrFalse",
-                "case ARTICLE_FLOWER_MOON_DROP:",
-                "case FOOD_TURNIP:",
+                "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
+                "case ITEM_FOOD_TURNIP:",
             ),
-            (2, "TestAndConflict", "case 0:", "case FOOD_TURNIP:"),
+            (2, "TestAndConflict", "case 0:", "case ITEM_FOOD_TURNIP:"),
         ] {
             let raised =
                 decompile_script_named(&numeric.scripts[index].2, &callables.scope, name).unwrap();
@@ -10672,7 +10389,7 @@ fn compound_boolean_refinements_keep_only_logically_forced_types() {
             );
             if name == "TestAndConflict" {
                 assert!(
-                    !source.contains("case ARTICLE_FLOWER_MOON_DROP:"),
+                    !source.contains("case ITEM_ARTICLE_FLOWER_MOON_DROP:"),
                     "{target}: conflicting compound refinements selected the other domain: {source}"
                 );
             }
@@ -10696,17 +10413,14 @@ fn terminating_switch_cases_do_not_pollute_the_surviving_exit_state() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestSwitchExit, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10721,7 +10435,7 @@ fn terminating_switch_cases_do_not_pollute_the_surviving_exit_state() {
                 .unwrap();
         let source = format_named_script("TestSwitchExit", &raised).unwrap();
         assert!(
-            source.contains("case FOOD_TURNIP:"),
+            source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: terminating switch cases polluted the only surviving exit: {source}"
         );
         let rebuilt =
@@ -10743,17 +10457,14 @@ fn conditional_switch_break_paths_are_not_hidden_by_later_returns() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestConditionalBreak, TestConditionalBreakDirect, };",
             &options,
@@ -10774,7 +10485,7 @@ fn conditional_switch_break_paths_are_not_hidden_by_later_returns() {
         .unwrap();
         let source = format_named_script("TestConditionalBreak", &raised).unwrap();
         assert!(
-            source.contains("case FOOD_TURNIP:"),
+            source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: conditional switch break was hidden by a later return: {source}"
         );
         let rebuilt =
@@ -10794,7 +10505,7 @@ fn conditional_switch_break_paths_are_not_hidden_by_later_returns() {
         let source_direct =
             format_named_script("TestConditionalBreakDirect", &raised_direct).unwrap();
         assert!(
-            source_direct.contains("case FOOD_TURNIP:"),
+            source_direct.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: the switch label's entry refinement was lost on its break path: {source_direct}"
         );
         let rebuilt_direct =
@@ -10816,17 +10527,14 @@ fn conditional_switch_break_does_not_inherit_later_path_assignments() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestConditionalBreakAssignment, };",
             &options,
@@ -10848,8 +10556,8 @@ fn conditional_switch_break_does_not_inherit_later_path_assignments() {
         let source = format_named_script("TestConditionalBreakAssignment", &raised).unwrap();
         assert!(
             source.contains("case 0:")
-                && !source.contains("case FOOD_TURNIP:")
-                && !source.contains("case ARTICLE_FLOWER_MOON_DROP:"),
+                && !source.contains("case ITEM_FOOD_TURNIP:")
+                && !source.contains("case ITEM_ARTICLE_FLOWER_MOON_DROP:"),
             "{target}: the break exit inherited a later unreachable-path type: {source}"
         );
         let rebuilt =
@@ -10871,17 +10579,10 @@ fn related_callable_origins_survive_local_copies_without_leaking() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestCopiedOrigins, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10905,9 +10606,9 @@ fn related_callable_origins_survive_local_copies_without_leaking() {
         let source = format_named_script("TestCopiedOrigins", &raised).unwrap();
         for expected in [
             "var_1 == HELD_ITEM_KIND_FOOD",
-            "case FOOD_TURNIP:",
+            "case ITEM_FOOD_TURNIP:",
             "var_1 == HELD_ITEM_KIND_ARTICLE",
-            "case ARTICLE_FLOWER_MOON_DROP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
         ] {
             assert!(
                 source.contains(expected),
@@ -10933,17 +10634,10 @@ fn related_callable_origins_survive_local_copies_without_leaking() {
 fn mfomt_outfit_color_symbols_print_and_round_trip() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestOutfit, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -10986,17 +10680,10 @@ fn project_tv_shopping_ids_are_printed_for_reads_and_round_trip() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestTVShopping, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -11040,17 +10727,10 @@ fn project_blacksmith_order_symbols_print_and_round_trip_for_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestBlacksmith, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -11094,17 +10774,10 @@ fn project_item_id_constants_print_and_round_trip_for_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestItems, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -11135,32 +10808,42 @@ fn project_item_id_constants_print_and_round_trip_for_all_targets() {
         let raised =
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestItems").unwrap();
         let source = format_named_script("TestItems", &raised).unwrap();
-        assert!(source.contains("FOOD_MOON_DUMPLINGS"), "{target}: {source}");
         assert!(
-            source.contains("ARTICLE_JEWEL_OF_TRUTH"),
+            source.contains("ITEM_FOOD_MOON_DUMPLINGS"),
             "{target}: {source}"
         );
-        assert!(source.contains("TOOL_SICKLE_CURSED"), "{target}: {source}");
         assert!(
-            source.contains("GetPlayerHeldToolStackCount() == HELD_TOOL_STACK_NOT_PRESENT"),
+            source.contains("ITEM_ARTICLE_JEWEL_OF_TRUTH"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("ITEM_TOOL_SICKLE_CURSED"),
+            "{target}: {source}"
+        );
+        assert!(
+            source.contains("GetPlayerHeldToolStackCount() == ITEM_TOOL_STACK_NOT_PRESENT"),
             "{target}: {source}"
         );
         assert!(
             source.contains(
-                "AddArticleToRucksack(ARTICLE_JEWEL_OF_TRUTH, 2) != UNADDED_ITEM_COUNT_NONE"
+                "AddArticleToRucksack(ITEM_ARTICLE_JEWEL_OF_TRUTH, 2) != ITEM_UNADDED_COUNT_NONE"
             ),
             "{target}: {source}"
         );
         assert!(
-            source.contains("AddFoodToRucksack(FOOD_MOON_DUMPLINGS, 2) != UNADDED_ITEM_COUNT_NONE"),
+            source.contains(
+                "AddFoodToRucksack(ITEM_FOOD_MOON_DUMPLINGS, 2) != ITEM_UNADDED_COUNT_NONE"
+            ),
             "{target}: {source}"
         );
         assert!(
-            source.contains("AddToolToRucksack(TOOL_SICKLE_CURSED, 2) != UNADDED_ITEM_COUNT_NONE"),
+            source.contains(
+                "AddToolToRucksack(ITEM_TOOL_SICKLE_CURSED, 2) != ITEM_UNADDED_COUNT_NONE"
+            ),
             "{target}: {source}"
         );
         assert!(
-            source.contains("ShowPlayerHoldingTool(TOOL_SICKLE_CURSED)"),
+            source.contains("ShowPlayerHoldingTool(ITEM_TOOL_SICKLE_CURSED)"),
             "{target}: {source}"
         );
         assert!(source.contains("HELD_ITEM_KIND_DOG"), "{target}: {source}");
@@ -11177,15 +10860,15 @@ fn project_item_id_constants_print_and_round_trip_for_all_targets() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_NONE:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_NONE:"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_1:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_1:"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_8:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_8:"),
             "{target}: {source}"
         );
         let symbolic =
@@ -11207,11 +10890,7 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let entity_type = constants.user_type("MaryEntityId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(entity_type, 0),
@@ -11232,8 +10911,8 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
         for (id, expected) in [
             (43, "ENTITY_FARM_DOG"),
             (44, "ENTITY_FARM_HORSE"),
-            (46, "ENTITY_CHICKEN_SLOT_1"),
-            (53, "ENTITY_CHICKEN_SLOT_8"),
+            (46, "ENTITY_ANIMAL_CHICKEN_SLOT_1"),
+            (53, "ENTITY_ANIMAL_CHICKEN_SLOT_8"),
             (54, "ENTITY_BARN_ANIMAL_SLOT_1"),
             (69, "ENTITY_BARN_ANIMAL_SLOT_16"),
             (74, "ENTITY_BASKET"),
@@ -11263,12 +10942,9 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
             );
         }
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestEntities, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -11288,8 +10964,8 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
             "SetEntityAnim(ENTITY_TIMID, ANIMATION_ID_0000)",
             "HideEntity(ENTITY_FARM_DOG)",
             "HideEntity(ENTITY_FARM_HORSE)",
-            "HideEntity(ENTITY_CHICKEN_SLOT_1)",
-            "HideEntity(ENTITY_CHICKEN_SLOT_8)",
+            "HideEntity(ENTITY_ANIMAL_CHICKEN_SLOT_1)",
+            "HideEntity(ENTITY_ANIMAL_CHICKEN_SLOT_8)",
             "HideEntity(ENTITY_BARN_ANIMAL_SLOT_1)",
             "HideEntity(ENTITY_BARN_ANIMAL_SLOT_16)",
             "HideEntity(ENTITY_BARN_ANIMAL_SLOT_1 + var_0)",
@@ -11318,11 +10994,13 @@ fn static_entity_ids_cover_player_and_every_character_on_all_targets() {
 
 #[test]
 fn only_open_coordinate_domains_use_typed_identity_wrappers() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let declarations = header
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("mary_typed_identity("))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
     assert_eq!(
         declarations,
@@ -11354,17 +11032,10 @@ fn harvest_sprite_work_and_minigame_callables_round_trip_for_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestSprite, };\n", &options).unwrap();
         let source = "void TestSprite(void) {\n\
@@ -11469,17 +11140,10 @@ fn event_context_and_product_name_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x148, 0x149),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["SetTextVariableToProductName"].0 .0, product_name_id,
@@ -11533,17 +11197,10 @@ fn event_context_numeric_amount_is_not_misprinted_as_a_product() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestContextAmount, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -11579,7 +11236,7 @@ fn event_context_numeric_amount_is_not_misprinted_as_a_product() {
 
 #[test]
 fn winery_mountain_painting_keeps_location_wrapper_and_shared_leaf_distinct() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, leaf_slot, wrapper_slot) in [
         ("MARY_FOMT_US", 131, 396),
         ("MARY_FOMT_JP", 131, 396),
@@ -11609,7 +11266,7 @@ fn winery_mountain_painting_keeps_location_wrapper_and_shared_leaf_distinct() {
 
 #[test]
 fn gray_and_kai_cooking_event_aligns_across_game_families() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, event_slot, followup_slot) in [
         ("MARY_FOMT_US", 714, 715),
         ("MARY_FOMT_JP", 714, 715),
@@ -11664,11 +11321,7 @@ fn ann_followup_dialogue_keeps_distinct_fomt_and_mfomt_event_contexts() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(symbols.script_name(slot), Some(expected), "{target}");
     }
 }
@@ -11677,11 +11330,7 @@ fn ann_followup_dialogue_keeps_distinct_fomt_and_mfomt_event_contexts() {
 fn fomt_love_event_symbols_use_gba_heart_stages() {
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 16,
@@ -11834,11 +11483,7 @@ fn fomt_love_event_symbols_use_gba_heart_stages() {
 fn fomt_family_event_symbols_keep_spouse_and_child_stage_context() {
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 589,
@@ -11903,11 +11548,7 @@ fn fomt_family_event_symbols_keep_spouse_and_child_stage_context() {
 fn mfomt_love_event_symbols_use_gba_heart_stages() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 16,
@@ -12008,11 +11649,7 @@ fn mfomt_love_event_symbols_use_gba_heart_stages() {
 fn mfomt_family_event_symbols_keep_spouse_and_child_stage_context() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 598,
@@ -12078,7 +11715,7 @@ fn mfomt_family_event_symbols_keep_spouse_and_child_stage_context() {
 
 #[test]
 fn anniversary_date_dialogue_texts_use_choice_and_outcome_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, scripts) in [
         (
             "MARY_FOMT_US",
@@ -12178,11 +11815,7 @@ fn spouse_festival_dispatchers_use_event_level_names() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(id),
             Some(expected),
@@ -12264,11 +11897,7 @@ fn sentence_derived_script_names_are_replaced_with_event_level_names() {
         for region in ["US", "JP"] {
             let target = target.replace("US", region);
             let options = Options::default().define(&target).unwrap();
-            let symbols = parse_text_name_table(
-                &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-                &options,
-            )
-            .unwrap();
+            let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
             for (id, expected) in &cases {
                 assert_eq!(
                     symbols.script_name(*id),
@@ -12282,7 +11911,7 @@ fn sentence_derived_script_names_are_replaced_with_event_level_names() {
 
 #[test]
 fn regional_script_names_match_at_every_physical_slot() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut differences = Vec::new();
     for (family, slot_count) in [("FOMT", 1329), ("MFOMT", 1416)] {
         let us_options = Options::default()
@@ -12319,7 +11948,7 @@ fn regional_script_names_match_at_every_physical_slot() {
 
 #[test]
 fn love_event_followups_remain_scoped_to_their_parent_event() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for heart in ["BlackHeart", "PurpleHeart", "BlueHeart", "YellowHeart"] {
         let unscoped = format!("{heart}_Followup");
         assert!(
@@ -12331,7 +11960,7 @@ fn love_event_followups_remain_scoped_to_their_parent_event() {
 
 #[test]
 fn followup_symbol_roles_use_an_explicit_hierarchy_separator() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(
         !source.contains("_FollowupDialogue"),
         "followup dialogue symbols must identify their bound speaker"
@@ -12355,7 +11984,7 @@ fn followup_symbol_roles_use_an_explicit_hierarchy_separator() {
 
 #[test]
 fn numeric_script_names_are_reserved_for_textless_placeholders() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut audited = 0usize;
 
     for (target, slot_count) in [
@@ -12395,7 +12024,7 @@ fn numeric_script_names_are_reserved_for_textless_placeholders() {
 
 #[test]
 fn script_symbols_are_unique_within_each_target() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -12424,7 +12053,7 @@ fn script_symbols_are_unique_within_each_target() {
 
 #[test]
 fn text_symbols_are_case_insensitively_unique_within_each_target() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -12463,7 +12092,7 @@ fn text_symbols_are_case_insensitively_unique_within_each_target() {
 
 #[test]
 fn every_text_symbol_stays_in_its_owning_scripts_event_category() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -12499,7 +12128,7 @@ fn every_text_symbol_stays_in_its_owning_scripts_event_category() {
 
 #[test]
 fn duplicate_text_variants_use_branch_semantics_instead_of_numeric_suffixes() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for (target, water_tank_id, rucksack_id) in [
         ("MARY_FOMT_US", 98usize, 479usize),
@@ -12538,7 +12167,7 @@ fn duplicate_text_variants_use_branch_semantics_instead_of_numeric_suffixes() {
 
 #[test]
 fn clinic_diagnosis_texts_encode_the_full_stamina_and_fatigue_matrix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let stamina_bands = [
         "StaminaAtLeast70Percent",
         "Stamina50To69Percent",
@@ -12590,7 +12219,7 @@ fn clinic_diagnosis_texts_encode_the_full_stamina_and_fatigue_matrix() {
 
 #[test]
 fn clinic_examination_result_values_and_generated_symbols_stay_aligned() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let results = [
         ("CLINIC_EXAM_RESULT_HEALTHY", 0),
         ("CLINIC_EXAM_RESULT_MODERATE_STAMINA_OR_FATIGUE", 1),
@@ -12630,7 +12259,7 @@ fn clinic_examination_result_values_and_generated_symbols_stay_aligned() {
 
 #[test]
 fn spouse_bedtime_regional_text_splits_follow_their_actual_callers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let cases = [
         (
             "MARY_FOMT_US",
@@ -12694,7 +12323,7 @@ fn spouse_bedtime_regional_text_splits_follow_their_actual_callers() {
 
 #[test]
 fn won_lottery_drawing_uses_minigame_and_reel_state_symbols() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12731,7 +12360,7 @@ fn won_lottery_drawing_uses_minigame_and_reel_state_symbols() {
 
 #[test]
 fn mfomt_record_player_navigation_texts_are_named_as_pages_and_arrows() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12766,7 +12395,7 @@ fn mfomt_record_player_navigation_texts_are_named_as_pages_and_arrows() {
 
 #[test]
 fn fomt_debug_affection_editor_texts_describe_navigation_and_adjustments() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_FOMT_US", 115usize), ("MARY_FOMT_JP", 113usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12812,7 +12441,7 @@ fn fomt_debug_affection_editor_texts_describe_navigation_and_adjustments() {
 
 #[test]
 fn mfomt_debug_bachelor_editor_texts_describe_navigation_and_adjustments() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 118usize), ("MARY_MFOMT_JP", 116usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12863,7 +12492,7 @@ fn mfomt_debug_bachelor_editor_texts_describe_navigation_and_adjustments() {
 
 #[test]
 fn mfomt_slot_0359_order_and_mirror_messages_use_branch_semantics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 100usize), ("MARY_MFOMT_JP", 101usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12901,7 +12530,7 @@ fn mfomt_slot_0359_order_and_mirror_messages_use_branch_semantics() {
 
 #[test]
 fn mfomt_tv_program_editor_names_region_specific_japanese_residue() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 56usize), ("MARY_MFOMT_JP", 52usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -12954,7 +12583,7 @@ fn mfomt_tv_program_editor_names_region_specific_japanese_residue() {
 
 #[test]
 fn mfomt_rick_dialogue_names_location_state_and_regional_residue() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 164usize), ("MARY_MFOMT_JP", 163usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13013,7 +12642,7 @@ fn mfomt_rick_dialogue_names_location_state_and_regional_residue() {
 
 #[test]
 fn pumpkin_festival_family_texts_follow_spouse_child_stage_and_region() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13075,7 +12704,7 @@ fn pumpkin_festival_family_texts_follow_spouse_child_stage_and_region() {
 
 #[test]
 fn child_dialogue_variants_follow_age_friendship_and_selector_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, count) in [
         ("MARY_FOMT_US", 995usize, 37usize),
         ("MARY_FOMT_JP", 995usize, 38usize),
@@ -13142,7 +12771,7 @@ fn child_dialogue_variants_follow_age_friendship_and_selector_branches() {
 
 #[test]
 fn fishing_reward_texts_name_units_and_exact_milestones() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 976usize),
         ("MARY_FOMT_JP", 976usize),
@@ -13178,7 +12807,7 @@ fn fishing_reward_texts_name_units_and_exact_milestones() {
 
 #[test]
 fn cliff_dialogue_names_starry_night_departure_church_and_married_work_states() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, count) in [
         ("MARY_FOMT_US", 996usize, 56usize),
         ("MARY_FOMT_JP", 996usize, 55usize),
@@ -13403,7 +13032,7 @@ fn cliff_dialogue_names_starry_night_departure_church_and_married_work_states() 
 
 #[test]
 fn fomt_zack_dialogue_names_follow_location_friendship_and_shipping_context() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13454,7 +13083,7 @@ fn fomt_zack_dialogue_names_follow_location_friendship_and_shipping_context() {
 
 #[test]
 fn mfomt_zack_shipment_dialogue_names_shared_and_japanese_farm_variants() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 41usize), ("MARY_MFOMT_JP", 42usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13487,7 +13116,7 @@ fn mfomt_zack_shipment_dialogue_names_shared_and_japanese_farm_variants() {
 
 #[test]
 fn mfomt_gourmet_dialogue_names_gift_sharing_child_age_and_heart_stages() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 45usize), ("MARY_MFOMT_JP", 46usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13564,7 +13193,7 @@ fn mfomt_gourmet_dialogue_names_gift_sharing_child_age_and_heart_stages() {
 
 #[test]
 fn mfomt_ruby_gamecube_recipe_dialogue_names_follow_unlock_order() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13599,7 +13228,7 @@ fn mfomt_ruby_gamecube_recipe_dialogue_names_follow_unlock_order() {
 
 #[test]
 fn fomt_lou_gifts_and_gamecube_recipes_use_item_categories_and_unlock_order() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13641,7 +13270,7 @@ fn fomt_lou_gifts_and_gamecube_recipes_use_item_categories_and_unlock_order() {
 
 #[test]
 fn mfomt_won_dialogue_names_gift_marriage_location_and_heart_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13684,7 +13313,7 @@ fn mfomt_won_dialogue_names_gift_marriage_location_and_heart_state() {
 
 #[test]
 fn mfomt_won_spouse_location_matrices_preserve_ranges_and_region_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13754,7 +13383,7 @@ fn mfomt_won_spouse_location_matrices_preserve_ranges_and_region_reuse() {
 
 #[test]
 fn thomas_entry_and_fomt_location_roles_follow_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 1017),
         ("MARY_FOMT_JP", 1017),
@@ -13842,7 +13471,7 @@ fn thomas_entry_and_fomt_location_roles_follow_control_flow() {
 
 #[test]
 fn fomt_popuri_dialogue_names_gifts_starry_night_locations_and_heart_states() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_FOMT_US", 144usize), ("MARY_FOMT_JP", 142usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13897,7 +13526,7 @@ fn fomt_popuri_dialogue_names_gifts_starry_night_locations_and_heart_states() {
 
 #[test]
 fn fomt_ann_dialogue_names_gifts_inn_heart_stages_and_regional_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_FOMT_US", 152usize), ("MARY_FOMT_JP", 151usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13949,7 +13578,7 @@ fn fomt_ann_dialogue_names_gifts_inn_heart_stages_and_regional_text_sharing() {
 
 #[test]
 fn fomt_chicken_festival_invitation_names_animal_eligibility_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -13978,7 +13607,7 @@ fn fomt_chicken_festival_invitation_names_animal_eligibility_branches() {
 
 #[test]
 fn mfomt_chicken_festival_invitation_names_marriage_and_regional_slot_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 10usize), ("MARY_MFOMT_JP", 13usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14024,7 +13653,7 @@ fn mfomt_chicken_festival_invitation_names_marriage_and_regional_slot_sharing() 
 
 #[test]
 fn cooking_festival_theme_announcements_use_dish_categories_on_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 1105usize),
         ("MARY_FOMT_JP", 1105usize),
@@ -14052,7 +13681,7 @@ fn cooking_festival_theme_announcements_use_dish_categories_on_all_targets() {
 
 #[test]
 fn mfomt_kai_dialogue_names_gift_sharing_rival_stage_and_inn_red_heart() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 170usize), ("MARY_MFOMT_JP", 173usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14099,7 +13728,7 @@ fn mfomt_kai_dialogue_names_gift_sharing_rival_stage_and_inn_red_heart() {
 
 #[test]
 fn mfomt_kai_south_town_dialogue_exposes_the_native_cliff_love_gate_bug() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14133,7 +13762,7 @@ fn mfomt_kai_south_town_dialogue_exposes_the_native_cliff_love_gate_bug() {
 
 #[test]
 fn mfomt_kai_farmhouse_dialogue_tracks_pregnancy_child_age_time_and_heart_stage() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14164,7 +13793,7 @@ fn mfomt_kai_farmhouse_dialogue_tracks_pregnancy_child_age_time_and_heart_stage(
 
 #[test]
 fn mfomt_kai_location_dialogue_tracks_rival_marriage_proposal_and_heart_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14207,7 +13836,7 @@ fn mfomt_kai_location_dialogue_tracks_rival_marriage_proposal_and_heart_state() 
 
 #[test]
 fn fomt_kai_dialogue_roles_cover_rival_progression_and_location_matrix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_FOMT_US", 35usize), ("MARY_FOMT_JP", 36usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14264,7 +13893,7 @@ fn fomt_kai_dialogue_roles_cover_rival_progression_and_location_matrix() {
 
 #[test]
 fn mfomt_gray_japanese_insertions_name_marriage_black_heart_and_library_context() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14295,7 +13924,7 @@ fn mfomt_gray_japanese_insertions_name_marriage_black_heart_and_library_context(
 
 #[test]
 fn mfomt_gray_core_and_farmhouse_roles_track_family_stage_and_daily_heart_matrix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 159usize), ("MARY_MFOMT_JP", 161usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14331,7 +13960,7 @@ fn mfomt_gray_core_and_farmhouse_roles_track_family_stage_and_daily_heart_matrix
 
 #[test]
 fn mfomt_gray_location_roles_track_rival_marriage_schedule_and_heart_context() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_MFOMT_US", 159usize), ("MARY_MFOMT_JP", 161usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14393,7 +14022,7 @@ fn mfomt_gray_location_roles_track_rival_marriage_schedule_and_heart_context() {
 
 #[test]
 fn mfomt_saibara_dialogue_roles_track_gray_family_friendship_schedule_and_location() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14445,7 +14074,7 @@ fn mfomt_saibara_dialogue_roles_track_gray_family_friendship_schedule_and_locati
 
 #[test]
 fn fomt_saibara_dialogue_roles_track_friendship_schedule_and_location() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -14482,7 +14111,7 @@ fn fomt_saibara_dialogue_roles_track_friendship_schedule_and_location() {
 
 #[test]
 fn gotz_dialogue_roles_align_across_games_and_preserve_jp_north_town_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, count) in [
         ("MARY_FOMT_US", 1028usize, 40usize),
         ("MARY_FOMT_JP", 1028, 39),
@@ -14531,7 +14160,7 @@ fn gotz_dialogue_roles_align_across_games_and_preserve_jp_north_town_reuse() {
 
 #[test]
 fn may_dialogue_script_and_text_roles_cover_general_interactions_not_only_joanna_followup() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, count) in [
         ("MARY_FOMT_US", 1029usize, 34usize),
         ("MARY_FOMT_JP", 1029, 34),
@@ -14586,7 +14215,7 @@ fn may_dialogue_script_and_text_roles_cover_general_interactions_not_only_joanna
 
 #[test]
 fn barley_dialogue_roles_align_schedule_friendship_family_and_link_contexts() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, count) in [
         ("MARY_FOMT_US", 1030usize, 39usize),
         ("MARY_FOMT_JP", 1030, 39),
@@ -14634,7 +14263,7 @@ fn barley_dialogue_roles_align_schedule_friendship_family_and_link_contexts() {
 
 #[test]
 fn debug_affection_editor_uses_canonical_harvest_goddess_spelling() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(!source.contains("Goddesss"));
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
@@ -14654,7 +14283,7 @@ fn debug_affection_editor_uses_canonical_harvest_goddess_spelling() {
 
 #[test]
 fn mfomt_starry_night_spouse_texts_follow_child_stage_and_regional_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let cases = [
         (
             "MARY_MFOMT_US",
@@ -14705,11 +14334,7 @@ fn supermarket_script_symbols_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 478, 479, 480, 486, 488),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 basket_id,
@@ -14754,11 +14379,7 @@ fn town_shop_counter_symbols_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 491, 492, 493, 494, 495, 496, 497, 498),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (clinic_id, "EventScript_ShopEvent_Clinic_Counter"),
             (exam_id, "EventScript_ShopEvent_Clinic_ExaminationChoice"),
@@ -14787,11 +14408,7 @@ fn farmhouse_system_script_symbols_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 350, 351, 353, 358, 360, 363, 368),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (
                 bath_id,
@@ -14831,11 +14448,7 @@ fn mountain_cottage_system_scripts_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 540, 542),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(fireplace_id),
             Some("EventScript_LocationInteraction_Fireplace"),
@@ -14858,11 +14471,7 @@ fn poultry_farm_family_events_have_event_level_symbols() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, expected) in [
             (696, "EventScript_NPCEvent_Rick_WorriesAboutLilliasHealth"),
             (699, "EventScript_NPCEvent_Lillia_ReadsRodsLetter"),
@@ -14891,17 +14500,13 @@ fn poultry_farm_family_events_have_event_level_symbols() {
 }
 
 #[test]
-fn mfomt_fish_pond_interaction_has_a_farm_event_symbol() {
+fn mfomt_fish_pond_deposit_or_withdraw_has_a_farm_event_symbol() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(165),
-            Some("EventScript_FarmEvent_FishPond_Interaction"),
+            Some("EventScript_FarmEvent_FishPond_DepositOrWithdrawFish"),
             "{target} slot 165"
         );
     }
@@ -14922,7 +14527,7 @@ fn system_and_tutorial_collections_have_event_level_symbols() {
                 (738, "EventScript_NPCEvent_Thomas_RandomItemRequestChoice"),
                 (1040, "EventScript_TV_HarvestGoddessRockPaperScissors"),
                 (1050, "EventScript_TV_HarvestGoddessMathQuiz"),
-                (1052, "EventScript_TV_NewYearSpecialPrograms"),
+                (1052, "EventScript_TV_NewYearSpecial_Programs"),
                 (1055, "EventScript_TV_StEmeraldAcademy"),
             ][..],
         ),
@@ -14938,7 +14543,7 @@ fn system_and_tutorial_collections_have_event_level_symbols() {
                 (738, "EventScript_NPCEvent_Thomas_RandomItemRequestChoice"),
                 (1040, "EventScript_TV_HarvestGoddessRockPaperScissors"),
                 (1050, "EventScript_TV_HarvestGoddessMathQuiz"),
-                (1052, "EventScript_TV_NewYearSpecialPrograms"),
+                (1052, "EventScript_TV_NewYearSpecial_Programs"),
                 (1055, "EventScript_TV_StEmeraldAcademy"),
             ][..],
         ),
@@ -14954,7 +14559,7 @@ fn system_and_tutorial_collections_have_event_level_symbols() {
                 (747, "EventScript_NPCEvent_Thomas_RandomItemRequestChoice"),
                 (1111, "EventScript_TV_HarvestGoddessRockPaperScissors"),
                 (1121, "EventScript_TV_HarvestGoddessMathQuiz"),
-                (1123, "EventScript_TV_NewYearSpecialPrograms"),
+                (1123, "EventScript_TV_NewYearSpecial_Programs"),
             ][..],
         ),
         (
@@ -14969,16 +14574,12 @@ fn system_and_tutorial_collections_have_event_level_symbols() {
                 (747, "EventScript_NPCEvent_Thomas_RandomItemRequestChoice"),
                 (1111, "EventScript_TV_HarvestGoddessRockPaperScissors"),
                 (1121, "EventScript_TV_HarvestGoddessMathQuiz"),
-                (1123, "EventScript_TV_NewYearSpecialPrograms"),
+                (1123, "EventScript_TV_NewYearSpecial_Programs"),
             ][..],
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in expected {
             assert_eq!(symbols.script_name(id), Some(name), "{target} slot {id}");
         }
@@ -15060,11 +14661,7 @@ fn horse_race_spectator_dialogue_symbols_match_across_versions() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &fomt_events {
             assert_eq!(
                 symbols.script_name(id + offset),
@@ -15135,11 +14732,7 @@ fn frisbee_tournament_dialogue_symbols_match_across_versions() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &fomt_events {
             assert_eq!(
                 symbols.script_name(id + offset),
@@ -15202,11 +14795,7 @@ fn chicken_and_cow_festival_dialogue_symbols_match_across_versions() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &fomt_events {
             assert_eq!(
                 symbols.script_name(id + offset),
@@ -15220,7 +14809,7 @@ fn chicken_and_cow_festival_dialogue_symbols_match_across_versions() {
 
 #[test]
 fn mfomt_regional_text_insertions_keep_their_actual_semantic_slots() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for (target, expected) in [
         (
@@ -15279,7 +14868,7 @@ fn mfomt_regional_text_insertions_keep_their_actual_semantic_slots() {
 
 #[test]
 fn regional_branch_text_symbols_remain_scoped_to_their_owning_event() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for forbidden in [
         "gText_BabysBirthday,",
         "gText_DukeWelcomesCliffToWinery,",
@@ -15300,13 +14889,14 @@ fn regional_branch_text_symbols_remain_scoped_to_their_owning_event() {
 
 #[test]
 fn every_region_conditional_text_symbol_has_an_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut conditions = Vec::<bool>::new();
 
     for (line_index, line) in source.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.starts_with("#if ") {
-            conditions.push(trimmed == "#if defined(MARY_US)" || trimmed == "#if defined(MARY_JP)");
+            conditions
+                .push(trimmed == "#if defined(REGION_US)" || trimmed == "#if defined(REGION_JP)");
             continue;
         }
         if trimmed == "#endif" {
@@ -15335,7 +14925,7 @@ fn every_region_conditional_text_symbol_has_an_event_scope() {
 
 #[test]
 fn mfomt_nickname_region_slots_distinguish_values_from_confirmation_dialogue() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     let us_options = Options::default().define("MARY_MFOMT_US").unwrap();
     let us = parse_text_name_table(&source, &us_options).unwrap();
@@ -15413,11 +15003,7 @@ fn cow_fireworks_and_music_festival_symbols_match_their_target_scripts() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &common {
             assert_eq!(
                 symbols.script_name(id + offset),
@@ -15430,11 +15016,7 @@ fn cow_fireworks_and_music_festival_symbols_match_their_target_scripts() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, character) in [
             (1194, "Popuri"),
             (1197, "Karen"),
@@ -15453,11 +15035,7 @@ fn cow_fireworks_and_music_festival_symbols_match_their_target_scripts() {
     }
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, character) in [
             (1274, "Popuri"),
             (1277, "Karen"),
@@ -15505,11 +15083,7 @@ fn harvest_fall_horse_and_sheep_festival_symbols_match_across_versions() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (index, character) in harvest_characters.iter().enumerate() {
             let id = 1219 + index + offset;
             assert_eq!(
@@ -15567,11 +15141,7 @@ fn pumpkin_and_winter_thanksgiving_visits_have_character_symbols() {
         ("MARY_MFOMT_JP", 80),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, character) in [(1290, "May"), (1291, "Stu"), (1292, "Popuri")] {
             assert_eq!(
                 symbols.script_name(id + offset),
@@ -15585,11 +15155,7 @@ fn pumpkin_and_winter_thanksgiving_visits_have_character_symbols() {
     }
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, character) in [
             (1294, "Popuri"),
             (1295, "Ann"),
@@ -15617,11 +15183,7 @@ fn remaining_major_festival_and_character_events_have_stable_symbols() {
         ("MARY_MFOMT_JP", [745, 1140, 1204, 1395]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, name) in ids.into_iter().zip([
             "EventScript_NPCEvent_Mary_GathersGrassForBasilsResearchChoice",
             "EventScript_FestivalEvent_NewYearRiceCakeFestival_Meal",
@@ -15634,11 +15196,7 @@ fn remaining_major_festival_and_character_events_have_stable_symbols() {
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, character) in [
             (1153, "Rick"),
             (1154, "Cliff"),
@@ -15673,7 +15231,7 @@ fn remaining_major_festival_and_character_events_have_stable_symbols() {
 
 #[test]
 fn mfomt_new_year_dreams_and_winter_thanksgiving_spouse_gift_have_event_symbols() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -15728,7 +15286,7 @@ fn mfomt_new_year_dreams_and_winter_thanksgiving_spouse_gift_have_event_symbols(
 
 #[test]
 fn cooking_festival_judging_texts_are_scoped_to_the_judging_event() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1128),
         ("MARY_FOMT_JP", 1128),
@@ -15755,7 +15313,7 @@ fn cooking_festival_judging_texts_are_scoped_to_the_judging_event() {
 
 #[test]
 fn major_npc_event_dialogue_is_scoped_to_its_own_event() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, script_name, text_prefix) in [
         (
             "MARY_FOMT_US",
@@ -15838,12 +15396,8 @@ fn major_npc_event_dialogue_is_scoped_to_its_own_event() {
 
 #[test]
 fn won_and_karen_first_meeting_preserves_speakers_and_followups() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let combined_source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let combined_source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -15914,12 +15468,8 @@ fn won_and_karen_first_meeting_preserves_speakers_and_followups() {
 
 #[test]
 fn doctor_family_reflection_preserves_mfomt_only_closing_text() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let combined_source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let combined_source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, shift, expected_count) in [
         ("MARY_FOMT_US", 0, 4),
         ("MARY_FOMT_JP", 0, 4),
@@ -15978,7 +15528,7 @@ fn doctor_family_reflection_preserves_mfomt_only_closing_text() {
 
 #[test]
 fn jeff_blood_type_correction_preserves_mfomt_spouse_greeting() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift, expected_count) in [
         ("MARY_FOMT_US", 0, 11),
         ("MARY_FOMT_JP", 0, 11),
@@ -16045,12 +15595,8 @@ fn jeff_blood_type_correction_preserves_mfomt_spouse_greeting() {
 
 #[test]
 fn elli_medical_study_event_preserves_choice_and_followup_roles() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let combined_source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let combined_source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -16113,12 +15659,8 @@ fn elli_medical_study_event_preserves_choice_and_followup_roles() {
 
 #[test]
 fn carter_confessional_dream_keeps_unspecified_item_semantics() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let combined_source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let combined_source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -16177,12 +15719,8 @@ fn carter_confessional_dream_keeps_unspecified_item_semantics() {
 
 #[test]
 fn carter_back_door_secret_choice_does_not_gate_door_access() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let combined_source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let combined_source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, script_id, expected_count) in [
         ("MARY_FOMT_US", 779, 16),
         ("MARY_FOMT_JP", 779, 16),
@@ -16233,7 +15771,7 @@ fn carter_back_door_secret_choice_does_not_gate_door_access() {
 
 #[test]
 fn harvest_goddess_offering_and_matchmaking_texts_keep_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 571),
         ("MARY_FOMT_JP", 571),
@@ -16258,7 +15796,7 @@ fn harvest_goddess_offering_and_matchmaking_texts_keep_event_scope() {
 
 #[test]
 fn church_confessional_and_elli_doctor_rival_dialogue_keep_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, script_name, text_prefix) in [
         (
             "MARY_FOMT_US",
@@ -16329,7 +15867,7 @@ fn church_confessional_and_elli_doctor_rival_dialogue_keep_event_scope() {
 
 #[test]
 fn won_apple_challenge_and_jeff_painting_dialogue_keep_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, apple_id, painting_id) in [
         ("MARY_FOMT_US", 811, 751),
         ("MARY_FOMT_JP", 811, 751),
@@ -16369,7 +15907,7 @@ fn won_apple_challenge_and_jeff_painting_dialogue_keep_event_scope() {
 
 #[test]
 fn newly_scoped_story_and_system_dialogue_keeps_owning_event_prefix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, cases) in [
         (
             "MARY_FOMT_US",
@@ -16504,7 +16042,7 @@ fn newly_scoped_story_and_system_dialogue_keeps_owning_event_prefix() {
 
 #[test]
 fn moon_viewing_won_shop_argument_and_starry_night_texts_keep_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -16567,7 +16105,7 @@ fn moon_viewing_won_shop_argument_and_starry_night_texts_keep_event_scope() {
 
 #[test]
 fn system_farm_tutorial_and_new_year_texts_keep_event_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, cases) in [
         (
             "MARY_FOMT_US",
@@ -16644,8 +16182,8 @@ fn system_farm_tutorial_and_new_year_texts_keep_event_scope() {
             vec![
                 (
                     165,
-                    "EventScript_FarmEvent_FishPond_Interaction",
-                    "gText_FarmEvent_FishPond_Interaction_",
+                    "EventScript_FarmEvent_FishPond_DepositOrWithdrawFish",
+                    "gText_FarmEvent_FishPond_DepositOrWithdrawFish_",
                 ),
                 (
                     327,
@@ -16679,8 +16217,8 @@ fn system_farm_tutorial_and_new_year_texts_keep_event_scope() {
             vec![
                 (
                     165,
-                    "EventScript_FarmEvent_FishPond_Interaction",
-                    "gText_FarmEvent_FishPond_Interaction_",
+                    "EventScript_FarmEvent_FishPond_DepositOrWithdrawFish",
+                    "gText_FarmEvent_FishPond_DepositOrWithdrawFish_",
                 ),
                 (
                     327,
@@ -16782,11 +16320,7 @@ fn mfomt_family_and_girls_cooking_events_have_stable_symbols() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &expected {
             assert_eq!(symbols.script_name(id), Some(name), "{target} slot {id}");
         }
@@ -16802,11 +16336,7 @@ fn mfomt_system_dispatcher_debug_viewer_and_quiz_have_stable_symbols() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for &(id, name) in &expected {
             assert_eq!(symbols.script_name(id), Some(name), "{target} slot {id}");
         }
@@ -16815,7 +16345,7 @@ fn mfomt_system_dispatcher_debug_viewer_and_quiz_have_stable_symbols() {
 
 #[test]
 fn one_hundred_question_quiz_answers_are_scoped_by_question_number() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(
         !source.contains("OneHundredQuestionQuiz_Answer_"),
         "quiz answer symbols must identify their owning question"
@@ -16932,11 +16462,7 @@ fn entrance_event_dispatchers_are_named_by_verified_destination_location() {
         ("MARY_MFOMT_JP", &mfomt_ids[..]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (&id, &location) in ids.iter().zip(&locations) {
             let role = if [
                 "BehindChurch",
@@ -16971,7 +16497,7 @@ fn entrance_event_dispatchers_are_named_by_verified_destination_location() {
 
 #[test]
 fn semantic_symbol_table_has_no_generated_generic_script_names() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for forbidden in [
         "    EventScript_NPCEvent_Cutscene",
         "    EventScript_NPCEvent_Dialogue_",
@@ -16988,7 +16514,7 @@ fn semantic_symbol_table_has_no_generated_generic_script_names() {
 
 #[test]
 fn event_symbol_hierarchy_uses_npc_names_and_ordered_relationship_stages() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(
         !source.contains("CharacterEvent_"),
         "NPC event symbols must use the NPCEvent category"
@@ -17031,7 +16557,7 @@ fn event_symbol_hierarchy_uses_npc_names_and_ordered_relationship_stages() {
 
 #[test]
 fn text_symbols_are_unique_to_their_owning_script_on_every_target() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -17064,7 +16590,7 @@ fn text_symbols_are_unique_to_their_owning_script_on_every_target() {
 
 #[test]
 fn npc_dialogue_collection_texts_are_scoped_to_their_owning_script() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut audited_scripts = 0usize;
 
     for (target, slot_count) in [
@@ -17112,7 +16638,7 @@ fn npc_dialogue_collection_texts_are_scoped_to_their_owning_script() {
 
 #[test]
 fn paired_npc_family_and_ann_cliff_rival_events_keep_event_scoped_texts() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let cases = [
         (
             "MARY_FOMT_US",
@@ -17725,11 +17251,7 @@ fn numbered_script_symbols_are_textless_placeholder_slots() {
         ("MARY_MFOMT_JP", 1416),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
 
         let mut actual_numbered = Vec::new();
         for id in 0..slot_count {
@@ -17792,17 +17314,10 @@ fn raw_integer_callable_arguments_are_an_explicit_audited_inventory() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let mut actual =
             callables
                 .scope
@@ -17835,17 +17350,10 @@ fn callable_alias_names_are_a_closed_native_pointer_identity_inventory() {
         ("MARY_MFOMT_JP", vec!["SelectMoonViewingPartnerAlias"]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let mut actual = callables
             .scope
             .callable_map()
@@ -17863,7 +17371,7 @@ fn callable_alias_names_are_a_closed_native_pointer_identity_inventory() {
 
 #[test]
 fn text_symbols_are_owned_by_only_one_script_per_target() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot_count) in [
         ("MARY_FOMT_US", 1329),
         ("MARY_FOMT_JP", 1329),
@@ -17891,7 +17399,7 @@ fn text_symbols_are_owned_by_only_one_script_per_target() {
 
 #[test]
 fn semantic_symbol_table_has_no_unscoped_sentence_derived_text_names() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let sentence_starts = [
         "gText_I",
         "gText_You",
@@ -17956,7 +17464,7 @@ fn semantic_symbol_table_has_no_unscoped_sentence_derived_text_names() {
 
 #[test]
 fn semantic_symbol_table_does_not_fall_back_to_mechanical_variant_names() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for legacy_category in [
         "EventScript_FarmInteraction_",
         "EventScript_Minigame_",
@@ -18021,7 +17529,7 @@ fn semantic_symbol_table_does_not_fall_back_to_mechanical_variant_names() {
 
 #[test]
 fn every_text_symbol_uses_its_owning_scripts_semantic_domain() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut script_domain = None;
     let mut script_subject = None;
     let subject_scoped_domains = [
@@ -18097,7 +17605,7 @@ fn every_text_symbol_uses_its_owning_scripts_semantic_domain() {
 
 #[test]
 fn remaining_text_bearing_helpers_use_event_level_script_names() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for forbidden in [
         "EventScript_ShowComeAgainMessage",
         "EventScript_UseChurchConfessional",
@@ -18258,14 +17766,10 @@ fn mineral_town_friends_profiles_share_structured_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1119),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
-            Some("EventScript_TV_MineralTownFriendsCharacterProfiles"),
+            Some("EventScript_TV_MineralTownFriends_CharacterProfiles"),
             "{target} profile-program script"
         );
         let count = symbols.text_count(script_id);
@@ -18315,14 +17819,10 @@ fn calendar_program_uses_date_and_event_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1120, 55),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
-            Some("EventScript_TV_CalendarProgram"),
+            Some("EventScript_TV_Calendar_Program"),
             "{target} calendar script"
         );
         let count = symbols.text_count(script_id);
@@ -18350,13 +17850,9 @@ fn life_on_the_farm_programs_use_season_and_day_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1114, 1115),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (script_id, level) in [(advanced_id, "Advanced"), (beginner_id, "Beginner")] {
-            let script_name = format!("EventScript_TV_LifeOnTheFarm{level}");
+            let script_name = format!("EventScript_TV_LifeOnTheFarm_{level}");
             let text_prefix = format!("gText_TV_LifeOnTheFarm_{level}_");
             assert_eq!(
                 symbols.script_name(script_id),
@@ -18386,11 +17882,7 @@ fn weather_forecasts_use_calling_channel_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1128, 1129),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (script_id, role, minimum_texts) in [
             (weather_channel_id, "WeatherChannelForecast", 14),
             (
@@ -18432,11 +17924,7 @@ fn f314m_grand_prix_uses_race_phase_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1110, 104),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_TV_F314MGrandPrix"),
@@ -18467,11 +17955,7 @@ fn harvest_goddess_tv_games_use_game_state_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 71),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, game, minimum_texts) in [
             (1040, "RockPaperScissors", 25),
             (1041, "NumberGuessing", 18),
@@ -18511,11 +17995,7 @@ fn harvest_theater_uses_episode_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1113, 64),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_TV_HarvestTheater"),
@@ -18546,11 +18026,7 @@ fn aaron_changes_uses_episode_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1116, 43),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_TV_AaronChanges"),
@@ -18578,11 +18054,7 @@ fn mechabot_programs_use_episode_and_reminder_symbols() {
         ("MARY_MFOMT_JP", 1117, 52),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(ultror_id),
             Some("EventScript_TV_MechabotUltror"),
@@ -18602,25 +18074,17 @@ fn mechabot_programs_use_episode_and_reminder_symbols() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(1047),
-            Some("EventScript_TV_MechabotUltrorZeroEpisodeReminders")
+            Some("EventScript_TV_MechabotUltrorZero_EpisodeReminders")
         );
         assert_eq!(symbols.text_count(1047), 20);
     }
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(1118),
             Some("EventScript_TV_MechabotGenesis")
@@ -18644,11 +18108,7 @@ fn remaining_tv_serials_use_program_episode_symbols() {
         ("MARY_MFOMT_JP", 71, 4),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, program, episodes) in [
             (1054, "StarLilyBanditGirl", 25),
             (1055, "StEmeraldAcademy", 10),
@@ -18697,11 +18157,7 @@ fn early_tv_serials_use_program_episode_symbols() {
         ("MARY_MFOMT_JP", 1104, 4),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (offset, (program, episodes)) in programs.iter().enumerate() {
             let script_id = base_id + offset;
             let script_name = format!("EventScript_TV_{program}");
@@ -18738,11 +18194,7 @@ fn four_am_hidden_broadcast_uses_schedule_symbols() {
         ("MARY_MFOMT_JP", 1103, 16),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_TV_4AMHiddenBroadcast"),
@@ -18773,14 +18225,10 @@ fn new_year_tv_specials_use_calendar_function_symbols() {
         ("MARY_MFOMT_JP", 1123),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
-            Some("EventScript_TV_NewYearSpecialPrograms"),
+            Some("EventScript_TV_NewYearSpecial_Programs"),
             "{target} New Year TV special"
         );
         let count = symbols.text_count(script_id);
@@ -18805,11 +18253,7 @@ fn tv_shopping_broadcasts_use_product_symbols_across_all_targets() {
         ("MARY_MFOMT_JP", 1122, 31),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_TV_Shopping_ProductBroadcasts"),
@@ -18832,11 +18276,7 @@ fn tv_shopping_broadcasts_use_product_symbols_across_all_targets() {
 fn television_and_kappa_events_have_event_level_symbols() {
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(540),
             Some("EventScript_TV_EntertainmentChannel"),
@@ -18851,11 +18291,7 @@ fn television_and_kappa_events_have_event_level_symbols() {
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(581),
             Some("EventScript_NPCEvent_Kappa_CucumberOfferingAndStarryNightFestival"),
@@ -18873,11 +18309,7 @@ fn basil_harris_and_ellen_events_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (724, "EventScript_NPCEvent_Basil_LetterAdvice"),
             (
@@ -18927,11 +18359,7 @@ fn aja_and_jeff_family_events_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (
                 757,
@@ -18970,12 +18398,8 @@ fn aja_and_jeff_family_events_follow_each_games_shifted_slots() {
 
 #[test]
 fn manna_aja_advice_event_preserves_shared_slot_roles() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let source = format!(
-        "{}\n{}",
-        symbol_source,
-        fs::read_to_string("goodies/mary_constants.mary.h").unwrap()
-    );
+    let symbol_source = common::symbols_source();
+    let source = format!("{}\n{}", symbol_source, common::constants_source());
     for (target, script_id) in [
         ("MARY_FOMT_US", 756),
         ("MARY_FOMT_JP", 756),
@@ -19028,7 +18452,7 @@ fn manna_aja_advice_event_preserves_shared_slot_roles() {
 
 #[test]
 fn fomt_family_date_regional_text_slots_follow_actual_consumers() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let symbol_source = common::symbols_source();
     for (target, script_id, slot, expected, generated_file, is_called) in [
         (
             "MARY_FOMT_US",
@@ -19085,7 +18509,7 @@ fn fomt_family_date_regional_text_slots_follow_actual_consumers() {
 
 #[test]
 fn popuri_player_birthday_dinner_preserves_regional_text_pool_order() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let symbol_source = common::symbols_source();
     let prefix = "gText_FamilyEvent_Popuri_PlayerBirthdayDinnerDialogueChoice_";
     let us_roles = [
         "HappyBirthdayIveBeenPlanningThis",
@@ -19129,7 +18553,7 @@ fn popuri_player_birthday_dinner_preserves_regional_text_pool_order() {
 
 #[test]
 fn lillia_and_sasha_marriage_reminiscence_preserves_speakers_and_roles() {
-    let symbol_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let symbol_source = common::symbols_source();
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -19218,11 +18642,7 @@ fn inn_beach_and_gotz_events_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (786, "EventScript_NPCEvent_DougAndDuke_ArgumentChoice"),
             (
@@ -19308,11 +18728,7 @@ fn fishing_merchant_and_jewel_events_follow_each_games_shifted_slots() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (806, "EventScript_NPCEvent_Zack_GivesFishingRod"),
             (
@@ -19418,11 +18834,7 @@ fn rival_wedding_event_families_match_fomt_and_mfomt_slots() {
         ("MARY_MFOMT_JP", &mfomt_ids[..]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (&id, expected) in ids.iter().zip(expected) {
             assert_eq!(
                 symbols.script_name(id),
@@ -19442,17 +18854,10 @@ fn supermarket_shelf_redraw_callables_keep_target_ids() {
         ("MARY_MFOMT_JP", 0x0CC, 0x0CD),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(
             map["RedrawRucksackShelfAfterPurchase"].0 .0, rucksack_id,
@@ -19553,11 +18958,7 @@ fn fomt_harvest_goddess_family_events_have_structured_names() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, name) in expected {
             assert_eq!(symbols.script_name(id), Some(name), "{target} slot {id}");
         }
@@ -19581,11 +18982,7 @@ fn harvest_goddess_child_injury_texts_follow_event_roles() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let names = symbols.names(866, symbols.text_count(866));
         assert_eq!(names.len(), expected.len(), "{target}");
         for (actual, expected) in names.iter().zip(expected) {
@@ -19622,11 +19019,7 @@ fn harvest_goddess_childbirth_and_first_steps_texts_follow_event_roles() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (script_id, expected_names) in expected {
             let names = symbols.names(script_id, symbols.text_count(script_id));
             assert_eq!(
@@ -19669,11 +19062,7 @@ fn harvest_goddess_anniversary_texts_use_date_and_delivery_roles() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (script_id, expected_names) in [
             (849, &expected[..]),
             (851, &delivery[..]),
@@ -19721,11 +19110,7 @@ fn harvest_goddess_wedding_texts_follow_speaker_and_nickname_roles() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let names = symbols.names(848, symbols.text_count(848));
         assert_eq!(names.len(), expected.len(), "{target}");
         for (actual, expected_name) in names.iter().zip(expected) {
@@ -19755,11 +19140,7 @@ fn harvest_goddess_child_birthday_texts_follow_date_choice_outcomes() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let names = symbols.names(855, symbols.text_count(855));
         assert_eq!(names.len(), expected.len(), "{target}");
         for (actual, expected_name) in names.iter().zip(expected) {
@@ -19792,11 +19173,7 @@ fn harvest_goddess_family_evening_texts_follow_physical_date_quiz_roles() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let names = symbols.names(858, symbols.text_count(858));
         assert_eq!(names.len(), expected.len(), "{target}");
         for (actual, expected_name) in names.iter().zip(expected) {
@@ -19831,11 +19208,7 @@ fn harvest_goddess_player_birthday_texts_preserve_regional_slot_reuse() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         let names = symbols.names(861, symbols.text_count(861));
         let mut expected = shared_before_us_duplicate.to_vec();
         if target == "MARY_FOMT_US" {
@@ -19874,11 +19247,7 @@ fn harvest_goddess_single_text_family_scripts_name_their_actual_speaker_role() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (script_id, expected_name) in expected {
             let names = symbols.names(script_id, symbols.text_count(script_id));
             assert_eq!(names.len(), 1, "{target} slot {script_id}");
@@ -19908,11 +19277,7 @@ fn clinic_sofa_symbol_corrects_localized_sopha_typo_without_changing_text_bytes(
         ("MARY_MFOMT_JP", 245, None),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(script_id),
             Some("EventScript_LocationInteraction_InspectClinic1FSofa"),
@@ -19935,11 +19300,7 @@ fn mine_and_tool_system_messages_follow_each_games_slots() {
         ("MARY_MFOMT_JP", 1047, 1058, 1059),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         assert_eq!(
             symbols.script_name(mine_id),
             Some("EventScript_MineEvent_ReturnToSurfaceChoice"),
@@ -19967,11 +19328,7 @@ fn cliff_and_ann_events_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (781, "EventScript_NPCEvent_Cliff_CollapsesInSnow"),
             (
@@ -19997,7 +19354,7 @@ fn cliff_and_ann_events_follow_each_games_shifted_slots() {
 
 #[test]
 fn cliff_snow_collapse_preserves_photo_and_doctor_spouse_branch() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift, expected_count) in [
         ("MARY_FOMT_US", 0, 8),
         ("MARY_FOMT_JP", 0, 8),
@@ -20061,7 +19418,7 @@ fn cliff_snow_collapse_preserves_photo_and_doctor_spouse_branch() {
 
 #[test]
 fn cliff_departure_texts_follow_speaker_and_event_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected_roles = [
         "DougAsksCliffToStay",
         "CliffThanksDougButSaysHeMustLeave",
@@ -20114,7 +19471,7 @@ fn cliff_departure_texts_follow_speaker_and_event_roles() {
 
 #[test]
 fn ann_mother_memorial_and_doug_duke_argument_texts_follow_event_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let argument_roles = [
         "AnnPleadsWithDougAndDukeToStop",
         "DougTellsAnnToStayOut",
@@ -20177,7 +19534,7 @@ fn ann_mother_memorial_and_doug_duke_argument_texts_follow_event_roles() {
 
 #[test]
 fn doug_duke_argument_followups_encode_choice_and_repeat_talk_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let followups: &[(usize, &str, &[&str])] = &[
         (
             787,
@@ -20253,7 +19610,7 @@ fn doug_duke_argument_followups_encode_choice_and_repeat_talk_roles() {
 
 #[test]
 fn doug_birthday_gift_event_unifies_mfomt_followup_with_fomt() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let main_roles = [
         "DougAsksPlayerToReturnLaterWhileBusy",
         "AnnCallsForDoug",
@@ -20313,7 +19670,7 @@ fn doug_birthday_gift_event_unifies_mfomt_followup_with_fomt() {
 
 #[test]
 fn ann_cliff_sibling_comparison_is_post_rival_marriage_stage_six() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "CliffCriticizesAnnForNotActingFeminine",
         "AnnDefendsHerPersonality",
@@ -20361,7 +19718,7 @@ fn ann_cliff_sibling_comparison_is_post_rival_marriage_stage_six() {
 
 #[test]
 fn popuri_customer_rush_preserves_mfomt_spouse_and_jp_split_texts() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, id, expected_count) in [
         ("MARY_FOMT_US", 795, 17),
         ("MARY_FOMT_JP", 795, 17),
@@ -20420,7 +19777,7 @@ fn popuri_customer_rush_preserves_mfomt_spouse_and_jp_split_texts() {
 
 #[test]
 fn kai_summer_arrival_and_departure_texts_follow_speaker_and_marriage_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let arrival_roles = [
         "MayRecognizesKai",
         "PopuriWelcomesKaiAndMarksStartOfSummer",
@@ -20477,7 +19834,7 @@ fn kai_summer_arrival_and_departure_texts_follow_speaker_and_marriage_roles() {
 
 #[test]
 fn gotz_work_suspension_events_use_action_and_dialogue_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let loses_roles = [
         "GotzLamentsLossOfMotivation",
         "GotzApologizesForStartlingPlayer",
@@ -20534,7 +19891,7 @@ fn gotz_work_suspension_events_use_action_and_dialogue_roles() {
 
 #[test]
 fn gotz_harris_mountain_patrol_event_preserves_speakers_and_followups() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let main_roles = [
         "GotzAsksAboutHarrisPatrol",
         "HarrisReportsTownIsSafe",
@@ -20604,7 +19961,7 @@ fn gotz_harris_mountain_patrol_event_preserves_speakers_and_followups() {
 
 #[test]
 fn zack_fishing_rod_events_preserve_gift_and_every_species_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -20660,7 +20017,7 @@ fn zack_fishing_rod_events_preserve_gift_and_every_species_roles() {
 
 #[test]
 fn zack_visits_sick_lillia_preserves_speaker_order_and_temporary_dialogue() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "LilliaAsksWhyZackIsVisiting",
         "ZackClaimsHeWasPassingBy",
@@ -20723,7 +20080,7 @@ fn zack_visits_sick_lillia_preserves_speaker_order_and_temporary_dialogue() {
 
 #[test]
 fn won_intro_apple_and_vase_events_use_sales_roles_and_region_topology() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift, jp) in [
         ("MARY_FOMT_US", 0, false),
         ("MARY_FOMT_JP", 0, true),
@@ -20810,7 +20167,7 @@ fn won_intro_apple_and_vase_events_use_sales_roles_and_region_topology() {
 
 #[test]
 fn gamecube_link_guest_introductions_preserve_identity_and_schedule_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -20840,7 +20197,7 @@ fn gamecube_link_guest_introductions_preserve_identity_and_schedule_roles() {
 
 #[test]
 fn harvest_sprite_tea_party_preserves_speakers_reward_and_target_slots() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "ChefAsksIfEveryoneIsReady",
         "SpritesConfirmTheyAreReady",
@@ -20879,7 +20236,7 @@ fn harvest_sprite_tea_party_preserves_speakers_reward_and_target_slots() {
 
 #[test]
 fn jewel_exchanges_are_collection_achievements_with_retry_semantics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, shift) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -20949,11 +20306,7 @@ fn town_family_and_request_events_follow_each_games_shifted_slots() {
         ("MARY_MFOMT_JP", 9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (base_id, expected) in [
             (
                 710,
@@ -21057,11 +20410,7 @@ fn mfomt_bachelor_love_event_followups_have_character_names() {
     ];
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let symbols = parse_text_name_table(
-            &fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let symbols = parse_text_name_table(&common::symbols_source(), &options).unwrap();
         for (id, name) in expected {
             assert_eq!(symbols.script_name(id), Some(name), "{target} slot {id}");
         }
@@ -21070,7 +20419,7 @@ fn mfomt_bachelor_love_event_followups_have_character_names() {
 
 #[test]
 fn karen_profile_dialogue_symbols_encode_location_state_instead_of_numeric_suffixes() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, expected) in [
         (
             "MARY_FOMT_US",
@@ -21129,7 +20478,7 @@ fn karen_profile_dialogue_symbols_encode_location_state_instead_of_numeric_suffi
 
 #[test]
 fn mfomt_doctor_profile_dialogue_symbols_encode_choice_location_and_heart_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21167,7 +20516,7 @@ fn mfomt_doctor_profile_dialogue_symbols_encode_choice_location_and_heart_state(
 
 #[test]
 fn mfomt_moon_viewing_symbols_identify_the_owning_bachelor() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21192,7 +20541,7 @@ fn mfomt_moon_viewing_symbols_identify_the_owning_bachelor() {
 
 #[test]
 fn fomt_zack_profile_symbols_encode_gift_and_friendship_context() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21221,7 +20570,7 @@ fn fomt_zack_profile_symbols_encode_gift_and_friendship_context() {
 
 #[test]
 fn mary_profile_symbols_distinguish_romance_and_friendship_domains() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, specific) in [
         (
             "MARY_FOMT_US",
@@ -21273,7 +20622,7 @@ fn mary_profile_symbols_distinguish_romance_and_friendship_domains() {
 
 #[test]
 fn mary_intro_birthday_blue_feather_and_starry_night_roles_follow_game_family() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1014),
         ("MARY_FOMT_JP", 1014),
@@ -21480,7 +20829,7 @@ fn mary_intro_birthday_blue_feather_and_starry_night_roles_follow_game_family() 
 
 #[test]
 fn mfomt_television_dispatcher_symbols_encode_static_and_episode_browser_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21530,7 +20879,7 @@ fn mfomt_television_dispatcher_symbols_encode_static_and_episode_browser_roles()
 
 #[test]
 fn cow_festival_invitation_symbols_encode_eligibility_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1164),
         ("MARY_FOMT_JP", 1164),
@@ -21558,7 +20907,7 @@ fn cow_festival_invitation_symbols_encode_eligibility_branches() {
 
 #[test]
 fn fall_horse_race_invitation_symbols_encode_horse_growth_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1245),
         ("MARY_FOMT_JP", 1245),
@@ -21589,7 +20938,7 @@ fn fall_horse_race_invitation_symbols_encode_horse_growth_branches() {
 
 #[test]
 fn spring_horse_race_invitation_preserves_fomt_us_physical_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1079),
         ("MARY_FOMT_JP", 1079),
@@ -21629,7 +20978,7 @@ fn spring_horse_race_invitation_preserves_fomt_us_physical_text_sharing() {
 
 #[test]
 fn sheep_festival_invitation_symbols_encode_eligibility_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1265),
         ("MARY_FOMT_JP", 1265),
@@ -21662,7 +21011,7 @@ fn sheep_festival_invitation_symbols_encode_eligibility_branches() {
 
 #[test]
 fn frisbee_invitation_symbols_align_games_and_preserve_mfomt_us_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1130),
         ("MARY_FOMT_JP", 1130),
@@ -21707,7 +21056,7 @@ fn frisbee_invitation_symbols_align_games_and_preserve_mfomt_us_text_sharing() {
 
 #[test]
 fn fomt_starry_night_spouse_symbols_preserve_us_child_state_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21750,7 +21099,7 @@ fn fomt_starry_night_spouse_symbols_preserve_us_child_state_text_sharing() {
 
 #[test]
 fn fomt_moon_viewing_partner_symbols_follow_character_switch_cases() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21791,7 +21140,7 @@ fn fomt_moon_viewing_partner_symbols_follow_character_switch_cases() {
 
 #[test]
 fn mfomt_won_apple_shuffle_symbols_preserve_japanese_right_position_forms() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21824,7 +21173,7 @@ fn mfomt_won_apple_shuffle_symbols_preserve_japanese_right_position_forms() {
 
 #[test]
 fn church_confessional_symbols_follow_outcomes_instead_of_localized_wording() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 139),
         ("MARY_FOMT_JP", 139),
@@ -21869,7 +21218,7 @@ fn church_confessional_symbols_follow_outcomes_instead_of_localized_wording() {
 
 #[test]
 fn fomt_winter_thanksgiving_preserves_us_shared_rucksack_search_text() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21900,7 +21249,7 @@ fn fomt_winter_thanksgiving_preserves_us_shared_rucksack_search_text() {
 
 #[test]
 fn mfomt_starry_night_mail_delivery_symbols_identify_invitation_counts() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -21928,7 +21277,7 @@ fn mfomt_starry_night_mail_delivery_symbols_identify_invitation_counts() {
 
 #[test]
 fn duke_special_article_gift_texts_follow_the_article_categories() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1020),
         ("MARY_FOMT_JP", 1020),
@@ -21954,7 +21303,7 @@ fn duke_special_article_gift_texts_follow_the_article_categories() {
 
 #[test]
 fn festival_calendar_names_and_year_end_windows_align_across_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, has_early_winter) in [
         ("MARY_FOMT_US", 403, false),
         ("MARY_FOMT_JP", 403, true),
@@ -21993,7 +21342,7 @@ fn festival_calendar_names_and_year_end_windows_align_across_all_targets() {
 
 #[test]
 fn mfomt_ann_inn_greetings_preserve_us_friendship_range_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22027,7 +21376,7 @@ fn mfomt_ann_inn_greetings_preserve_us_friendship_range_sharing() {
 
 #[test]
 fn karen_duke_drinking_contest_preserves_us_choice_branch_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 763),
         ("MARY_FOMT_JP", 763),
@@ -22069,7 +21418,7 @@ fn karen_duke_drinking_contest_preserves_us_choice_branch_sharing() {
 
 #[test]
 fn karen_duke_drinking_contest_uses_one_event_identity_and_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id, expected_count) in [
         ("MARY_FOMT_US", 763, 37),
         ("MARY_FOMT_JP", 763, 39),
@@ -22122,7 +21471,7 @@ fn karen_duke_drinking_contest_uses_one_event_identity_and_speaker_roles() {
 
 #[test]
 fn basil_daily_dialogue_roles_preserve_family_replacements_and_region_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1013),
         ("MARY_FOMT_JP", 1013),
@@ -22229,7 +21578,7 @@ fn basil_daily_dialogue_roles_preserve_family_replacements_and_region_reuse() {
 
 #[test]
 fn jeff_special_article_gift_texts_follow_the_article_categories() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1007),
         ("MARY_FOMT_JP", 1007),
@@ -22255,7 +21604,7 @@ fn jeff_special_article_gift_texts_follow_the_article_categories() {
 
 #[test]
 fn thomas_aepfe_apple_rejections_identify_the_wrong_item_category() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 739),
         ("MARY_FOMT_JP", 739),
@@ -22282,7 +21631,7 @@ fn thomas_aepfe_apple_rejections_identify_the_wrong_item_category() {
 
 #[test]
 fn cursed_tool_purification_messages_follow_the_blessed_tool_switch() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 990),
         ("MARY_FOMT_JP", 990),
@@ -22308,7 +21657,7 @@ fn cursed_tool_purification_messages_follow_the_blessed_tool_switch() {
 
 #[test]
 fn mfomt_won_shop_symbols_preserve_us_decline_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22344,7 +21693,7 @@ fn mfomt_won_shop_symbols_preserve_us_decline_text_sharing() {
 
 #[test]
 fn town_square_exit_guards_use_their_actual_role_and_preserve_mfomt_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, base_id) in [
         ("MARY_FOMT_US", 409),
         ("MARY_FOMT_JP", 409),
@@ -22423,7 +21772,7 @@ fn town_square_exit_guards_use_their_actual_role_and_preserve_mfomt_text_sharing
 
 #[test]
 fn mfomt_grape_harvest_job_offer_preserves_us_speaker_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22453,7 +21802,7 @@ fn mfomt_grape_harvest_job_offer_preserves_us_speaker_text_sharing() {
 
 #[test]
 fn mfomt_anna_cooking_class_names_recipe_steps_despite_us_text_duplication() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22474,7 +21823,7 @@ fn mfomt_anna_cooking_class_names_recipe_steps_despite_us_text_duplication() {
 
 #[test]
 fn mfomt_carter_back_door_choice_preserves_jp_outcome_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22511,7 +21860,7 @@ fn mfomt_carter_back_door_choice_preserves_jp_outcome_text_sharing() {
 
 #[test]
 fn mfomt_cliff_collapse_doctor_thanks_follow_the_marriage_branch() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22532,7 +21881,7 @@ fn mfomt_cliff_collapse_doctor_thanks_follow_the_marriage_branch() {
 
 #[test]
 fn mfomt_kai_beach_cafe_help_dialogue_follows_the_marriage_branch() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22555,7 +21904,7 @@ fn mfomt_kai_beach_cafe_help_dialogue_follows_the_marriage_branch() {
 
 #[test]
 fn mfomt_animal_death_rick_dialogue_preserves_us_marriage_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22590,7 +21939,7 @@ fn mfomt_animal_death_rick_dialogue_preserves_us_marriage_text_sharing() {
 
 #[test]
 fn mfomt_dog_sickness_opening_follows_doctor_marriage_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22612,7 +21961,7 @@ fn mfomt_dog_sickness_opening_follows_doctor_marriage_state() {
 
 #[test]
 fn mfomt_big_bed_sleepover_greetings_follow_the_arriving_girl_switch() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22634,7 +21983,7 @@ fn mfomt_big_bed_sleepover_greetings_follow_the_arriving_girl_switch() {
 
 #[test]
 fn sleep_recovery_and_cursed_tool_blessing_is_aligned_across_game_families() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 986),
         ("MARY_FOMT_JP", 986),
@@ -22667,7 +22016,7 @@ fn sleep_recovery_and_cursed_tool_blessing_is_aligned_across_game_families() {
 
 #[test]
 fn mine_descent_and_floor_report_identity_is_shared_by_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 978),
         ("MARY_FOMT_JP", 978),
@@ -22704,7 +22053,7 @@ fn mine_descent_and_floor_report_identity_is_shared_by_all_targets() {
 
 #[test]
 fn fomt_spouse_bedtime_silent_reactions_follow_character_love_and_repeat_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22726,7 +22075,7 @@ fn fomt_spouse_bedtime_silent_reactions_follow_character_love_and_repeat_state()
 
 #[test]
 fn fomt_won_unconditional_interactions_follow_their_physical_categories() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22754,7 +22103,7 @@ fn fomt_won_unconditional_interactions_follow_their_physical_categories() {
 
 #[test]
 fn fomt_elli_unfavorable_animal_reactions_preserve_marriage_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22773,7 +22122,7 @@ fn fomt_elli_unfavorable_animal_reactions_preserve_marriage_branches() {
 
 #[test]
 fn elli_entry_birthday_blue_feather_and_starry_night_roles_follow_game_family() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 1018),
         ("MARY_FOMT_JP", 1018),
@@ -22860,7 +22209,7 @@ fn elli_entry_birthday_blue_feather_and_starry_night_roles_follow_game_family() 
 
 #[test]
 fn elli_clinic_relationship_matrices_follow_game_family_and_shared_strs() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 1018),
         ("MARY_FOMT_JP", 1018),
@@ -22958,7 +22307,7 @@ fn elli_clinic_relationship_matrices_follow_game_family_and_shared_strs() {
 
 #[test]
 fn stu_gift_responses_preserve_only_fomt_us_liked_neutral_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -22998,7 +22347,7 @@ fn stu_gift_responses_preserve_only_fomt_us_liked_neutral_sharing() {
 
 #[test]
 fn stu_dialogue_roles_cover_the_complete_four_target_location_matrix() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let shared_roles = [
         "Introduction",
         "BirthdayGiftResponsePart1",
@@ -23047,7 +22396,7 @@ fn stu_dialogue_roles_cover_the_complete_four_target_location_matrix() {
 
 #[test]
 fn duke_dialogue_roles_preserve_shared_schedule_and_mfomt_cliff_family_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let load = |target: &str, slot: usize| {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -23104,7 +22453,7 @@ fn duke_dialogue_roles_preserve_shared_schedule_and_mfomt_cliff_family_branches(
 
 #[test]
 fn manna_dialogue_roles_preserve_multistep_stories_and_mfomt_cliff_family_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let load = |target: &str, slot: usize| {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -23159,7 +22508,7 @@ fn manna_dialogue_roles_preserve_multistep_stories_and_mfomt_cliff_family_branch
 
 #[test]
 fn harris_dialogue_roles_preserve_gamecube_report_and_cross_location_str_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, expects_gamecube, separate_gotz_high) in [
         ("MARY_FOMT_US", 1023, false, true),
         ("MARY_FOMT_JP", 1023, false, false),
@@ -23219,7 +22568,7 @@ fn harris_dialogue_roles_preserve_gamecube_report_and_cross_location_str_sharing
 
 #[test]
 fn carter_dialogue_roles_cover_stories_schedules_and_mfomt_link_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, expects_strange_creature) in [
         ("MARY_FOMT_US", 1024, false),
         ("MARY_FOMT_JP", 1024, false),
@@ -23288,7 +22637,7 @@ fn carter_dialogue_roles_cover_stories_schedules_and_mfomt_link_branches() {
 
 #[test]
 fn barley_accessory_and_cosmetic_responses_preserve_only_mfomt_us_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 1030),
         ("MARY_FOMT_JP", 1030),
@@ -23323,7 +22672,7 @@ fn barley_accessory_and_cosmetic_responses_preserve_only_mfomt_us_sharing() {
 
 #[test]
 fn cliff_family_photo_return_dialogue_has_the_same_four_semantic_stages() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot) in [
         ("MARY_FOMT_US", 996),
         ("MARY_FOMT_JP", 996),
@@ -23350,7 +22699,7 @@ fn cliff_family_photo_return_dialogue_has_the_same_four_semantic_stages() {
 
 #[test]
 fn fomt_gray_married_library_dialogue_preserves_us_location_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -23365,7 +22714,7 @@ fn fomt_gray_married_library_dialogue_preserves_us_location_sharing() {
 
 #[test]
 fn fomt_gray_dialogue_roles_cover_rival_progression_schedule_and_grape_job_advice() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, count) in [("MARY_FOMT_US", 44usize), ("MARY_FOMT_JP", 45usize)] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -23418,7 +22767,7 @@ fn fomt_gray_dialogue_roles_cover_rival_progression_schedule_and_grape_job_advic
 
 #[test]
 fn fomt_carter_story_transition_texts_preserve_region_specific_slot_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -23440,7 +22789,7 @@ fn fomt_carter_story_transition_texts_preserve_region_specific_slot_reuse() {
 
 #[test]
 fn carter_story_texts_use_event_roles_instead_of_sentence_fragments() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected = [
         "StorytellingPrompt",
         "StorytellingChoiceListen",
@@ -23486,17 +22835,10 @@ fn talk_choice_results_are_one_based_and_raise_symbolically_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestChoice, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -23534,17 +22876,10 @@ fn screen_fade_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x034, 0x035),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["FadeOutScreen"].0 .0, fade_out_id, "{target}");
         assert_eq!(callable_map["FadeInScreen"].0 .0, fade_in_id, "{target}");
@@ -23560,17 +22895,10 @@ fn entity_seat_aux_render_profile_and_fade_variant_callables_follow_all_targets(
         ("MARY_MFOMT_JP", 0x036),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["SetEntitySpritePriority"].0 .0, 0x007,
@@ -23622,10 +22950,10 @@ fn entity_seat_aux_render_profile_and_fade_variant_callables_follow_all_targets(
         }
         let legacy = parse_named_scripts(
             "void TestEntityState(void) {
-             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_0);
-             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_1);
-             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_2);
-             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_3);
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_HIGHEST);
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_HIGH);
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_LOW);
+             SetEntitySpritePriority(41, ENTITY_SPRITE_PRIORITY_LOWEST);
              SetEntityAuxRenderProfile(70, 0);
              SetEntityAuxRenderProfile(70, 1);
              SetEntityAuxRenderProfile(70, 2);
@@ -23655,17 +22983,10 @@ fn inheritance_flashback_and_staff_credits_follow_target_tables() {
         ("MARY_MFOMT_JP", 0x0A7, 0x0AB),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["RunStaffCredits"].0 .0, transition_id, "{target}");
         assert!(
@@ -23695,17 +23016,10 @@ fn farmhouse_modal_menu_lifecycle_hooks_follow_target_tables() {
         ("MARY_MFOMT_JP", 0x0AD),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         for (offset, name) in [
             (0, "PrepareClockMenuTransition"),
@@ -23743,17 +23057,10 @@ fn talk_heart_indicator_callables_keep_their_behavioral_slots_on_all_targets() {
         ("MARY_MFOMT_JP", 0x032, 0x033, "CHARACTER_KAI"),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["ShowTalkHeartIndicator"]
                 .0
@@ -23795,17 +23102,10 @@ fn recovered_unreferenced_callable_handlers_have_stable_target_ids() {
         ("MARY_MFOMT_JP", 1),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         for (name, expected) in [
             ("NoOp014", 0x00E),
@@ -23845,17 +23145,10 @@ fn audited_entity_and_tutorial_helpers_round_trip_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let no_op_shape = &callables.scope.callable_map()["NoOpAnimalEventEntityInitialization"].1;
         assert_eq!(
             no_op_shape.parameter_types(),
@@ -23875,11 +23168,11 @@ fn audited_entity_and_tutorial_helpers_round_trip_on_all_targets() {
                      NoOpTutorialEggDefinition(190, 72, 0);\n\
                      NoOpTutorialEggSelection(0);\n\
                      NoOpAnimalEventEntityInitialization(95, 2, 12);\n\
-                     SetEntityEventScript(ENTITY_70, 0);\n\
-                     SetEntityEventScript(ENTITY_71, 65535);\n\
-                     SetEntityEventScript(ENTITY_72, 65536);\n\
-                     SetEntityEventScript(ENTITY_73, -1);\n\
-                     ClearEntityEventScript(ENTITY_70);\n\
+                     SetEntityEventScript(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, 0);\n\
+                     SetEntityEventScript(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_1, 65535);\n\
+                     SetEntityEventScript(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_2, 65536);\n\
+                     SetEntityEventScript(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_3, -1);\n\
+                     ClearEntityEventScript(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0);\n\
                      SetGameTime(6, 0);\n\
                      SetGameTime(23, 59);\n\
                      SetGameTime(24, 60);\n\
@@ -23922,17 +23215,10 @@ fn name_keyboard_and_rucksack_menu_follow_all_target_tables() {
         ("MARY_MFOMT_JP", 0x0A8, 0x0A9),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["OpenNameEntryKeyboard"].0 .0, keyboard_id, "{target}");
         assert_eq!(map["OpenRucksackMenu"].0 .0, rucksack_id, "{target}");
@@ -23961,17 +23247,10 @@ fn frisbee_tournament_round_follows_all_target_tables() {
         ("MARY_MFOMT_JP", 0x0DE),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["RunFrisbeeTournamentRound"]
                 .0
@@ -24001,17 +23280,10 @@ fn entity_movement_wait_callable_keeps_its_target_id() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["MoveEntityXTo"].0 .0, 0x008, "{target}");
         assert_eq!(callable_map["MoveEntityXToRaw"].0 .0, 0x009, "{target}");
@@ -24070,17 +23342,10 @@ fn hide_entity_callable_keeps_its_target_id() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["HideEntity"].0 .0, 0x00F, "{target}");
     }
@@ -24095,17 +23360,10 @@ fn camera_movement_callables_keep_their_target_ids() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["ChangeMap"].0 .0, 0x016, "{target}");
         assert_eq!(callable_map["PanCameraTo"].0 .0, 0x017, "{target}");
@@ -24206,7 +23464,7 @@ fn camera_movement_callables_keep_their_target_ids() {
 
 #[test]
 fn entity_effect_callables_keep_their_target_ids() {
-    let constants_header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let constants_header = common::constants_source();
     assert!(
         constants_header.contains("ENTITY_EMOTE_SLEEP = 8"),
         "decoded physical animation 8 must retain its proven sleep label"
@@ -24220,12 +23478,9 @@ fn entity_effect_callables_keep_their_target_ids() {
     ] {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&constants_header, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["StartEntityEffect"].0 .0, 0x011, "{target}");
         assert_eq!(callable_map["StopEntityEffect"].0 .0, 0x012, "{target}");
@@ -24322,17 +23577,10 @@ fn composed_dialogue_and_nameplate_callables_keep_their_target_ids() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         let prompt_choice_type = constants.user_type("MaryPromptChoiceResult").unwrap();
         let choice_type = constants.user_type("MaryChoiceResult").unwrap();
@@ -24408,17 +23656,10 @@ fn held_item_action_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x046, 0x047, 0x04E),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["UsePlayerHeldItem"].0 .0, use_id, "{target}");
         assert_eq!(
@@ -24455,17 +23696,10 @@ fn television_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x0FE, 0x0FF, 0x100),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["ShowTelevisionMessage"].0 .0, show_id,
@@ -24552,17 +23786,10 @@ fn television_return_type_survives_consistent_switch_branch_definitions() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestTelevisionBranches, };\n", &options)
                 .unwrap();
@@ -24631,17 +23858,10 @@ fn scripted_npc_control_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x0F2, 0x0F3),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["EnableScriptedNpcControl"].0 .0, enable_id,
@@ -24676,17 +23896,10 @@ fn refresh_all_npc_schedules_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x101),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["RefreshAllNpcSchedules"].0 .0, callable_id,
@@ -24714,16 +23927,28 @@ fn event_icon_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x13D, 0x13E),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         for (value, canonical, legacy) in [
-            (0, "EVENT_ICON_LAYER_HIGHEST_PRIORITY", "EVENT_ICON_LAYER_0"),
-            (1, "EVENT_ICON_LAYER_HIGH_PRIORITY", "EVENT_ICON_LAYER_1"),
-            (2, "EVENT_ICON_LAYER_LOW_PRIORITY", "EVENT_ICON_LAYER_2"),
-            (3, "EVENT_ICON_LAYER_LOWEST_PRIORITY", "EVENT_ICON_LAYER_3"),
+            (
+                0,
+                "EVENT_ICON_LAYER_HIGHEST_PRIORITY",
+                "EVENT_ICON_LAYER_HIGHEST_PRIORITY",
+            ),
+            (
+                1,
+                "EVENT_ICON_LAYER_HIGH_PRIORITY",
+                "EVENT_ICON_LAYER_HIGH_PRIORITY",
+            ),
+            (
+                2,
+                "EVENT_ICON_LAYER_LOW_PRIORITY",
+                "EVENT_ICON_LAYER_LOW_PRIORITY",
+            ),
+            (
+                3,
+                "EVENT_ICON_LAYER_LOWEST_PRIORITY",
+                "EVENT_ICON_LAYER_LOWEST_PRIORITY",
+            ),
         ] {
             assert_eq!(
                 constants.const_int_value(canonical),
@@ -24732,12 +23957,9 @@ fn event_icon_callables_keep_their_target_ids() {
             );
             assert_eq!(constants.const_int_value(legacy), Some(value), "{target}");
         }
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["CreateEventIcon"].0 .0, create_id, "{target}");
         assert_eq!(callable_map["RemoveEventIcon"].0 .0, remove_id, "{target}");
@@ -24800,7 +24022,7 @@ fn event_icon_callables_keep_their_target_ids() {
             );
         }
         let numeric = parse_named_scripts(
-            "void TestEventIcon(void) { CreateEventIcon(0, 288, 123, 2, GetFoodIconId(FOOD_CAKE)); RemoveEventIcon(1); }\n",
+            "void TestEventIcon(void) { CreateEventIcon(0, 288, 123, 2, GetFoodIconId(ITEM_FOOD_CAKE)); RemoveEventIcon(1); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -24811,7 +24033,7 @@ fn event_icon_callables_keep_their_target_ids() {
                 .unwrap();
         let source = format_named_script("TestEventIcon", &raised).unwrap();
         assert!(
-            source.contains("CreateEventIcon(EVENT_ICON_SLOT_0, X(288), Y(123), EVENT_ICON_LAYER_LOW_PRIORITY, GetFoodIconId(FOOD_CAKE))"),
+            source.contains("CreateEventIcon(EVENT_ICON_SLOT_0, X(288), Y(123), EVENT_ICON_LAYER_LOW_PRIORITY, GetFoodIconId(ITEM_FOOD_CAKE))"),
             "{target}: {source}"
         );
         assert!(
@@ -24827,7 +24049,7 @@ fn event_icon_callables_keep_their_target_ids() {
         );
 
         let compound = parse_named_scripts(
-            "void TestEventIcon(void) { CreateEventIcon(0, 20 * 8 + 8, 18 * 8 + 8 + 4, 2, GetFoodIconId(FOOD_CAKE)); }\n",
+            "void TestEventIcon(void) { CreateEventIcon(0, 20 * 8 + 8, 18 * 8 + 8 + 4, 2, GetFoodIconId(ITEM_FOOD_CAKE)); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -24850,7 +24072,7 @@ fn event_icon_callables_keep_their_target_ids() {
         );
 
         let local_coordinate = parse_named_scripts(
-            "void TestEventIcon(void) { int x; int y; x = 20 * 8 + 8; y = 18 * 8 + 8 + 4; CreateEventIcon(0, x, y, 2, GetFoodIconId(FOOD_CAKE)); }\n",
+            "void TestEventIcon(void) { int x; int y; x = 20 * 8 + 8; y = 18 * 8 + 8 + 4; CreateEventIcon(0, x, y, 2, GetFoodIconId(ITEM_FOOD_CAKE)); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -24864,7 +24086,7 @@ fn event_icon_callables_keep_their_target_ids() {
         .unwrap();
         let source = format_named_script("TestEventIcon", &raised).unwrap();
         assert!(
-            source.contains("CreateEventIcon(EVENT_ICON_SLOT_0, X(var_0), Y(var_1), EVENT_ICON_LAYER_LOW_PRIORITY, GetFoodIconId(FOOD_CAKE))"),
+            source.contains("CreateEventIcon(EVENT_ICON_SLOT_0, X(var_0), Y(var_1), EVENT_ICON_LAYER_LOW_PRIORITY, GetFoodIconId(ITEM_FOOD_CAKE))"),
             "{target}: local coordinate uses lost their domains: {source}"
         );
         let rebuilt =
@@ -24876,7 +24098,7 @@ fn event_icon_callables_keep_their_target_ids() {
         );
 
         let mut negative_coordinates = parse_named_scripts(
-            "void TestEventIcon(void) { CreateEventIcon(0, -48, -32, 2, GetFoodIconId(FOOD_CAKE)); }\n",
+            "void TestEventIcon(void) { CreateEventIcon(0, -48, -32, 2, GetFoodIconId(ITEM_FOOD_CAKE)); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -24958,17 +24180,10 @@ fn map_local_door_indices_use_explicit_physical_slot_constants() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let door_type = constants.user_type("MaryDoorIndex").unwrap();
         for slot in 0..=13 {
             assert_eq!(
@@ -25025,17 +24240,10 @@ fn cursed_tool_callables_keep_their_target_ids_and_accept_tool_symbols() {
         ("MARY_MFOMT_JP", 0x13A, 0x13B, 0x13C),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(callable_map["IsToolCursed"].0 .0, is_cursed_id, "{target}");
         assert_eq!(
@@ -25051,9 +24259,9 @@ fn cursed_tool_callables_keep_their_target_ids_and_accept_tool_symbols() {
             parse_script_table("mary_script_table { TestCursedTool, };\n", &options).unwrap();
         parse_named_scripts(
             "void TestCursedTool(void) {\n\
-             if (IsToolCursed(TOOL_SICKLE_CURSED)) {\n\
-                 AdvanceCursedToolLiftProgress(TOOL_SICKLE_CURSED);\n\
-                 AttemptChurchCursedToolRemoval(TOOL_SICKLE_CURSED);\n\
+             if (IsToolCursed(ITEM_TOOL_SICKLE_CURSED)) {\n\
+                 AdvanceCursedToolLiftProgress(ITEM_TOOL_SICKLE_CURSED);\n\
+                 AttemptChurchCursedToolRemoval(ITEM_TOOL_SICKLE_CURSED);\n\
              }\n\
              }\n",
             &options,
@@ -25073,17 +24281,10 @@ fn reference_page_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x09B),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["ShowReferencePage"].0 .0,
             callable_id,
@@ -25143,17 +24344,10 @@ fn reference_pages_and_mailbox_letters_follow_their_distinct_domains() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPages, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -25195,17 +24389,10 @@ fn mailbox_callables_use_the_bounded_letter_id_domain() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let letter_type =
             mary::ir::ValueType::UserType(constants.user_type("MaryLetterId").unwrap());
         for name in [
@@ -25232,17 +24419,10 @@ fn mailbox_letter_symbols_cover_each_native_boundary_without_crossing_it() {
         ("MARY_MFOMT_JP", 189, "LETTER_USEFUL_CONTROLS", None),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestLetterBoundary, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -25293,17 +24473,10 @@ fn link_milestone_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x07A, 0x07B, 0x07C, 0x07D),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["HasLocalLinkMilestone"].0 .0, local_id,
@@ -25333,17 +24506,10 @@ fn farmhouse_bed_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x12A),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["PlacePlayerAtFarmhouseBed"]
                 .0
@@ -25363,17 +24529,10 @@ fn supermarket_item_symbols_print_and_round_trip_for_all_targets() {
         ("MARY_MFOMT_JP", 0x08F),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["PurchaseSupermarketItem"]
                 .0
@@ -25417,17 +24576,10 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
         ("MARY_MFOMT_JP", 0x0A6),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["OpenNameEntry"].0 .0,
             callable_id,
@@ -25494,7 +24646,7 @@ fn name_entry_symbols_respect_target_evidence_and_round_trip() {
         let source = format_named_script("TestNameEntry", &raised).unwrap();
         assert!(source.contains("ANIMAL_SLOT_3"), "{target}: {source}");
         assert!(
-            source.contains("OpenNameEntry(NAME_ENTRY_CHICKEN, CHICKEN_SLOT_8)"),
+            source.contains("OpenNameEntry(NAME_ENTRY_CHICKEN, ANIMAL_CHICKEN_SLOT_8)"),
             "{target}: {source}"
         );
         assert!(
@@ -25536,17 +24688,10 @@ fn contest_animal_callables_keep_target_ids_and_symbolic_kind() {
         ("MARY_MFOMT_JP", 0x11B, 0x11C, 0x11D),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["SetContestAnimal"].0 .0, set_id, "{target}");
         assert_eq!(map["ClearContestAnimal"].0 .0, clear_id, "{target}");
@@ -25590,15 +24735,15 @@ fn contest_animal_callables_keep_target_ids_and_symbolic_kind() {
         );
         assert!(source.contains("case ANIMAL_SLOT_3:"), "{target}: {source}");
         assert!(
-            source.contains("SetContestAnimal(ANIMAL_KIND_CHICKEN, CHICKEN_SLOT_8)"),
+            source.contains("SetContestAnimal(ANIMAL_KIND_CHICKEN, ANIMAL_CHICKEN_SLOT_8)"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_NONE:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_NONE:"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case CHICKEN_SLOT_8:"),
+            source.contains("case ANIMAL_CHICKEN_SLOT_8:"),
             "{target}: {source}"
         );
         let symbolic =
@@ -25620,17 +24765,10 @@ fn animal_growth_stage_results_use_the_selected_species_domain() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestGrowth, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -25665,18 +24803,18 @@ fn animal_growth_stage_results_use_the_selected_species_domain() {
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestGrowth").unwrap();
         let source = format_named_script("TestGrowth", &raised).unwrap();
         for expected in [
-            "GetAnimalGrowthStage(ANIMAL_KIND_CHICKEN, CHICKEN_SLOT_1) == CHICKEN_GROWTH_STAGE_CHICK",
-            "GetAnimalGrowthStage(ANIMAL_KIND_COW, ANIMAL_SLOT_2) == COW_GROWTH_STAGE_ADULT",
-            "GetAnimalGrowthStage(ANIMAL_KIND_SHEEP, ANIMAL_SLOT_3) == SHEEP_GROWTH_STAGE_ADULT",
-            "GetAnimalGrowthStage(ANIMAL_KIND_HORSE, PET_INDEX_ARGUMENT_IGNORED_ZERO) == PET_GROWTH_STAGE_ADULT",
-            "GetAnimalGrowthStage(ANIMAL_KIND_DOG, PET_INDEX_ARGUMENT_IGNORED_ZERO) == PET_GROWTH_STAGE_ADULT",
-            "GetAnimalName(TEXT_VARIABLE_1, ANIMAL_KIND_CHICKEN, CHICKEN_SLOT_8)",
-            "DoesAnimalExist(ANIMAL_KIND_CHICKEN, CHICKEN_SLOT_8) == TRUE",
-            "GetAnimalGrowthStage(var_0, CHICKEN_SLOT_8) == CHICKEN_GROWTH_STAGE_CHICK",
-            "GetAnimalGrowthStage(var_0, ANIMAL_SLOT_3) == COW_GROWTH_STAGE_ADULT",
-            "GetAnimalGrowthStage(var_0, CHICKEN_SLOT_7) == CHICKEN_GROWTH_STAGE_CHICK",
+            "GetAnimalGrowthStage(ANIMAL_KIND_CHICKEN, ANIMAL_CHICKEN_SLOT_1) == ANIMAL_CHICKEN_GROWTH_STAGE_CHICK",
+            "GetAnimalGrowthStage(ANIMAL_KIND_COW, ANIMAL_SLOT_2) == ANIMAL_COW_GROWTH_STAGE_ADULT",
+            "GetAnimalGrowthStage(ANIMAL_KIND_SHEEP, ANIMAL_SLOT_3) == ANIMAL_SHEEP_GROWTH_STAGE_ADULT",
+            "GetAnimalGrowthStage(ANIMAL_KIND_HORSE, ANIMAL_PET_INDEX_ARGUMENT_IGNORED_ZERO) == ANIMAL_PET_GROWTH_STAGE_ADULT",
+            "GetAnimalGrowthStage(ANIMAL_KIND_DOG, ANIMAL_PET_INDEX_ARGUMENT_IGNORED_ZERO) == ANIMAL_PET_GROWTH_STAGE_ADULT",
+            "GetAnimalName(TEXT_VARIABLE_1, ANIMAL_KIND_CHICKEN, ANIMAL_CHICKEN_SLOT_8)",
+            "DoesAnimalExist(ANIMAL_KIND_CHICKEN, ANIMAL_CHICKEN_SLOT_8) == TRUE",
+            "GetAnimalGrowthStage(var_0, ANIMAL_CHICKEN_SLOT_8) == ANIMAL_CHICKEN_GROWTH_STAGE_CHICK",
+            "GetAnimalGrowthStage(var_0, ANIMAL_SLOT_3) == ANIMAL_COW_GROWTH_STAGE_ADULT",
+            "GetAnimalGrowthStage(var_0, ANIMAL_CHICKEN_SLOT_7) == ANIMAL_CHICKEN_GROWTH_STAGE_CHICK",
             "GetAnimalGrowthStage(var_0, ANIMAL_SLOT_1) == 0",
-            "GetAnimalGrowthStage(var_0, CHICKEN_SLOT_6) == CHICKEN_GROWTH_STAGE_CHICK",
+            "GetAnimalGrowthStage(var_0, ANIMAL_CHICKEN_SLOT_6) == ANIMAL_CHICKEN_GROWTH_STAGE_CHICK",
         ] {
             assert!(source.contains(expected), "{target}: missing {expected}: {source}");
         }
@@ -25699,7 +24837,7 @@ fn animal_growth_stage_results_use_the_selected_species_domain() {
 
 #[test]
 fn manna_flatters_jeff_texts_use_dialogue_roles_across_game_families() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     for required in [
         "gText_NPCEvent_Manna_FlattersJeff_JeffGreetsPlayerAtCounter",
         "gText_NPCEvent_Manna_FlattersJeff_MannaGreetsPlayer",
@@ -25739,7 +24877,7 @@ fn manna_flatters_jeff_texts_use_dialogue_roles_across_game_families() {
 
 #[test]
 fn basil_letter_advice_texts_use_choice_and_dialogue_roles_across_game_families() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     for required in [
         "gText_NPCEvent_Basil_LetterAdvice_BasilPacesWhileWorried",
         "gText_NPCEvent_Basil_LetterAdvice_BasilGreetsPlayerAndIntroducesDilemma",
@@ -25780,7 +24918,7 @@ fn basil_letter_advice_texts_use_choice_and_dialogue_roles_across_game_families(
 
 #[test]
 fn basil_publishing_award_texts_use_speaker_roles_across_game_families() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     for required in [
         "gText_NPCEvent_Basil_PublishingAward_AnnaCongratulatesBasil",
         "gText_NPCEvent_Basil_PublishingAward_MaryCongratulatesBasil",
@@ -25832,7 +24970,7 @@ fn basil_publishing_award_texts_use_speaker_roles_across_game_families() {
 
 #[test]
 fn anna_cooking_lesson_invitation_is_aligned_across_game_families() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     assert_eq!(
         source
             .matches("EventScript_NPCEvent_Anna_CookingLessonsInvitationChoice\n")
@@ -25889,7 +25027,7 @@ fn anna_cooking_lesson_invitation_is_aligned_across_game_families() {
 
 #[test]
 fn anna_cooking_class_names_all_five_lessons_across_game_families() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     assert_eq!(
         source
             .matches("EventScript_NPCEvent_Anna_CookingClass\n")
@@ -25940,7 +25078,7 @@ fn anna_cooking_class_names_all_five_lessons_across_game_families() {
 
 #[test]
 fn mary_and_gray_book_event_is_a_post_marriage_rival_event() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     let event = "RivalMarriageEvent_MaryAndGray_06_BookSuccessAndHealthConcern";
     assert_eq!(
         source.matches(&format!("EventScript_{event}\n")).count(),
@@ -25983,7 +25121,7 @@ fn mary_and_gray_book_event_is_a_post_marriage_rival_event() {
 
 #[test]
 fn mary_research_grass_event_does_not_misclassify_mary_as_married() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     let event = "NPCEvent_Mary_GathersGrassForBasilsResearchChoice";
     assert_eq!(
         source.matches(&format!("EventScript_{event}\n")).count(),
@@ -26010,7 +25148,7 @@ fn mary_research_grass_event_does_not_misclassify_mary_as_married() {
 
 #[test]
 fn farm_introduction_texts_name_thomas_and_zack_tutorial_roles() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     let prefix = "gText_FarmEvent_FarmIntroduction_ShippingTutorial_";
     for required in [
         "ThomasExplainsBasicControls",
@@ -26061,8 +25199,8 @@ fn farm_introduction_texts_name_thomas_and_zack_tutorial_roles() {
 fn thomas_random_item_request_does_not_misidentify_the_neighboring_mayor_as_goddess() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     let prefix = "gText_NPCEvent_Thomas_RandomItemRequestChoice_";
     for required in [
@@ -26110,8 +25248,8 @@ fn thomas_random_item_request_does_not_misidentify_the_neighboring_mayor_as_godd
 fn thomas_random_item_delivery_names_text_roles_and_near_miss_results() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     let prefix = "gText_NPCEvent_Thomas_RandomItemRequestDelivery_";
     for required in [
@@ -26167,8 +25305,8 @@ fn thomas_random_item_delivery_names_text_roles_and_near_miss_results() {
 fn harris_aja_letter_events_use_advice_and_rejection_roles() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     for (event, roles) in [
         (
@@ -26218,7 +25356,7 @@ fn harris_aja_letter_events_use_advice_and_rejection_roles() {
 
 #[test]
 fn ellen_white_flower_event_chain_uses_speaker_and_stage_roles() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     for (event, roles) in [
         (
             "NPCEvent_Ellen_WhiteFlowerLegend",
@@ -26278,8 +25416,8 @@ fn ellen_white_flower_event_chain_uses_speaker_and_stage_roles() {
 fn ellen_grandfathers_hidden_letter_chain_uses_one_event_identity() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     for role in [
         "ElliGreetsPlayer",
@@ -26343,7 +25481,7 @@ fn ellen_grandfathers_hidden_letter_chain_uses_one_event_identity() {
 
 #[test]
 fn ellen_starry_night_stocking_texts_name_material_process_and_delivery() {
-    let source = include_str!("../goodies/mary_scripts_text.mary.sym");
+    let source = &common::symbols_source();
     let event = "NPCEvent_Ellen_KnitsStarryNightStocking";
     for role in [
         "EllenAcceptsYarnAndPromisesStarryNightStocking",
@@ -26367,8 +25505,8 @@ fn ellen_starry_night_stocking_texts_name_material_process_and_delivery() {
 fn elli_and_stu_play_event_unifies_gendered_older_sibling_wording() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     let event = "NPCEvent_ElliAndStu_PlayTogetherChoice";
     for role in [
@@ -26417,8 +25555,8 @@ fn elli_and_stu_play_event_unifies_gendered_older_sibling_wording() {
 fn jeff_painting_purchase_offer_names_speakers_and_refusal_motive() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     let event = "NPCEvent_Jeff_WonOffersToBuyPainting";
     for role in [
@@ -26485,8 +25623,8 @@ fn jeff_painting_purchase_offer_names_speakers_and_refusal_motive() {
 fn jeff_and_sasha_store_credit_lesson_names_the_customer_test_and_followups() {
     let source = format!(
         "{}\n{}",
-        include_str!("../goodies/mary_scripts_text.mary.sym"),
-        include_str!("../goodies/mary_constants.mary.h")
+        common::symbols_source(),
+        common::constants_source()
     );
     let event = "NPCEvent_JeffAndSasha_StoreCreditLesson";
     for role in [
@@ -26550,14 +25688,10 @@ fn chicken_family_slot_metadata_covers_every_shared_livestock_callable() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let chicken_slot_type = mary::ir::ValueType::UserType(
             constants
-                .user_type("MaryChickenSlotIndex")
+                .user_type("MaryAnimalChickenSlotIndex")
                 .expect("missing chicken slot type"),
         );
         for (callable, discriminator_index, target_index) in [
@@ -26599,7 +25733,7 @@ fn chicken_family_slot_metadata_covers_every_shared_livestock_callable() {
 
 #[test]
 fn horse_and_dog_handlers_expose_their_ignored_index_argument() {
-    let source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let source = common::constants_source();
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -26609,7 +25743,9 @@ fn horse_and_dog_handlers_expose_their_ignored_index_argument() {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&source, &options).unwrap();
         let ignored_type = mary::ir::ValueType::UserType(
-            constants.user_type("MaryIgnoredPetIndexArgument").unwrap(),
+            constants
+                .user_type("MaryAnimalIgnoredPetIndexArgument")
+                .unwrap(),
         );
         for callable in [
             "DoesAnimalExist",
@@ -26648,19 +25784,21 @@ fn horse_and_dog_handlers_expose_their_ignored_index_argument() {
             assert_eq!(
                 constants.dependent_callable_parameter_type(callable, 0, 3, 1),
                 Some(mary::ir::ValueType::UserType(
-                    constants.user_type("MaryChickenSlotIndex").unwrap(),
+                    constants.user_type("MaryAnimalChickenSlotIndex").unwrap(),
                 )),
                 "{target}: {callable}: chicken roster"
             );
         }
-        let type_id = constants.user_type("MaryIgnoredPetIndexArgument").unwrap();
+        let type_id = constants
+            .user_type("MaryAnimalIgnoredPetIndexArgument")
+            .unwrap();
         assert_eq!(
             constants.typed_int_const_name(type_id, 0),
-            Some("PET_INDEX_ARGUMENT_IGNORED_ZERO")
+            Some("ANIMAL_PET_INDEX_ARGUMENT_IGNORED_ZERO")
         );
         assert_eq!(
             constants.typed_int_const_name(type_id, 1),
-            Some("PET_INDEX_ARGUMENT_IGNORED_ONE")
+            Some("ANIMAL_PET_INDEX_ARGUMENT_IGNORED_ONE")
         );
         assert_eq!(constants.typed_int_const_name(type_id, 2), None);
     }
@@ -26675,17 +25813,10 @@ fn caught_fish_state_callables_keep_their_target_ids() {
         ("MARY_MFOMT_JP", 0x11E, 0x11F, 0x120, 0x121),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(
             map["SetTextVariableToCaughtFishName"].0 .0, name_id,
@@ -26706,17 +25837,10 @@ fn spouse_nickname_callable_keeps_target_id_and_accepts_text_symbol() {
         ("MARY_MFOMT_JP", 0x129),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SetPlayerNicknameForSpouse"]
                 .0
@@ -26746,17 +25870,10 @@ fn descend_mine_floor_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x139),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["DescendMineFloor"].0 .0,
             callable_id,
@@ -26774,17 +25891,10 @@ fn interacting_animal_index_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x106),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["GetInteractingAnimalIndex"]
                 .0
@@ -26804,17 +25914,10 @@ fn mountain_cottage_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x0C7),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["BuildMountainCottage"].0 .0,
             callable_id,
@@ -26832,17 +25935,10 @@ fn livestock_life_state_symbols_print_and_round_trip_for_all_targets() {
         ("MARY_MFOMT_JP", 0x112),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["CountAnimalsByLifeState"]
                 .0
@@ -26889,17 +25985,10 @@ fn livestock_death_summary_and_cleanup_callables_keep_target_ids() {
         ("MARY_MFOMT_JP", 0x113, 0x114, 0x115, 0x116),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(
             map["ShowLivestockNeglectDeathSummary"].0 .0, neglect_summary,
@@ -26929,17 +26018,10 @@ fn screen_color_flash_callable_keeps_its_target_id() {
         ("MARY_MFOMT_JP", 0x12B),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["FlashScreenColor"].0 .0,
             callable_id,
@@ -26957,17 +26039,10 @@ fn global_farm_animal_and_shooting_star_callables_keep_target_ids() {
         ("MARY_MFOMT_JP", 0x12D, 0x12E, 0x12F),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["CureAllSickLivestock"].0 .0, cure_id, "{target}");
         assert_eq!(
@@ -26990,17 +26065,10 @@ fn cooking_festival_rating_symbols_print_and_round_trip_for_all_targets() {
         ("MARY_MFOMT_JP", 0x124),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["GetCookingFestivalDishRating"]
                 .0
@@ -27026,17 +26094,17 @@ fn cooking_festival_rating_symbols_print_and_round_trip_for_all_targets() {
                 .unwrap();
         let source = format_named_script("TestDishRating", &raised).unwrap();
         assert!(
-            source.contains("case COOKING_FESTIVAL_DISH_RATING_EXCELLENT:"),
+            source.contains("case FESTIVAL_COOKING_DISH_RATING_EXCELLENT:"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("case COOKING_FESTIVAL_DISH_RATING_INELIGIBLE:"),
+            source.contains("case FESTIVAL_COOKING_DISH_RATING_INELIGIBLE:"),
             "{target}: {source}"
         );
         assert!(
             source.contains(
                 "VarGet(VAR_COOKING_FESTIVAL_PLAYER_DISH_RATING) == \
-                 COOKING_FESTIVAL_DISH_RATING_GREAT"
+                 FESTIVAL_COOKING_DISH_RATING_GREAT"
             ),
             "{target}: {source}"
         );
@@ -27059,17 +26127,10 @@ fn random_spouse_gift_callable_keeps_target_id_and_article_type() {
         ("MARY_MFOMT_JP", 0x126),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["GetRandomSpouseGiftArticleId"]
                 .0
@@ -27099,17 +26160,10 @@ fn create_player_child_entity_keeps_target_id_for_all_targets() {
         ("MARY_MFOMT_JP", 0x131),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["CreatePlayerChildEntity"]
                 .0
@@ -27129,17 +26183,10 @@ fn cycle_backward_to_non_cursed_tool_keeps_target_id_for_all_targets() {
         ("MARY_MFOMT_JP", 0x14A),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["CycleBackwardToNonCursedTool"]
                 .0
@@ -27156,40 +26203,33 @@ fn moon_viewing_partner_symbols_follow_the_selected_game_and_round_trip() {
         (
             "MARY_FOMT_US",
             0x11F,
-            "MOON_VIEWING_PARTNER_KAREN",
-            "MOON_VIEWING_PARTNER_ELLI",
+            "FESTIVAL_MOON_VIEWING_PARTNER_KAREN",
+            "FESTIVAL_MOON_VIEWING_PARTNER_ELLI",
         ),
         (
             "MARY_FOMT_JP",
             0x11F,
-            "MOON_VIEWING_PARTNER_KAREN",
-            "MOON_VIEWING_PARTNER_ELLI",
+            "FESTIVAL_MOON_VIEWING_PARTNER_KAREN",
+            "FESTIVAL_MOON_VIEWING_PARTNER_ELLI",
         ),
         (
             "MARY_MFOMT_US",
             0x122,
-            "MOON_VIEWING_PARTNER_RICK",
-            "MOON_VIEWING_PARTNER_DOCTOR",
+            "FESTIVAL_MOON_VIEWING_PARTNER_RICK",
+            "FESTIVAL_MOON_VIEWING_PARTNER_DOCTOR",
         ),
         (
             "MARY_MFOMT_JP",
             0x122,
-            "MOON_VIEWING_PARTNER_RICK",
-            "MOON_VIEWING_PARTNER_DOCTOR",
+            "FESTIVAL_MOON_VIEWING_PARTNER_RICK",
+            "FESTIVAL_MOON_VIEWING_PARTNER_DOCTOR",
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SelectMoonViewingPartner"]
                 .0
@@ -27227,17 +26267,10 @@ fn moon_viewing_partner_symbols_follow_the_selected_game_and_round_trip() {
 fn mfomt_duplicate_moon_viewing_slot_preserves_its_distinct_id() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["SelectMoonViewingPartner"].0 .0, 0x122, "{target}");
         assert_eq!(map["SelectMoonViewingPartnerAlias"].0 .0, 0x123, "{target}");
@@ -27262,17 +26295,10 @@ fn van_album_progress_callables_follow_all_four_target_tables_and_round_trip() {
         ("MARY_MFOMT_JP", 0x127, 0x128),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["UnlockNextVanAlbum"].0 .0,
             unlock_id,
@@ -27327,17 +26353,10 @@ fn record_player_album_callables_use_article_symbols_and_round_trip() {
         ("MARY_MFOMT_JP", 0x0B4, 0x0B5),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SwapRecordPlayerAlbum"].0 .0,
             swap_id,
@@ -27370,11 +26389,11 @@ fn record_player_album_callables_use_article_symbols_and_round_trip() {
                 .unwrap();
         let source = format_named_script("TestRecordPlayer", &raised).unwrap();
         assert!(
-            source.contains("SwapRecordPlayerAlbum(ARTICLE_ALBUM_1) == ARTICLE_ALBUM_1"),
+            source.contains("SwapRecordPlayerAlbum(ITEM_ARTICLE_ALBUM_1) == ITEM_ARTICLE_ALBUM_1"),
             "{target}: {source}"
         );
         assert!(
-            source.contains("RemoveRecordPlayerAlbum() == ARTICLE_NONE"),
+            source.contains("RemoveRecordPlayerAlbum() == ITEM_ARTICLE_NONE"),
             "{target}: {source}"
         );
         let symbolic =
@@ -27396,17 +26415,10 @@ fn shipment_box_deposit_animation_follows_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x0C3),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["StartShipmentBoxDepositAnimation"]
                 .0
@@ -27450,17 +26462,10 @@ fn thomas_stocking_gift_callable_and_enum_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x125),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SelectThomasStockingGift"]
                 .0
@@ -27511,17 +26516,10 @@ fn berry_acquisition_callables_follow_all_four_target_tables_and_round_trip() {
         ("MARY_MFOMT_JP", 0x062, 0x063),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["ObtainPowerBerry"].0 .0,
             power_id,
@@ -27569,17 +26567,10 @@ fn preserved_overnight_location_callables_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x067, 0x068, 0x069, 0x023A),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["PreservePlayerLocationForNextDay"].0 .0, preserve_id);
         assert_eq!(map["ClearPreservedPlayerLocation"].0 .0, clear_id);
@@ -27636,17 +26627,10 @@ fn entity_location_and_fireplace_callables_share_the_map_id_domain() {
         ("MARY_MFOMT_JP", 0x014, 0x0B6, 0x0B7),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["GetEntityLocation"].0 .0, get_location_id, "{target}");
         assert_eq!(map["LightFireplaceAtLocation"].0 .0, light_id, "{target}");
@@ -27698,17 +26682,10 @@ fn player_scripted_animation_callables_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x06A, 0x06B, 0x06C),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["EatRandomMeal"].0 .0, eat_id);
         assert_eq!(map["PreparePlayerForScriptedAnimation"].0 .0, prepare_id);
@@ -27756,17 +26733,10 @@ fn new_day_map_rebuild_callable_follows_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x12C),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["RebuildMapEntitiesForNewDay"]
                 .0
@@ -27809,17 +26779,10 @@ fn hot_spring_state_callables_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x065, 0x066),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["EnterHotSpringBathingState"].0 .0, enter_id);
         assert_eq!(map["ExitHotSpringBathingState"].0 .0, exit_id);
@@ -27865,17 +26828,10 @@ fn sunrise_and_star_effect_callables_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x133, 0x134, 0x135, 0x136),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let map = callables.scope.callable_map();
         assert_eq!(map["CreateNewYearSunriseEffect"].0 .0, create_id);
         assert_eq!(map["PlayNewYearSunriseEffect"].0 .0, play_id);
@@ -27923,17 +26879,10 @@ fn cross_map_entity_relocation_uses_map_symbols_for_all_targets() {
         ("MARY_MFOMT_JP", 0x132),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["RelocateEntityToMap"].0 .0,
             callable_id
@@ -27974,17 +26923,10 @@ fn mine_floor_generator_accepts_symbolic_mine_kinds_for_all_targets() {
         ("MARY_MFOMT_JP", 0x138),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["GenerateMineFloorLayout"]
                 .0
@@ -28032,17 +26974,10 @@ fn held_actor_graphic_callable_preserves_target_specific_animation_ids() {
         ("MARY_MFOMT_JP", 0x146, 1892),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["BeginHoldingActorGraphic"]
                 .0
@@ -28071,21 +27006,6 @@ fn held_actor_graphic_callable_preserves_target_specific_animation_ids() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
         );
-
-        let legacy = parse_named_scripts(
-            &format!(
-                "void TestHoldActor(void) {{ BeginHoldingActorGraphic(ANIMATION_ID_{animation_id:04}); }}\n"
-            ),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&parsed.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy alias"
-        );
     }
 }
 
@@ -28098,17 +27018,10 @@ fn player_actor_update_suspension_callable_follows_all_targets() {
         ("MARY_MFOMT_JP", 0x077),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SetPlayerActorUpdateSuspended"]
                 .0
@@ -28156,17 +27069,10 @@ fn fixed_field_width_text_number_callable_follows_all_targets() {
         ("MARY_MFOMT_JP", 0x03A),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SetTextVariableNumberFieldWidth"]
                 .0
@@ -28211,17 +27117,10 @@ fn relationship_numeric_boundaries_are_not_folded_or_truncated() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let table =
             parse_script_table("mary_script_table { TestRelationshipBoundary, };", &options)
                 .unwrap();
@@ -28286,17 +27185,10 @@ fn random_range_operands_preserve_native_boundaries() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let table =
             parse_script_table("mary_script_table { TestRandomBoundary, };", &options).unwrap();
         // Compilation is lossless, not execution or parameter sanitization:
@@ -28348,17 +27240,10 @@ fn audio_out_of_domain_values_are_not_normalized() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let table =
             parse_script_table("mary_script_table { TestAudioBoundary, };", &options).unwrap();
         let parsed = parse_named_scripts("void TestAudioBoundary(void) { PlaySong(3, 65536); PlaySong(-1, -1); PlaySong(65536, 211); }", &options, &callables.scope, &table).unwrap();
@@ -28466,17 +27351,10 @@ fn relative_entity_position_callable_follows_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["OffsetEntityPosition"].0 .0,
             0x015,
@@ -28555,17 +27433,10 @@ fn stamina_and_fatigue_callable_follows_target_physical_slots() {
         ("MARY_MFOMT_JP", 0x05C),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["ChangePlayerStaminaAndFatigue"]
                 .0
@@ -28602,7 +27473,7 @@ fn stamina_and_fatigue_callable_follows_target_physical_slots() {
 
 #[test]
 fn farm_horse_lifecycle_callables_follow_all_targets() {
-    let callable_source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let callable_source = common::callables_source();
     assert!(callable_source.contains("MaryBool skip_creation,"));
     assert!(callable_source.contains("RemoveFarmHorse(MaryBool skip_removal, int unused_value)"));
     for library in ["goodies/lib_fomt.txt", "goodies/lib_mfomt.txt"] {
@@ -28621,17 +27492,10 @@ fn farm_horse_lifecycle_callables_follow_all_targets() {
         ("MARY_MFOMT_JP", 0x103, 0x104),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["CreateFarmHorse"].0 .0,
             create_id,
@@ -28656,7 +27520,7 @@ fn farm_horse_lifecycle_callables_follow_all_targets() {
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestHorse").unwrap();
         let source = format_named_script("TestHorse", &raised).unwrap();
         assert!(
-            source.contains("HORSE_AGE_STAGE_ADULT"),
+            source.contains("ANIMAL_HORSE_AGE_STAGE_ADULT"),
             "{target}: {source}"
         );
         assert!(source.contains("MAP_FARM"), "{target}: {source}");
@@ -28696,17 +27560,10 @@ fn seaside_cottage_callable_follows_all_targets() {
         ("MARY_MFOMT_JP", 0x0C8),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["BuildSeasideCottage"].0 .0,
             callable_id,
@@ -28748,17 +27605,10 @@ fn complete_animation_table_preserves_every_physical_slot() {
         ("MARY_MFOMT_JP", 2635),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestAnimationIds, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -28824,17 +27674,10 @@ fn player_fishing_rod_animation_group_is_canonical_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFishingAnimations, };\n", &options)
                 .unwrap();
@@ -28871,21 +27714,6 @@ fn player_fishing_rod_animation_group_is_canonical_on_all_targets() {
                 encode_script(&rebuilt.scripts[0].2),
                 "{target}: {symbol}"
             );
-
-            let legacy = parse_named_scripts(
-                &format!(
-                    "void TestFishingAnimations(void) {{ SetEntityAnim(ENTITY_PLAYER, ANIMATION_ID_{id:04}); }}\n"
-                ),
-                &options,
-                &callables.scope,
-                &script_table,
-            )
-            .unwrap();
-            assert_eq!(
-                encode_script(&numeric.scripts[0].2),
-                encode_script(&legacy.scripts[0].2),
-                "{target}: legacy animation alias {id}"
-            );
         }
     }
 }
@@ -28899,17 +27727,10 @@ fn proven_player_hold_state_animations_are_canonical_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestAnimations, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -28944,7 +27765,7 @@ fn proven_player_hold_state_animations_are_canonical_on_all_targets() {
         );
 
         let legacy = parse_named_scripts(
-            "void TestAnimations(void) { SetEntityAnim(0, ANIMATION_ID_0326); SetEntityAnim(0, ANIMATION_ID_0402); SetEntityAnim(0, ANIMATION_ID_0338); SetEntityAnim(0, ANIMATION_ID_0454); SetEntityAnim(0, ANIMATION_ID_0342); }\n",
+            "void TestAnimations(void) { SetEntityAnim(0, ANIMATION_PLAYER_PREPARE_TO_HOLD_ITEM); SetEntityAnim(0, ANIMATION_PLAYER_IDLE_EMPTY_HANDED); SetEntityAnim(0, ANIMATION_PLAYER_IDLE_HOLDING_ITEM); SetEntityAnim(0, ANIMATION_PLAYER_WALK_EMPTY_HANDED); SetEntityAnim(0, ANIMATION_PLAYER_WALK_HOLDING_ITEM); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -28969,17 +27790,10 @@ fn rick_idle_walk_animations_are_shared_by_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestNpcAnimations, };\n", &options).unwrap();
         let numeric_body = values
@@ -29007,19 +27821,6 @@ fn rick_idle_walk_animations_are_shared_by_all_targets() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
         );
-
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy_source = format!("void TestNpcAnimations(void) {{ {legacy_body} }}\n");
-        let legacy =
-            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 }
 
@@ -29040,17 +27841,10 @@ fn child_growth_animation_slots_follow_each_game_family() {
             "ANIMATION_CHILD_SLEEPING",
         ];
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestChildAnimations, };\n", &options).unwrap();
         let body = values
@@ -29084,23 +27878,6 @@ fn child_growth_animation_slots_follow_each_game_family() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
         );
-
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(ENTITY_CHILD, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy = parse_named_scripts(
-            &format!("void TestChildAnimations(void) {{ {legacy_body} }}\n"),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&parsed.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 }
 
@@ -29113,23 +27890,16 @@ fn chicken_idle_walk_animations_follow_each_game_family() {
         ("MARY_MFOMT_JP", [1868, 1872]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestChickenAnimations, };\n", &options)
                 .unwrap();
         let numeric = parse_named_scripts(
             &format!(
-                "void TestChickenAnimations(void) {{ SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); }}\n",
+                "void TestChickenAnimations(void) {{ SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {}); SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {}); }}\n",
                 values[0], values[1]
             ),
             &options,
@@ -29158,21 +27928,6 @@ fn chicken_idle_walk_animations_follow_each_game_family() {
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
         );
-
-        let legacy = parse_named_scripts(
-            &format!(
-                "void TestChickenAnimations(void) {{ SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); }}\n",
-                values[0], values[1]
-            ),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
-        );
     }
 }
 
@@ -29193,22 +27948,15 @@ fn farm_dog_idle_walk_and_puppy_idle_follow_each_game_family() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestDogAnimations, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
             &format!(
-                "void TestDogAnimations(void) {{ SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); SetEntityAnim(ENTITY_70, {}); }}\n",
+                "void TestDogAnimations(void) {{ SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {}); SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {}); SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {}); }}\n",
                 values[0], values[1], values[2]
             ),
             &options,
@@ -29242,21 +27990,6 @@ fn farm_dog_idle_walk_and_puppy_idle_follow_each_game_family() {
         assert_eq!(
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
-        );
-
-        let legacy = parse_named_scripts(
-            &format!(
-                "void TestDogAnimations(void) {{ SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_70, ANIMATION_ID_{:04}); }}\n",
-                values[0], values[1], values[2]
-            ),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
         );
     }
 }
@@ -29304,17 +28037,10 @@ fn cliff_hospital_and_collapse_animations_follow_each_game_family() {
             "ANIMATION_CLIFF_COLLAPSE_FORWARD",
         ];
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestCliffAnimations, };\n", &options).unwrap();
         let body = values
@@ -29365,17 +28091,10 @@ fn cow_and_sheep_idle_walk_animations_follow_each_game_family() {
             "ANIMATION_SHEEP_WALK",
         ];
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestLivestockAnimations, };\n",
             &options,
@@ -29383,7 +28102,7 @@ fn cow_and_sheep_idle_walk_animations_follow_each_game_family() {
         .unwrap();
         let body = values
             .iter()
-            .map(|value| format!("SetEntityAnim(ENTITY_70, {value});"))
+            .map(|value| format!("SetEntityAnim(ENTITY_SCRIPT_VISUAL_EFFECT_SLOT_0, {value});"))
             .collect::<String>();
         let numeric = parse_named_scripts(
             &format!("void TestLivestockAnimations(void) {{ {body} }}\n"),
@@ -29411,22 +28130,6 @@ fn cow_and_sheep_idle_walk_animations_follow_each_game_family() {
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
         );
-
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(ENTITY_70, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy = parse_named_scripts(
-            &format!("void TestLivestockAnimations(void) {{ {legacy_body} }}\n"),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
-        );
     }
 }
 
@@ -29444,17 +28147,10 @@ fn young_livestock_idle_animations_follow_each_game_family() {
             "ANIMATION_LAMB_IDLE",
         ];
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestYoungAnimalAnimations, };\n",
             &options,
@@ -29462,7 +28158,7 @@ fn young_livestock_idle_animations_follow_each_game_family() {
         .unwrap();
         let body = values
             .iter()
-            .map(|value| format!("SetEntityAnim(ENTITY_97, {value});"))
+            .map(|value| format!("SetEntityAnim(ENTITY_TUTORIAL_YOUNG_ANIMAL, {value});"))
             .collect::<String>();
         let numeric = parse_named_scripts(
             &format!("void TestYoungAnimalAnimations(void) {{ {body} }}\n"),
@@ -29490,22 +28186,6 @@ fn young_livestock_idle_animations_follow_each_game_family() {
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
         );
-
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(ENTITY_97, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy = parse_named_scripts(
-            &format!("void TestYoungAnimalAnimations(void) {{ {legacy_body} }}\n"),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
-        );
     }
 }
 
@@ -29518,17 +28198,10 @@ fn foal_idle_walk_animations_follow_each_game_family() {
         ("MARY_MFOMT_JP", [1994, 1998]),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFoalAnimations, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -29556,21 +28229,6 @@ fn foal_idle_walk_animations_follow_each_game_family() {
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
         );
-
-        let legacy = parse_named_scripts(
-            &format!(
-                "void TestFoalAnimations(void) {{ SetEntityAnim(ENTITY_FARM_HORSE, ANIMATION_ID_{:04}); SetEntityAnim(ENTITY_FARM_HORSE, ANIMATION_ID_{:04}); }}\n",
-                values[0], values[1]
-            ),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
-        );
     }
 }
 
@@ -29583,17 +28241,10 @@ fn sheared_sheep_idle_animation_follows_each_game_family() {
         ("MARY_MFOMT_JP", 2433),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table = parse_script_table(
             "mary_script_table { TestShearedSheepAnimation, };\n",
             &options,
@@ -29601,7 +28252,7 @@ fn sheared_sheep_idle_animation_follows_each_game_family() {
         .unwrap();
         let numeric = parse_named_scripts(
             &format!(
-                "void TestShearedSheepAnimation(void) {{ SetEntityAnim(ENTITY_96, {value}); }}\n"
+                "void TestShearedSheepAnimation(void) {{ SetEntityAnim(ENTITY_TUTORIAL_ADULT_ANIMAL_SLOT_2, {value}); }}\n"
             ),
             &options,
             &callables.scope,
@@ -29624,20 +28275,6 @@ fn sheared_sheep_idle_animation_follows_each_game_family() {
         assert_eq!(
             encode_script(&numeric.scripts[0].2),
             encode_script(&rebuilt.scripts[0].2)
-        );
-
-        let legacy = parse_named_scripts(
-            &format!(
-                "void TestShearedSheepAnimation(void) {{ SetEntityAnim(ENTITY_96, ANIMATION_ID_{value:04}); }}\n"
-            ),
-            &options,
-            &callables.scope,
-            &script_table,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2)
         );
     }
 }
@@ -29766,17 +28403,10 @@ fn gender_specific_npc_animation_pairs_follow_each_physical_table() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestShiftedAnimations, };\n", &options)
                 .unwrap();
@@ -29814,18 +28444,6 @@ fn gender_specific_npc_animation_pairs_follow_each_physical_table() {
                 "{target}: missing {symbol}: {source}"
             );
         }
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy_source = format!("void TestShiftedAnimations(void) {{ {legacy_body} }}\n");
-        let legacy =
-            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 }
 
@@ -29837,19 +28455,11 @@ fn assert_animation_pair_round_trip(
     walk_symbol: &str,
 ) {
     let options = Options::default().define(target).unwrap();
-    let constants = parse_constant_header(
-        &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-        &options,
-    )
-    .unwrap();
+    let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
     assert_eq!(constants.const_int_value(idle_symbol), Some(idle));
     assert_eq!(constants.const_int_value(walk_symbol), Some(walk));
-    let callables = parse_callable_table_with_scope(
-        &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-        &options,
-        &constants,
-    )
-    .unwrap();
+    let callables =
+        parse_callable_table_with_scope(&common::callables_source(), &options, &constants).unwrap();
     let script_table =
         parse_script_table("mary_script_table { TestAnimationPair, };\n", &options).unwrap();
     let numeric_source = format!(
@@ -29867,16 +28477,6 @@ fn assert_animation_pair_round_trip(
     assert_eq!(
         encode_script(&numeric.scripts[0].2),
         encode_script(&rebuilt.scripts[0].2)
-    );
-
-    let legacy_source = format!(
-        "void TestAnimationPair(void) {{ SetEntityAnim(0, ANIMATION_ID_{idle:04}); SetEntityAnim(0, ANIMATION_ID_{walk:04}); }}\n"
-    );
-    let legacy =
-        parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
-    assert_eq!(
-        encode_script(&numeric.scripts[0].2),
-        encode_script(&legacy.scripts[0].2)
     );
 }
 
@@ -29972,11 +28572,7 @@ fn popuri_item_and_reaction_animations_are_not_conflated() {
     }
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_POPURI_HAND_OVER_ITEM"),
             None,
@@ -30117,11 +28713,7 @@ fn mfomt_mary_wedding_and_kai_gesture_animations_are_target_scoped() {
     }
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(constants.const_int_value("ANIMATION_KAI_GESTURE"), None);
         assert_eq!(
             constants.const_int_value("ANIMATION_MARY_WEDDING_IDLE"),
@@ -30143,11 +28735,7 @@ fn mfomt_mary_bad_dream_idle_walk_pair_is_target_scoped() {
     }
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_MARY_BAD_DREAM_IDLE"),
             None
@@ -30183,11 +28771,7 @@ fn mfomt_transformation_effect_parts_are_target_scoped() {
     }
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_TRANSFORMATION_EFFECT_PART_1"),
             None
@@ -30207,11 +28791,7 @@ fn sick_livestock_idle_animations_follow_game_family_offsets() {
             "ANIMATION_CHICKEN_SICK_IDLE",
         );
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_SHEEP_SICK_IDLE"),
             Some(2345)
@@ -30226,11 +28806,7 @@ fn sick_livestock_idle_animations_follow_game_family_offsets() {
             "ANIMATION_CHICKEN_SICK_IDLE",
         );
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_SHEEP_SICK_IDLE"),
             Some(2417)
@@ -30263,17 +28839,10 @@ fn colliding_npc_animation_slots_are_target_scoped() {
     ];
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFoMTAnimations, };\n", &options).unwrap();
         let numeric_body = values
@@ -30297,27 +28866,11 @@ fn colliding_npc_animation_slots_are_target_scoped() {
                 "{target}: missing {symbol}: {source}"
             );
         }
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy_source = format!("void TestFoMTAnimations(void) {{ {legacy_body} }}\n");
-        let legacy =
-            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_SASHA_IDLE"),
             Some(1781)
@@ -30350,11 +28903,7 @@ fn wedding_animation_groups_are_target_scoped() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_RICK_WEDDING_IDLE"),
             Some(547)
@@ -30690,12 +29239,9 @@ fn wedding_animation_groups_are_target_scoped() {
             ]);
         }
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestWeddingAnimations, };\n", &options)
                 .unwrap();
@@ -30824,17 +29370,10 @@ fn proven_player_action_animations_are_canonical_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestPlayerActions, };\n", &options).unwrap();
         let numeric_body = values
@@ -30862,19 +29401,6 @@ fn proven_player_action_animations_are_canonical_on_all_targets() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}"
         );
-
-        let legacy_body = values
-            .iter()
-            .map(|value| format!("SetEntityAnim(0, ANIMATION_ID_{value:04});"))
-            .collect::<String>();
-        let legacy_source = format!("void TestPlayerActions(void) {{ {legacy_body} }}\n");
-        let legacy =
-            parse_named_scripts(&legacy_source, &options, &callables.scope, &script_table).unwrap();
-        assert_eq!(
-            encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 }
 
@@ -30882,26 +29408,18 @@ fn proven_player_action_animations_are_canonical_on_all_targets() {
 fn harvest_goddess_appear_disappear_effect_is_fomt_scoped() {
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_HARVEST_GODDESS_APPEAR_DISAPPEAR_EFFECT"),
             Some(1068),
             "{target}"
         );
-        assert_eq!(constants.const_int_value("ANIMATION_ID_1068"), Some(1068));
+        assert_eq!(constants.const_int_value("ANIMATION_ID_1068"), None);
     }
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         assert_eq!(
             constants.const_int_value("ANIMATION_HARVEST_GODDESS_APPEAR_DISAPPEAR_EFFECT"),
             None,
@@ -30912,7 +29430,7 @@ fn harvest_goddess_appear_disappear_effect_is_fomt_scoped() {
 }
 
 #[test]
-fn proven_audio_names_are_canonical_while_numbered_sources_remain_compatible() {
+fn proven_audio_names_are_the_only_canonical_symbolic_inputs() {
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -30920,17 +29438,10 @@ fn proven_audio_names_are_canonical_while_numbered_sources_remain_compatible() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestAudio, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -31018,26 +29529,26 @@ fn proven_audio_names_are_canonical_while_numbered_sources_remain_compatible() {
             "{target}: {source}"
         );
 
-        let legacy = parse_named_scripts(
-            "void TestAudio(void) { PlayBGM(AUDIO_START_WEAK, AUDIO_SEQUENCE_006); \
-             PlayBGM(AUDIO_START_WEAK, AUDIO_SEQUENCE_016); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_017); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_125); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_126); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_127); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_AXE_CHOP); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_133); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_146); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_188); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_157); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_175); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_179); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_184); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_192); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_147); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_149); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_193); \
-             PlaySong(AUDIO_START_WEAK, AUDIO_SEQUENCE_200); }\n",
+        let symbolic = parse_named_scripts(
+            "void TestAudio(void) { PlayBGM(AUDIO_START_WEAK, AUDIO_BGM_WEDDING); \
+             PlayBGM(AUDIO_START_WEAK, AUDIO_BGM_RIVAL_EVENT); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_BGM_LOVE_EVENT); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_HAMMER_SMALL_STONE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_HAMMER_LARGE_STONE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_HAMMER_HUGE_STONE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_AXE_BRANCH_CHOP); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_AXE_STUMP_CHOP); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_WATER_SPLASH); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_STAR_SPARKLE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_HEAL_OR_PURIFY); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_TIME_PASSES); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_CEREMONIAL_CHIME); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_ATTENTION_CHIME); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_QUESTION_EMOTE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_BRUSH_LIVESTOCK); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_DOCTOR_EXAMINATION); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_APPLAUSE); \
+             PlaySong(AUDIO_START_WEAK, AUDIO_SFX_KAPPA_SURPRISE); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -31045,7 +29556,7 @@ fn proven_audio_names_are_canonical_while_numbered_sources_remain_compatible() {
         .unwrap();
         assert_eq!(
             encode_script(&numeric.scripts[0].2),
-            encode_script(&legacy.scripts[0].2),
+            encode_script(&symbolic.scripts[0].2),
             "{target}"
         );
     }
@@ -31060,17 +29571,10 @@ fn animal_state_to_counter_reuse_does_not_leak_boolean_symbols() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let table =
             parse_script_table("mary_script_table { TestAnimalReuse, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -31117,17 +29621,10 @@ fn livestock_facility_slot_domains_preserve_every_physical_selector() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFacilitySlots, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -31176,9 +29673,9 @@ fn livestock_facility_slot_domains_preserve_every_physical_selector() {
         );
         for symbol in [
             "CHICKEN_COOP_FEED_TROUGH_SLOT_08",
-            "CHICKEN_INCUBATOR_NORTH",
-            "CHICKEN_SLOT_1",
-            "CHICKEN_SLOT_8",
+            "CHICKEN_COOP_INCUBATOR_NORTH",
+            "ANIMAL_CHICKEN_SLOT_1",
+            "ANIMAL_CHICKEN_SLOT_8",
             "BARN_PREGNANCY_FEED_TROUGH_SOUTH",
             "BARN_PREGNANCY_STALL_SOUTH",
             "ANIMAL_SLOT_1",
@@ -31211,8 +29708,8 @@ fn chicken_coop_fixture_symbols_follow_physical_slots_on_all_targets() {
         "CHICKEN_COOP_FEED_TROUGH_SLOT_06",
         "CHICKEN_COOP_FEED_TROUGH_SLOT_07",
         "CHICKEN_COOP_FEED_TROUGH_SLOT_08",
-        "CHICKEN_INCUBATOR_SOUTH",
-        "CHICKEN_INCUBATOR_NORTH",
+        "CHICKEN_COOP_INCUBATOR_SOUTH",
+        "CHICKEN_COOP_INCUBATOR_NORTH",
     ];
     for target in [
         "MARY_FOMT_US",
@@ -31221,17 +29718,10 @@ fn chicken_coop_fixture_symbols_follow_physical_slots_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestChickenFixtures, };\n", &options).unwrap();
         let calls = (0..8)
@@ -31266,7 +29756,7 @@ fn chicken_coop_fixture_symbols_follow_physical_slots_on_all_targets() {
             "{target}"
         );
         parse_named_scripts(
-            "void TestChickenFixtures(void) { FillChickenFeedTrough(CHICKEN_FEED_TROUGH_1); BeginEggIncubation(CHICKEN_INCUBATOR_2); }\n",
+            "void TestChickenFixtures(void) { FillChickenFeedTrough(CHICKEN_COOP_FEED_TROUGH_SLOT_01); BeginEggIncubation(CHICKEN_COOP_INCUBATOR_NORTH); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -31305,17 +29795,10 @@ fn barn_feed_trough_symbols_follow_the_physical_rows_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestBarnTroughs, };\n", &options).unwrap();
         let calls = (0..18)
@@ -31369,7 +29852,7 @@ fn barn_feed_trough_symbols_follow_the_physical_rows_on_all_targets() {
             "{target}"
         );
         parse_named_scripts(
-            "void TestBarnTroughs(void) { IsBarnFeedTroughFilled(BARN_FEED_TROUGH_5); FillBarnFeedTrough(BARN_PREGNANCY_FEED_TROUGH_2); IsBarnAnimalReadyToGiveBirth(BARN_PREGNANCY_STALL_2); }\n",
+            "void TestBarnTroughs(void) { IsBarnFeedTroughFilled(BARN_FEED_TROUGH_SOUTH_ROW_SLOT_01); FillBarnFeedTrough(BARN_PREGNANCY_FEED_TROUGH_SOUTH); IsBarnAnimalReadyToGiveBirth(BARN_PREGNANCY_STALL_SOUTH); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -31380,7 +29863,7 @@ fn barn_feed_trough_symbols_follow_the_physical_rows_on_all_targets() {
 
 #[test]
 fn numbered_callables_are_an_explicit_audited_allowlist() {
-    let header = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let header = common::callables_source();
     let mut actual = header
         .lines()
         .filter_map(|line| {
@@ -31392,6 +29875,8 @@ fn numbered_callables_are_an_explicit_audited_allowlist() {
                     .all(|character| character.is_ascii_hexdigit()))
             .then(|| name.to_owned())
         })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
     actual.sort();
     actual.dedup();
@@ -31404,7 +29889,7 @@ fn numbered_callables_are_an_explicit_audited_allowlist() {
 
 #[test]
 fn public_callables_do_not_use_mechanical_parameter_names() {
-    let header = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let header = common::callables_source();
     let declarations = header
         .lines()
         .map(str::trim)
@@ -31414,6 +29899,8 @@ fn public_callables_do_not_use_mechanical_parameter_names() {
                 && !line.starts_with("mary_")
                 && !line.starts_with("typedef ")
         })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>();
 
     assert!(
@@ -31441,7 +29928,7 @@ fn public_callables_do_not_use_mechanical_parameter_names() {
 
 #[test]
 fn retail_no_op_parameters_do_not_claim_unread_native_semantics() {
-    let header = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let header = common::callables_source();
     for expected in [
         "void NoOpTutorialFieldTile(\n    int unused_operand_1,\n    int unused_operand_2,\n    int unused_operand_3,\n    int unused_operand_4,\n    int unused_operand_5\n);",
         "void NoOpTutorialFieldObject(int unused_operand_1, int unused_operand_2, int unused_operand_3);",
@@ -31464,17 +29951,10 @@ fn callable_tables_cover_every_non_internal_physical_slot_exactly_once() {
         ("MARY_MFOMT_JP", 0x153),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
 
         assert_eq!(callables.base, 0, "{target}: callable table base");
         assert_eq!(
@@ -31506,17 +29986,10 @@ fn vacation_villa_and_mythic_tool_checks_follow_all_four_target_tables() {
         ("MARY_MFOMT_JP", 0x0E6, 0x0ED),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let callable_map = callables.scope.callable_map();
         assert_eq!(
             callable_map["IsVacationVillaBuilt"].0 .0, villa_id,
@@ -31561,17 +30034,10 @@ fn vacation_villa_and_mythic_tool_checks_follow_all_four_target_tables() {
 fn mfomt_native_callable_tail_is_fully_represented() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         for (id, name) in [
             (0x14B, "IsMayonnaiseMakerInstalled"),
             (0x14C, "IsCheeseMakerInstalled"),
@@ -31592,7 +30058,7 @@ fn mfomt_native_callable_tail_is_fully_represented() {
         let script_table =
             parse_script_table("mary_script_table { TestMfomtTail, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
-            "void TestMfomtTail(void) { int mayonnaise = IsMayonnaiseMakerInstalled(); int cheese = IsCheeseMakerInstalled(); int yarn = IsYarnMakerInstalled(); int caught = GetFishCatchCount(53); int size = GetLargestCaughtFishSize(53); int registered = IsMapRegistered(MAP_FARM); int experience = GetToolExperience(TOOL_KIND_FISHING_ROD); int winners = CountFestivalWinningAnimals(ANIMAL_KIND_DOG); }\n",
+            "void TestMfomtTail(void) { int mayonnaise = IsMayonnaiseMakerInstalled(); int cheese = IsCheeseMakerInstalled(); int yarn = IsYarnMakerInstalled(); int caught = GetFishCatchCount(53); int size = GetLargestCaughtFishSize(53); int registered = IsMapRegistered(MAP_FARM); int experience = GetToolExperience(ITEM_TOOL_KIND_FISHING_ROD); int winners = CountFestivalWinningAnimals(ANIMAL_KIND_DOG); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -31627,7 +30093,7 @@ fn mfomt_native_callable_tail_is_fully_represented() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("GetToolExperience(TOOL_KIND_FISHING_ROD)"),
+            source.contains("GetToolExperience(ITEM_TOOL_KIND_FISHING_ROD)"),
             "{target}: {source}"
         );
         assert!(
@@ -31645,22 +30111,125 @@ fn mfomt_native_callable_tail_is_fully_represented() {
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert!(!callables
             .scope
             .callable_map()
             .contains_key("IsMayonnaiseMakerInstalled"));
     }
+}
+
+#[test]
+fn parented_domains_use_canonical_hierarchical_names_without_legacy_aliases() {
+    let header = common::constants_source();
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+
+        for canonical_type in [
+            "MaryItemFoodId",
+            "MaryItemArticleId",
+            "MaryItemToolId",
+            "MaryItemUnaddedCount",
+            "MaryAnimalCowGrowthStage",
+            "MaryAnimalChickenGrowthStage",
+            "MaryChickenCoopFeedTroughIndex",
+            "MaryChickenCoopIncubatorIndex",
+            "MaryChickenCoopIncubatorCapacity",
+            "MaryBarnPregnancyStallCapacity",
+            "MaryFestivalHorseRaceResult",
+            "MaryFestivalMoonViewingPartner",
+        ] {
+            assert!(
+                constants.user_type(canonical_type).is_some(),
+                "{target}: missing {canonical_type}"
+            );
+        }
+        for legacy_type in [
+            "MaryFoodId",
+            "MaryArticleId",
+            "MaryToolId",
+            "MaryUnaddedItemCount",
+            "MaryCowGrowthStage",
+            "MaryChickenGrowthStage",
+            "MaryChickenFeedTroughIndex",
+            "MaryChickenIncubatorIndex",
+            "MaryIncubatorCapacity",
+            "MaryPregnancyStallCapacity",
+            "MaryHorseRaceResult",
+            "MaryMoonViewingPartner",
+        ] {
+            assert!(
+                constants.user_type(legacy_type).is_none(),
+                "{target}: replaced type {legacy_type} remains available"
+            );
+        }
+        for canonical_constant in [
+            "ITEM_FOOD_TURNIP",
+            "ITEM_ARTICLE_BROOCH",
+            "ITEM_TOOL_SICKLE_IRON",
+            "ITEM_UNADDED_COUNT_NONE",
+            "ANIMAL_COW_GROWTH_STAGE_ADULT",
+            "ANIMAL_CHICKEN_GROWTH_STAGE_CHICK",
+            "CHICKEN_COOP_INCUBATOR_CAPACITY_BASIC_COOP",
+            "CHICKEN_COOP_INCUBATOR_SOUTH",
+            "BARN_PREGNANCY_STALL_CAPACITY_BASIC_BARN",
+            "FESTIVAL_HORSE_RACE_RESULT_WON",
+        ] {
+            assert!(
+                constants.const_int_value(canonical_constant).is_some(),
+                "{target}: missing {canonical_constant}"
+            );
+        }
+        let moon_viewing_partner = if target.contains("MFOMT") {
+            "FESTIVAL_MOON_VIEWING_PARTNER_RICK"
+        } else {
+            "FESTIVAL_MOON_VIEWING_PARTNER_KAREN"
+        };
+        assert!(
+            constants.const_int_value(moon_viewing_partner).is_some(),
+            "{target}: missing {moon_viewing_partner}"
+        );
+        for legacy_constant in [
+            "FOOD_TURNIP",
+            "ARTICLE_BROACH",
+            "ARTICLE_BROOCH",
+            "TOOL_SICKLE_IRON",
+            "UNADDED_ITEM_COUNT_NONE",
+            "COW_GROWTH_STAGE_ADULT",
+            "CHICKEN_GROWTH_STAGE_CHICK",
+            "INCUBATOR_CAPACITY_BASIC_COOP",
+            "CHICKEN_INCUBATOR_SOUTH",
+            "PREGNANCY_STALL_CAPACITY_BASIC_BARN",
+            "HORSE_RACE_RESULT_WON",
+            "MOON_VIEWING_PARTNER_KAREN",
+            "MOON_VIEWING_PARTNER_RICK",
+            "ITEM_FOOD_FRIED_NOODLES_2",
+        ] {
+            assert_eq!(
+                constants.const_int_value(legacy_constant),
+                None,
+                "{target}: replaced symbol {legacy_constant} remains as an alias"
+            );
+        }
+    }
+}
+
+#[test]
+fn project_constant_header_has_no_alias_declarations() {
+    let header = common::constants_source();
+    assert!(
+        !header.contains("mary_const_alias("),
+        "the project constant header must expose exactly one canonical name per typed ID"
+    );
 }
 
 #[test]
@@ -31672,12 +30241,8 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let food_type = constants.user_type("MaryFoodId").unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let food_type = constants.user_type("MaryItemFoodId").unwrap();
 
         for id in 0x00..=0xAA {
             assert!(
@@ -31686,16 +30251,16 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
             );
         }
         for (id, expected) in [
-            (0x15, "FOOD_SPA_BOILED_EGG"),
-            (0x38, "FOOD_QUEEN_OF_THE_NIGHT_OR_MYSTERY_FLOWER"),
-            (0x42, "FOOD_FLOUR"),
-            (0x44, "FOOD_MUFFIN_MIX_OR_RICE_FLOUR"),
-            (0x6B, "FOOD_SCRAMBLED_EGGS_OR_JAPANESE_OMELET"),
-            (0x75, "FOOD_APPLE_SOUFFLE"),
-            (0x7B, "FOOD_DINNER_ROLL"),
-            (0x89, "FOOD_FRIED_BUCKWHEAT_NOODLES"),
-            (0xA5, "FOOD_EGG_OVER_RICE_OR_EGG_BOWL"),
-            (0xAA, "FOOD_POTATO_PANCAKES_OR_CROQUETTE"),
+            (0x15, "ITEM_FOOD_SPA_BOILED_EGG"),
+            (0x38, "ITEM_FOOD_QUEEN_OF_THE_NIGHT_OR_MYSTERY_FLOWER"),
+            (0x42, "ITEM_FOOD_FLOUR"),
+            (0x44, "ITEM_FOOD_MUFFIN_MIX_OR_RICE_FLOUR"),
+            (0x6B, "ITEM_FOOD_SCRAMBLED_EGGS_OR_JAPANESE_OMELET"),
+            (0x75, "ITEM_FOOD_APPLE_SOUFFLE"),
+            (0x7B, "ITEM_FOOD_DINNER_ROLL"),
+            (0x89, "ITEM_FOOD_FRIED_BUCKWHEAT_NOODLES"),
+            (0xA5, "ITEM_FOOD_EGG_OVER_RICE_OR_EGG_BOWL"),
+            (0xAA, "ITEM_FOOD_POTATO_PANCAKES_OR_CROQUETTE"),
         ] {
             assert_eq!(
                 constants.typed_int_const_name(food_type, id),
@@ -31704,16 +30269,16 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
             );
         }
         assert_eq!(
-            constants.const_int_value("FOOD_FRIED_NOODLES_2"),
-            Some(0x89),
-            "{target}: legacy duplicate-name spelling"
+            constants.const_int_value("ITEM_FOOD_FRIED_NOODLES_2"),
+            None,
+            "{target}: replaced numeric-suffix spelling must not remain as an alias"
         );
         assert_eq!(
             constants.typed_int_const_name(food_type, 0xAB),
-            Some("FOOD_NONE"),
+            Some("ITEM_FOOD_NONE"),
             "{target}"
         );
-        let article_type = constants.user_type("MaryArticleId").unwrap();
+        let article_type = constants.user_type("MaryItemArticleId").unwrap();
         let article_last = if target.contains("MFOMT") { 0x6A } else { 0x5F };
         for id in 0x00..=article_last {
             assert!(
@@ -31723,14 +30288,14 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
         }
         if target.contains("MFOMT") {
             for (id, expected) in [
-                (0x33, "ARTICLE_RECIPE_FRENCH_FRIES"),
-                (0x3B, "ARTICLE_VANS_FAVORITE"),
-                (0x4F, "ARTICLE_NEW_RECORD_1"),
-                (0x5F, "ARTICLE_GOLDEN_LUMBER"),
-                (0x63, "ARTICLE_DOG_DISK"),
-                (0x68, "ARTICLE_DOCTORS_GOODIES"),
-                (0x69, "ARTICLE_MYSTERY_TICKET"),
-                (0x6A, "ARTICLE_NONE"),
+                (0x33, "ITEM_ARTICLE_RECIPE_FRENCH_FRIES"),
+                (0x3B, "ITEM_ARTICLE_VANS_FAVORITE"),
+                (0x4F, "ITEM_ARTICLE_NEW_RECORD_1"),
+                (0x5F, "ITEM_ARTICLE_GOLDEN_LUMBER"),
+                (0x63, "ITEM_ARTICLE_DOG_DISK"),
+                (0x68, "ITEM_ARTICLE_DOCTORS_GOODIES"),
+                (0x69, "ITEM_ARTICLE_MYSTERY_TICKET"),
+                (0x6A, "ITEM_ARTICLE_NONE"),
             ] {
                 assert_eq!(
                     constants.typed_int_const_name(article_type, id),
@@ -31741,7 +30306,7 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
         } else {
             assert_eq!(
                 constants.typed_int_const_name(article_type, 0x4F),
-                Some("ARTICLE_BAND_AID"),
+                Some("ITEM_ARTICLE_BAND_AID"),
                 "{target}: official English FoMT article name"
             );
             assert_eq!(
@@ -31750,8 +30315,30 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
                 "{target}: FoMT article table ends at 0x5F"
             );
         }
+        assert_eq!(
+            constants.typed_int_const_name(article_type, 0x2F),
+            Some("ITEM_ARTICLE_BROOCH"),
+            "{target}: standard English jewelry spelling"
+        );
+        assert_eq!(
+            constants.const_int_value("ITEM_ARTICLE_BROACH"),
+            None,
+            "{target}: obsolete/localization spelling must not remain as an alias"
+        );
 
-        let tool_type = constants.user_type("MaryToolId").unwrap();
+        let product_type = constants.user_type("MaryProductId").unwrap();
+        assert_eq!(
+            constants.typed_int_const_name(product_type, 0x52),
+            Some("PRODUCT_BROOCH"),
+            "{target}: shipping product uses the standard English jewelry spelling"
+        );
+        assert_eq!(
+            constants.const_int_value("PRODUCT_BROACH"),
+            None,
+            "{target}: obsolete/localization spelling must not remain as an alias"
+        );
+
+        let tool_type = constants.user_type("MaryItemToolId").unwrap();
         for id in 0x00..=0x51 {
             assert!(
                 constants.typed_int_const_name(tool_type, id).is_some(),
@@ -31759,14 +30346,14 @@ fn complete_food_article_and_tool_id_tables_are_contiguous_on_all_four_targets()
             );
         }
         for (id, expected) in [
-            (0x05, "TOOL_SICKLE_CURSED"),
-            (0x06, "TOOL_SICKLE_BLESSED"),
-            (0x07, "TOOL_SICKLE_MYTHIC"),
-            (0x2D, "TOOL_FISHING_ROD_CURSED"),
-            (0x2E, "TOOL_FISHING_ROD_BLESSED"),
-            (0x2F, "TOOL_FISHING_ROD_MYTHIC"),
-            (0x48, "TOOL_CLIPPER_OR_CLIPPERS"),
-            (0x4B, "TOOL_BLUE_FEATHER"),
+            (0x05, "ITEM_TOOL_SICKLE_CURSED"),
+            (0x06, "ITEM_TOOL_SICKLE_BLESSED"),
+            (0x07, "ITEM_TOOL_SICKLE_MYTHIC"),
+            (0x2D, "ITEM_TOOL_FISHING_ROD_CURSED"),
+            (0x2E, "ITEM_TOOL_FISHING_ROD_BLESSED"),
+            (0x2F, "ITEM_TOOL_FISHING_ROD_MYTHIC"),
+            (0x48, "ITEM_TOOL_CLIPPER_OR_CLIPPERS"),
+            (0x4B, "ITEM_TOOL_BLUE_FEATHER"),
         ] {
             assert_eq!(
                 constants.typed_int_const_name(tool_type, id),
@@ -31786,38 +30373,34 @@ fn script_facing_item_absence_sentinels_are_distinct_from_physical_none_ids() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let food_type = constants.user_type("MaryFoodId").unwrap();
-        let article_type = constants.user_type("MaryArticleId").unwrap();
-        let tool_type = constants.user_type("MaryToolId").unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let food_type = constants.user_type("MaryItemFoodId").unwrap();
+        let article_type = constants.user_type("MaryItemArticleId").unwrap();
+        let tool_type = constants.user_type("MaryItemToolId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(food_type, -1),
-            Some("FOOD_NOT_PRESENT"),
+            Some("ITEM_FOOD_NOT_PRESENT"),
             "{target}"
         );
         assert_eq!(
             constants.typed_int_const_name(article_type, -1),
-            Some("ARTICLE_NOT_PRESENT"),
+            Some("ITEM_ARTICLE_NOT_PRESENT"),
             "{target}"
         );
         assert_eq!(
             constants.typed_int_const_name(tool_type, -1),
-            Some("TOOL_NOT_PRESENT"),
+            Some("ITEM_TOOL_NOT_PRESENT"),
             "{target}"
         );
         assert_ne!(
-            constants.const_int_value("ARTICLE_NONE"),
+            constants.const_int_value("ITEM_ARTICLE_NONE"),
             Some(-1),
-            "{target}: physical ARTICLE_NONE must not be conflated with the VM sentinel"
+            "{target}: physical ITEM_ARTICLE_NONE must not be conflated with the VM sentinel"
         );
         assert_ne!(
-            constants.const_int_value("TOOL_NONE"),
+            constants.const_int_value("ITEM_TOOL_NONE"),
             Some(-1),
-            "{target}: physical TOOL_NONE must not be conflated with the VM sentinel"
+            "{target}: physical ITEM_TOOL_NONE must not be conflated with the VM sentinel"
         );
     }
 }
@@ -31831,17 +30414,10 @@ fn named_negative_sentinels_preserve_unary_negation_bytes_on_all_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestNegativeSentinels, };\n", &options)
                 .unwrap();
@@ -31868,13 +30444,13 @@ fn named_negative_sentinels_preserve_unary_negation_bytes_on_all_targets() {
         .unwrap();
         let source = format_named_script("TestNegativeSentinels", &raised).unwrap();
         for symbol in [
-            "FOOD_NOT_PRESENT",
-            "ARTICLE_NOT_PRESENT",
-            "TOOL_NOT_PRESENT",
-            "HELD_TOOL_STACK_NOT_PRESENT",
+            "ITEM_FOOD_NOT_PRESENT",
+            "ITEM_ARTICLE_NOT_PRESENT",
+            "ITEM_TOOL_NOT_PRESENT",
+            "ITEM_TOOL_STACK_NOT_PRESENT",
             "RUCKSACK_SLOT_NOT_FOUND",
-            "CHICKEN_SLOT_NONE",
-            "HORSE_RACE_INTERFACE_CANCELLED",
+            "ANIMAL_CHICKEN_SLOT_NONE",
+            "FESTIVAL_HORSE_RACE_INTERFACE_CANCELLED",
         ] {
             assert!(
                 source.contains(symbol),
@@ -31916,7 +30492,7 @@ fn named_negative_sentinels_preserve_unary_negation_bytes_on_all_targets() {
         .unwrap();
         let source = format_named_script("TestNegativeSentinels", &raised).unwrap();
         assert!(
-            source.contains("== mary_negated_int(FOOD_NOT_PRESENT)"),
+            source.contains("== mary_negated_int(ITEM_FOOD_NOT_PRESENT)"),
             "{target}: {source}"
         );
         let rebuilt =
@@ -31938,11 +30514,7 @@ fn complete_shipping_product_table_uses_physical_product_semantics() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let product_type = constants.user_type("MaryProductId").unwrap();
         for id in 0x00..=0x66 {
             assert!(
@@ -31963,12 +30535,9 @@ fn complete_shipping_product_table_uses_physical_product_semantics() {
             );
         }
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestProducts, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -32009,11 +30578,7 @@ fn complete_map_table_covers_every_physical_map_and_target_specific_none_sentine
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let map_type = constants.user_type("MaryMapId").unwrap();
 
         let is_fomt = target.starts_with("MARY_FOMT_");
@@ -32071,21 +30636,14 @@ fn complete_map_table_covers_every_physical_map_and_target_specific_none_sentine
 fn legacy_mfomt_opening_map_names_compile_but_decompile_semantically() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestOpeningMaps, };\n", &options).unwrap();
         let legacy = parse_named_scripts(
-            "void TestOpeningMaps(void) { ChangeMap(MAP_MFOMT_OPENING_SCENE_0, 0, 0); ChangeMap(MAP_MFOMT_OPENING_SCENE_1, 0, 0); ChangeMap(MAP_MFOMT_OPENING_SCENE_2, 0, 0); ChangeMap(MAP_MFOMT_OPENING_SCENE_3, 0, 0); ChangeMap(MAP_MFOMT_OPENING_SCENE_4, 0, 0); ChangeMap(MAP_MFOMT_OPENING_SCENE_5, 0, 0); }\n",
+            "void TestOpeningMaps(void) { ChangeMap(MAP_MFOMT_OPENING_PLAYER_HOME, 0, 0); ChangeMap(MAP_MFOMT_OPENING_ADVERTISEMENT_MONTAGE_1, 0, 0); ChangeMap(MAP_MFOMT_OPENING_ADVERTISEMENT_MONTAGE_2, 0, 0); ChangeMap(MAP_MFOMT_OPENING_ADVERTISEMENT_MONTAGE_3, 0, 0); ChangeMap(MAP_MFOMT_OPENING_ADVERTISEMENT_MONTAGE_4, 0, 0); ChangeMap(MAP_MFOMT_OPENING_PHONE_CALL_SCENE, 0, 0); }\n",
             &options,
             &callables.scope,
             &script_table,
@@ -32127,17 +30685,10 @@ fn constant_arithmetic_in_typed_arguments_preserves_bytecode_and_types_the_base(
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestTypedArithmetic, };\n", &options).unwrap();
         let lake_floor_zero = if target.starts_with("MARY_FOMT_") {
@@ -32181,11 +30732,7 @@ fn portrait_table_covers_all_0xb8_physical_slots_on_all_four_targets() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let portrait_type = constants.user_type("MaryTalkPortraitId").unwrap();
         let character_type = constants.user_type("MaryCharacterId").unwrap();
 
@@ -32249,8 +30796,8 @@ fn portrait_table_covers_all_0xb8_physical_slots_on_all_four_targets() {
 
 #[test]
 fn lou_or_ruby_character_symbols_do_not_regress_to_one_localization_name() {
-    let constants = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let scripts = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants = common::constants_source();
+    let scripts = common::symbols_source();
 
     for forbidden in [
         "CHARACTER_LOU =",
@@ -32298,7 +30845,7 @@ fn lou_or_ruby_character_symbols_do_not_regress_to_one_localization_name() {
 
     // Ruby the gemstone and the ruby wedding anniversary are separate concepts
     // and intentionally retain their official English names.
-    assert!(constants.contains("ARTICLE_RUBY ="));
+    assert!(constants.contains("ITEM_ARTICLE_RUBY ="));
     assert!(constants.contains("REFERENCE_PAGE_ANNIVERSARY_40_RUBY ="));
 }
 
@@ -32311,11 +30858,7 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let sequence_type = constants.user_type("MaryAudioSequenceId").unwrap();
         let mut numbered_nonempty_slots = 0;
 
@@ -32353,7 +30896,7 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
                 30 => Some("AUDIO_RECORD_ALBUM_13"),
                 31 => Some("AUDIO_RECORD_ALBUM_14"),
                 32 => Some("AUDIO_RECORD_ALBUM_15"),
-                33 => Some("AUDIO_BGM_HORSE_RACE_MINIGAME"),
+                33 => Some("AUDIO_BGM_FESTIVAL_HORSE_RACE_MINIGAME"),
                 34 => Some("AUDIO_BGM_HARVEST_SPRITE_MINIGAME"),
                 35 => Some("AUDIO_BGM_TITLE_SCREEN"),
                 36 => Some("AUDIO_BGM_CREDITS"),
@@ -32461,8 +31004,8 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
             );
             assert_eq!(
                 constants.const_int_value(&numbered),
-                Some(id),
-                "{target}: numbered audio compatibility name {numbered}"
+                (canonical == numbered).then_some(id),
+                "{target}: a semantic audio ID must not retain its numbered alias {numbered}"
             );
         }
         assert_eq!(
@@ -32474,12 +31017,9 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
             "{target}: audio sequence table must stop after ID 210"
         );
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestAudio, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -32519,11 +31059,7 @@ fn watering_can_intermediate_audio_uses_family_names_without_claiming_tool_tiers
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let sequence_type = constants.user_type("MaryAudioSequenceId").unwrap();
 
         // Track structure proves a single watering-can family, while the
@@ -32591,16 +31127,16 @@ fn vanilla_referenced_numbered_audio_is_a_closed_allowlist() {
 
 #[test]
 fn identical_single_declaration_branches_are_not_fabricated_as_target_differences() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let callables_source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let constants_source = common::constants_source();
+    let callables_source = common::callables_source();
     for (path, source) in [
-        ("goodies/mary_constants.mary.h", constants_source.as_str()),
-        ("goodies/mary_callables.mary.h", callables_source.as_str()),
+        ("split constant headers", constants_source.as_str()),
+        ("split callable headers", callables_source.as_str()),
     ] {
         let lines = source.lines().map(str::trim).collect::<Vec<_>>();
         for pair in [
             ("#if defined(MARY_FOMT)", "#elif defined(MARY_MFOMT)"),
-            ("#if defined(MARY_US)", "#elif defined(MARY_JP)"),
+            ("#if defined(REGION_US)", "#elif defined(REGION_JP)"),
             ("#if defined(MARY_FOMT_US)", "#elif defined(MARY_FOMT_JP)"),
             ("#if defined(MARY_MFOMT_US)", "#elif defined(MARY_MFOMT_JP)"),
         ] {
@@ -32627,11 +31163,7 @@ fn fishing_record_table_preserves_all_59_physical_slots() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let record_type = constants.user_type("MaryFishingRecordId").unwrap();
 
         for id in 0..59 {
@@ -32689,7 +31221,7 @@ fn link_milestone_domains_preserve_direction_and_target_ranges() {
         "LOCAL_LINK_MILESTONE_MOUNTAIN_AND_SEASIDE_COTTAGES_BUILT",
         "LOCAL_LINK_MILESTONE_MYTHIC_TOOL_OBTAINED",
         "LOCAL_LINK_MILESTONE_TEN_FRISBEE_TOURNAMENT_WINS",
-        "LOCAL_LINK_MILESTONE_TEN_HORSE_RACE_WINS",
+        "LOCAL_LINK_MILESTONE_TEN_FESTIVAL_HORSE_RACE_WINS",
         "LOCAL_LINK_MILESTONE_TEN_CHICKEN_FESTIVAL_WINS",
         "LOCAL_LINK_MILESTONE_TEN_COW_FESTIVAL_WINS",
         "LOCAL_LINK_MILESTONE_TEN_SHEEP_FESTIVAL_WINS",
@@ -32765,11 +31297,7 @@ fn link_milestone_domains_preserve_direction_and_target_ranges() {
         ("MARY_MFOMT_JP", 27, 60),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let local_type = constants.user_type("MaryLocalLinkMilestoneId").unwrap();
         let received_type = constants.user_type("MaryReceivedLinkMilestoneId").unwrap();
 
@@ -32805,12 +31333,9 @@ fn link_milestone_domains_preserve_direction_and_target_ranges() {
             "{target}: received milestone domain exceeds its physical range"
         );
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestLink, };\n", &options).unwrap();
         let numeric_source = format!(
@@ -32849,11 +31374,7 @@ fn screen_fade_domains_preserve_all_native_selectors() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let style_type = constants.user_type("MaryScreenFadeStyle").unwrap();
         let speed_type = constants.user_type("MaryScreenFadeSpeed").unwrap();
         for (id, name) in [
@@ -32883,12 +31404,9 @@ fn screen_fade_domains_preserve_all_native_selectors() {
         }
         assert!(constants.typed_int_const_name(speed_type, 3).is_none());
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFade, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -32929,11 +31447,7 @@ fn game_variable_domains_preserve_every_physical_slot() {
         ("MARY_MFOMT_JP", 727),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let missing = (0..=last_slot)
             .filter(|id| constants.typed_int_const_name(variable_type, *id).is_none())
@@ -32953,7 +31467,6 @@ fn game_variable_domains_preserve_every_physical_slot() {
 
 #[test]
 fn game_variable_completeness_check_detects_a_removed_target_slot() {
-    let source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
     for (target, declaration, id) in [
         (
             "MARY_FOMT_US",
@@ -32966,6 +31479,7 @@ fn game_variable_completeness_check_detects_a_removed_target_slot() {
             464,
         ),
     ] {
+        let source = common::constants_for_target(target);
         let modified = source.replacen(declaration, "", 1).replacen(
             "mary_var_type(VAR_HARVEST_FESTIVAL_ACTIVE, MaryFestivalActivityPhase);\n",
             "",
@@ -32991,11 +31505,7 @@ fn text_variable_domain_preserves_all_four_charmap_slots() {
         ("MARY_MFOMT_JP", 0x03B),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let slot_type = constants.user_type("MaryTextVariableSlot").unwrap();
         for id in 0..4 {
             assert_eq!(
@@ -33006,12 +31516,9 @@ fn text_variable_domain_preserves_all_four_charmap_slots() {
         }
         assert!(constants.typed_int_const_name(slot_type, 4).is_none());
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         assert_eq!(
             callables.scope.callable_map()["SetTextVariableString"].0 .0,
             string_setter_id,
@@ -33057,23 +31564,16 @@ fn held_item_kind_empty_sentinel_prints_symbolically_and_round_trips() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let kind_type = constants.user_type("MaryHeldItemKind").unwrap();
         assert_eq!(
             constants.typed_int_const_name(kind_type, -1),
             Some("HELD_ITEM_KIND_NONE")
         );
 
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestHeldKind, };\n", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -33126,21 +31626,14 @@ fn newly_audited_game_variable_domains_print_symbols_and_round_trip() {
         ),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestDomains, };\n", &options).unwrap();
         let numeric_source = format!(
-            "void TestDomains(void) {{ VarSet({cooking_var}, 3); VarSet(VAR_STARRY_NIGHT_FESTIVAL_HOST_INDEX, 5); VarSet(VAR_THOMAS_RANDOM_ITEM_REQUESTED_ITEM_INDEX, 8); VarSet(VAR_HARVEST_GODDESS_CHOSEN_AS_FAVORITE_VALUE, 5); }}\n"
+            "void TestDomains(void) {{ VarSet({cooking_var}, 3); VarSet(VAR_FESTIVAL_STARRY_NIGHT_HOST_INDEX, 5); VarSet(VAR_THOMAS_RANDOM_ITEM_REQUESTED_ITEM_INDEX, 8); VarSet(VAR_HARVEST_GODDESS_CHOSEN_AS_FAVORITE_VALUE, 5); }}\n"
         );
         let numeric =
             parse_named_scripts(&numeric_source, &options, &callables.scope, &script_table)
@@ -33149,7 +31642,7 @@ fn newly_audited_game_variable_domains_print_symbols_and_round_trip() {
             decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestDomains").unwrap();
         let source = format_named_script("TestDomains", &raised).unwrap();
         for symbol in [
-            "COOKING_FESTIVAL_DISH_CATEGORY_NOODLES",
+            "FESTIVAL_COOKING_DISH_CATEGORY_NOODLES",
             "STARRY_NIGHT_HOST_MARY_HOUSEHOLD",
             "THOMAS_RANDOM_ITEM_REQUEST_AEPFE_APPLE",
             hidden_candidate,
@@ -33172,29 +31665,22 @@ fn newly_audited_game_variable_domains_print_symbols_and_round_trip() {
 #[test]
 fn physically_boolean_unknown_slots_use_boolean_symbols_without_guessed_names() {
     for (target, variable) in [
-        ("MARY_FOMT_US", "VAR_UNKNOWN_SLOT_343"),
-        ("MARY_FOMT_JP", "VAR_UNKNOWN_SLOT_343"),
-        ("MARY_FOMT_US", "VAR_UNKNOWN_SLOT_423"),
-        ("MARY_FOMT_JP", "VAR_UNKNOWN_SLOT_423"),
-        ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_467"),
-        ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_467"),
+        ("MARY_FOMT_US", "VAR_UNKNOWN_016"),
+        ("MARY_FOMT_JP", "VAR_UNKNOWN_016"),
+        ("MARY_FOMT_US", "VAR_UNKNOWN_022"),
+        ("MARY_FOMT_JP", "VAR_UNKNOWN_022"),
+        ("MARY_MFOMT_US", "VAR_UNKNOWN_022"),
+        ("MARY_MFOMT_JP", "VAR_UNKNOWN_022"),
         ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_697"),
         ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_697"),
         ("MARY_MFOMT_US", "VAR_UNKNOWN_SLOT_705"),
         ("MARY_MFOMT_JP", "VAR_UNKNOWN_SLOT_705"),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestHarvestResult, };\n", &options).unwrap();
         let numeric_source = format!(
@@ -33229,11 +31715,7 @@ fn physically_boolean_unknown_slots_use_boolean_symbols_without_guessed_names() 
 fn physically_two_bit_unknown_mfomt_slots_do_not_invent_lifecycle_symbols() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         for id in [482, 484, 486, 488, 490] {
             assert_eq!(
                 constants.variable_value_type(id),
@@ -33253,24 +31735,13 @@ fn unknown_two_bit_state_preserves_unnamed_value_and_local_reuse() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let scripts =
             parse_script_table("mary_script_table { TestUnknownState, };", &options).unwrap();
-        let variables = if target.starts_with("MARY_MFOMT_") {
-            ["VAR_UNKNOWN_SLOT_232", "VAR_UNKNOWN_SLOT_233"]
-        } else {
-            ["VAR_UNKNOWN_SLOT_224", "VAR_UNKNOWN_SLOT_225"]
-        };
+        let variables = ["VAR_UNKNOWN_001", "VAR_UNKNOWN_002"];
         for variable in variables {
             let input = format!("void TestUnknownState(void) {{ int state; state = VarGet({variable}); switch (state) {{ case 1: VarSet({variable}, 3); break; case 3: if (state == 3) {{ VarSet({variable}, 2); }} break; }} state = GetKnownRecipeCount(); if (state == 2) {{ return; }} }}");
             let parsed = parse_named_scripts(&input, &options, &callables.scope, &scripts).unwrap();
@@ -33314,17 +31785,10 @@ fn mfomt_unknown_booleans_propagate_through_delayed_local_use() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let scripts =
             parse_script_table("mary_script_table { TestUnknownBool, };", &options).unwrap();
         for variable in ["VAR_UNKNOWN_SLOT_697", "VAR_UNKNOWN_SLOT_705"] {
@@ -33366,17 +31830,10 @@ fn mfomt_unknown_booleans_propagate_through_delayed_local_use() {
 fn mfomt_unknown_boolean_quantity_merge_does_not_invent_boolean_symbols() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let scripts = parse_script_table("mary_script_table { TestMerge, };", &options).unwrap();
         for variable in ["VAR_UNKNOWN_SLOT_697", "VAR_UNKNOWN_SLOT_705"] {
             let input = format!("void TestMerge(void) {{ int state; state = VarGet({variable}); if (GetKnownRecipeCount() > 3) {{ state = GetKnownRecipeCount(); }} if (state == 1) {{ return; }} }}");
@@ -33401,17 +31858,10 @@ fn mfomt_unknown_boolean_quantity_merge_does_not_invent_boolean_symbols() {
 fn mfomt_raw_unknown_byte_does_not_inherit_normalizing_setter_type() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let scripts = parse_script_table("mary_script_table { TestRawByte, };", &options).unwrap();
         for body in [
             "int state; VarSet(VAR_UNKNOWN_SLOT_053, 1); state = VarGet(VAR_UNKNOWN_SLOT_053); if (state == 1) { return; }",
@@ -33441,29 +31891,15 @@ fn ellen_adjacent_unknown_slots_keep_only_the_proven_boolean_domain() {
         "MARY_MFOMT_US",
         "MARY_MFOMT_JP",
     ] {
-        let (gate, state) = if target.starts_with("MARY_FOMT_") {
-            (
-                "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
-                "VAR_UNKNOWN_SLOT_276",
-            )
-        } else {
-            (
-                "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
-                "VAR_UNKNOWN_SLOT_284",
-            )
-        };
+        let (gate, state) = (
+            "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+            "VAR_UNKNOWN_006",
+        );
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestUnknownEvent, };\n", &options).unwrap();
         let numeric_source = format!(
@@ -33506,17 +31942,10 @@ fn backward_type_inference_decorates_switch_definitions_and_respects_conflicts()
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
 
         for (script_name, numeric_source, expected, forbidden) in [
             (
@@ -33546,20 +31975,20 @@ fn backward_type_inference_decorates_switch_definitions_and_respects_conflicts()
             (
                 "TestReassignmentBackprop",
                 "void TestReassignmentBackprop(void) { int value = 0; SetContestAnimal(ANIMAL_KIND_COW, value); value = 2; SetPlayerHeldFood(value); }\n",
-                vec!["ANIMAL_SLOT_1", "FOOD_CUCUMBER"],
+                vec!["ANIMAL_SLOT_1", "ITEM_FOOD_CUCUMBER"],
                 vec![],
             ),
             (
                 "TestMultiHopDelayedBackprop",
                 "void TestMultiHopDelayedBackprop(void) { int source = 0; int copy = source; int delayed = copy; WaitFrames(1); SetContestAnimal(ANIMAL_KIND_COW, delayed); copy = 2; WaitFrames(1); SetPlayerHeldFood(copy); }\n",
-                vec!["ANIMAL_SLOT_1", "FOOD_CUCUMBER"],
-                vec!["FOOD_TURNIP"],
+                vec!["ANIMAL_SLOT_1", "ITEM_FOOD_CUCUMBER"],
+                vec!["ITEM_FOOD_TURNIP"],
             ),
             (
                 "TestConflictingBackprop",
                 "void TestConflictingBackprop(void) { int value = 0; SetContestAnimal(ANIMAL_KIND_COW, value); SetPlayerHeldFood(value); }\n",
                 vec!["var_0 = 0"],
-                vec!["ANIMAL_SLOT_1", "FOOD_TURNIP"],
+                vec!["ANIMAL_SLOT_1", "ITEM_FOOD_TURNIP"],
             ),
             (
                 "TestSwitchFallthroughBackprop",
@@ -33639,17 +32068,10 @@ fn switch_fallthrough_joins_only_real_exit_paths_for_local_types() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestFallthroughExitTypes, };", &options)
                 .unwrap();
@@ -33692,17 +32114,10 @@ fn grouped_switch_labels_merge_conflicting_related_return_domains() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestGroupedKinds, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -33726,7 +32141,10 @@ fn grouped_switch_labels_merge_conflicting_related_return_domains() {
             source.contains("case 0:"),
             "{target}: conflicting food/article entries must keep the shared item ID numeric: {source}"
         );
-        for forbidden in ["case FOOD_TURNIP:", "case ARTICLE_FLOWER_MOON_DROP:"] {
+        for forbidden in [
+            "case ITEM_FOOD_TURNIP:",
+            "case ITEM_ARTICLE_FLOWER_MOON_DROP:",
+        ] {
             assert!(
                 !source.contains(forbidden),
                 "{target}: grouped conflicting entries selected one arbitrary domain ({forbidden}): {source}"
@@ -33751,21 +32169,18 @@ fn grouped_switch_labels_preserve_matching_related_return_domains() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         // This extra test-only relation models two discriminator values which
         // intentionally share one semantic ID domain. Production metadata has
         // no such pair yet, so construct it here instead of weakening the
         // conflict test above.
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_DOG, MaryFoodId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, GetPresentedItemKind, HELD_ITEM_KIND_DOG, MaryItemFoodId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestGroupedMatchingKinds, };", &options)
                 .unwrap();
@@ -33786,7 +32201,7 @@ fn grouped_switch_labels_preserve_matching_related_return_domains() {
         for expected in [
             "case HELD_ITEM_KIND_FOOD:",
             "case HELD_ITEM_KIND_DOG:",
-            "case FOOD_TURNIP:",
+            "case ITEM_FOOD_TURNIP:",
         ] {
             assert!(
                 source.contains(expected),
@@ -33812,17 +32227,14 @@ fn nested_switch_refinement_merges_with_outer_condition_domain() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        let mut constants_source = common::constants_source();
         constants_source.push_str(
-            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryArticleId);\n",
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, TRUE, MaryItemArticleId);\n",
         );
         let constants = parse_constant_header(&constants_source, &options).unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let script_table =
             parse_script_table("mary_script_table { TestNestedDomains, };", &options).unwrap();
         let numeric = parse_named_scripts(
@@ -33837,12 +32249,14 @@ fn nested_switch_refinement_merges_with_outer_condition_domain() {
                 .unwrap();
         let source = format_named_script("TestNestedDomains", &raised).unwrap();
         assert_eq!(
-            source.matches("case ARTICLE_FLOWER_MOON_DROP:").count(),
+            source
+                .matches("case ITEM_ARTICLE_FLOWER_MOON_DROP:")
+                .count(),
             1,
             "{target}: matching outer/case article domains were lost: {source}"
         );
         assert!(
-            !source.contains("case FOOD_TURNIP:"),
+            !source.contains("case ITEM_FOOD_TURNIP:"),
             "{target}: inner food case overwrote a conflicting outer article domain: {source}"
         );
         assert_eq!(
@@ -33894,17 +32308,10 @@ fn ordered_callable_table_preserves_every_physical_slot_for_all_targets() {
         ("MARY_MFOMT_JP", "goodies/lib_mfomt.txt", 339),
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
 
         assert_eq!(
             callables.next_id, expected_slot_count,
@@ -33937,8 +32344,64 @@ fn ordered_callable_table_preserves_every_physical_slot_for_all_targets() {
 }
 
 #[test]
+fn split_callable_tables_are_region_stable_and_id_comments_are_exact() {
+    for (family, expected_slots) in [("fomt", 327usize), ("mfomt", 339usize)] {
+        let source = fs::read_to_string(format!("goodies/{family}_callables.mary.h")).unwrap();
+        let constants_source =
+            fs::read_to_string(format!("goodies/{family}_constants.mary.h")).unwrap();
+        let upper = family.to_ascii_uppercase();
+        let mut parsed = Vec::new();
+        for region in ["US", "JP"] {
+            let options = Options::default()
+                .define(&format!("MARY_{upper}_{region}"))
+                .unwrap();
+            let constants = parse_constant_header(&constants_source, &options).unwrap();
+            parsed.push(parse_callable_table_with_scope(&source, &options, &constants).unwrap());
+        }
+        assert_eq!(parsed[0].next_id, expected_slots, "{family} US slots");
+        assert_eq!(parsed[1].next_id, expected_slots, "{family} JP slots");
+        let callable_inventory = |table: &mary::mary_c::CallableTable| {
+            let mut entries = table
+                .scope
+                .callable_map()
+                .iter()
+                .map(|(name, (id, shape))| {
+                    (
+                        name.clone(),
+                        id.0,
+                        shape.is_func(),
+                        shape.parameter_types().to_vec(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|entry| entry.1);
+            entries
+        };
+        assert_eq!(
+            callable_inventory(&parsed[0]),
+            callable_inventory(&parsed[1]),
+            "{family}: localization changed callable names, IDs, or signatures"
+        );
+
+        let comments = source
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim_start();
+                let id = line.strip_prefix("/* 0x")?.get(..3)?;
+                usize::from_str_radix(id, 16).ok()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            comments,
+            (0..expected_slots).collect::<Vec<_>>(),
+            "{family}"
+        );
+    }
+}
+
+#[test]
 fn every_callable_declaration_has_its_own_bilingual_documentation_block() {
-    let source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let source = common::callables_source();
     let declaration_section = source
         .split_once("Mary-C callable declarations")
         .expect("missing callable declaration section")
@@ -34106,7 +32569,7 @@ fn every_callable_declaration_has_its_own_bilingual_documentation_block() {
 
 #[test]
 fn every_constant_type_has_its_own_bilingual_documentation_block() {
-    let source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let source = common::constants_source();
     let lines = source.lines().collect::<Vec<_>>();
 
     for (line_index, line) in lines.iter().enumerate() {
@@ -34151,7 +32614,7 @@ fn every_constant_type_has_its_own_bilingual_documentation_block() {
 
 #[test]
 fn audited_system_dispatcher_texts_follow_their_actual_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -34200,7 +32663,7 @@ fn audited_system_dispatcher_texts_follow_their_actual_control_flow() {
 
 #[test]
 fn upstairs_access_guards_preserve_region_specific_physical_text_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, poultry_script_id, inn_script_id) in [
         ("MARY_FOMT_US", 123, Some(272)),
         ("MARY_FOMT_JP", 123, Some(272)),
@@ -34252,7 +32715,7 @@ fn upstairs_access_guards_preserve_region_specific_physical_text_sharing() {
 
 #[test]
 fn new_year_festival_choices_preserve_us_duplicates_and_jp_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 406),
         ("MARY_FOMT_JP", 406),
@@ -34302,7 +32765,7 @@ fn new_year_festival_choices_preserve_us_duplicates_and_jp_sharing() {
 
 #[test]
 fn horse_race_invitation_symbols_follow_entry_outcomes_across_both_games() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1079),
         ("MARY_FOMT_JP", 1079),
@@ -34335,7 +32798,7 @@ fn horse_race_invitation_symbols_follow_entry_outcomes_across_both_games() {
 
 #[test]
 fn fomt_animal_contest_reception_preserves_us_judging_prompt_sharing() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -34369,7 +32832,7 @@ fn fomt_animal_contest_reception_preserves_us_judging_prompt_sharing() {
 
 #[test]
 fn winter_thanksgiving_full_rucksack_texts_are_scoped_by_visitor() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -34414,7 +32877,7 @@ fn winter_thanksgiving_full_rucksack_texts_are_scoped_by_visitor() {
 
 #[test]
 fn thomas_stocking_delivery_uses_the_festival_event_namespace() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 1307),
         ("MARY_FOMT_JP", 1307),
@@ -34448,7 +32911,7 @@ fn thomas_stocking_delivery_uses_the_festival_event_namespace() {
 
 #[test]
 fn family_and_festival_scripts_use_event_level_categories_not_dialogue_fragments() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, expectations) in [
         (
             "MARY_FOMT_US",
@@ -34535,7 +32998,7 @@ fn family_and_festival_scripts_use_event_level_categories_not_dialogue_fragments
 
 #[test]
 fn event_category_suffixes_are_not_split_by_an_underscore() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for category in [
         "Achievement",
         "Family",
@@ -34559,7 +33022,7 @@ fn event_category_suffixes_are_not_split_by_an_underscore() {
 
 #[test]
 fn fomt_slot_356_is_the_television_channel_dispatcher_not_animal_interaction() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -34610,7 +33073,7 @@ fn fomt_slot_356_is_the_television_channel_dispatcher_not_animal_interaction() {
 
 #[test]
 fn mfomt_television_dispatcher_interference_texts_follow_their_producers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -34659,7 +33122,7 @@ fn mfomt_television_dispatcher_interference_texts_follow_their_producers() {
 
 #[test]
 fn festival_dialogue_symbols_describe_the_event_role_instead_of_copying_the_text() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, chicken_slot, cow_slot, sheep_slot) in [
         ("MARY_FOMT_US", 1153, 1177, 1289),
         ("MARY_FOMT_JP", 1153, 1177, 1289),
@@ -34731,7 +33194,7 @@ fn festival_dialogue_symbols_describe_the_event_role_instead_of_copying_the_text
 
 #[test]
 fn animal_and_crop_demonstrations_are_named_as_tutorials_in_all_four_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, first_slot) in [
         ("MARY_FOMT_US", 1060),
         ("MARY_FOMT_JP", 1060),
@@ -34784,7 +33247,7 @@ fn animal_and_crop_demonstrations_are_named_as_tutorials_in_all_four_targets() {
 
 #[test]
 fn achievement_scripts_use_the_event_category_and_preserve_version_specific_rewards() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, expectations) in [
         (
             "MARY_FOMT_US",
@@ -34859,7 +33322,7 @@ fn achievement_scripts_use_the_event_category_and_preserve_version_specific_rewa
 
 #[test]
 fn npc_and_festival_script_names_keep_their_subject_hierarchy() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, expectations) in [
         (
             "MARY_FOMT_US",
@@ -34926,7 +33389,7 @@ fn npc_and_festival_script_names_keep_their_subject_hierarchy() {
 
 #[test]
 fn every_shop_event_name_groups_the_shop_before_the_action() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let shop_prefixes = [
         "EventScript_ShopEvent_BeachCafe_",
         "EventScript_ShopEvent_Blacksmith_",
@@ -34963,7 +33426,7 @@ fn every_shop_event_name_groups_the_shop_before_the_action() {
 
 #[test]
 fn mfomt_reference_guide_and_mailbox_reminder_use_consistent_categories() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -35037,7 +33500,7 @@ fn mfomt_reference_guide_and_mailbox_reminder_use_consistent_categories() {
 
 #[test]
 fn multi_npc_event_names_group_participants_before_the_event_role() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for stale in [
         "NPCEvent_Barley_AndDoug",
         "NPCEvent_Gray_AndKai",
@@ -35111,7 +33574,7 @@ fn multi_npc_event_names_group_participants_before_the_event_role() {
 
 #[test]
 fn every_text_symbol_has_an_explicit_semantic_domain() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let allowed_prefixes = [
         "gText_AchievementEvent_",
         "gText_CollectibleEvent_",
@@ -35158,7 +33621,7 @@ fn every_text_symbol_has_an_explicit_semantic_domain() {
 
 #[test]
 fn a_text_symbol_never_silently_belongs_to_different_scripts() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let mut current_script = None;
     let mut owners = HashMap::<String, String>::new();
     for (line_index, line) in source.lines().enumerate() {
@@ -35198,7 +33661,7 @@ fn a_text_symbol_never_silently_belongs_to_different_scripts() {
 
 #[test]
 fn animal_birth_and_death_events_share_semantic_names_across_game_families() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, birth_slot, death_slot) in [
         ("MARY_FOMT_US", 984, 985),
         ("MARY_FOMT_JP", 984, 985),
@@ -35263,7 +33726,7 @@ fn animal_birth_and_death_events_share_semantic_names_across_game_families() {
 
 #[test]
 fn huge_stone_inspection_names_the_engine_restriction_in_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let script_name = "EventScript_LocationInteraction_InspectHugeStoneUnbreakableWithLevel5Hammer";
     let text_name = "gText_LocationInteraction_InspectHugeStoneUnbreakableWithLevel5Hammer";
     for (target, slot) in [
@@ -35300,7 +33763,7 @@ fn huge_stone_inspection_names_the_engine_restriction_in_all_targets() {
 
 #[test]
 fn shared_location_inspections_include_their_actual_location_in_both_game_families() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let cases = [
         (99, 107, "InspectHorseStableWoodBox"),
         (100, 108, "InspectBeachBench"),
@@ -35364,7 +33827,7 @@ fn shared_location_inspections_include_their_actual_location_in_both_game_famili
 
 #[test]
 fn mothers_hill_summit_transition_exposes_its_event_dispatch_role() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected =
         "EventScript_LocationTransition_EnterMothersHillSummitWithFestivalAndCharacterEventDispatch";
     for (target, slot) in [
@@ -35388,7 +33851,7 @@ fn mothers_hill_summit_transition_exposes_its_event_dispatch_role() {
 
 #[test]
 fn inn_upstairs_access_names_preserve_the_gender_version_event_difference() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, expected, expected_text_count) in [
         (
             "MARY_FOMT_US",
@@ -35432,8 +33895,8 @@ fn inn_upstairs_access_names_preserve_the_gender_version_event_difference() {
 
 #[test]
 fn script_local_purchase_and_blacksmith_domains_are_target_correct() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
     for (target, tv_slot, blacksmith_slot, mirror_slot) in [
         ("MARY_FOMT_US", 285, 487, None),
         ("MARY_FOMT_JP", 285, 487, None),
@@ -35481,8 +33944,8 @@ fn script_local_purchase_and_blacksmith_domains_are_target_correct() {
 
 #[test]
 fn npc_held_item_interaction_locals_cover_the_complete_target_script_sets() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
     for (target, slot_count, expected_count) in [
         ("MARY_FOMT_US", 1329, 32),
         ("MARY_FOMT_JP", 1329, 32),
@@ -35619,7 +34082,7 @@ fn npc_held_item_interaction_locals_cover_the_complete_target_script_sets() {
 
 #[test]
 fn npc_held_item_interaction_category_preserves_the_complete_physical_domain() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -35649,7 +34112,7 @@ fn npc_held_item_interaction_category_preserves_the_complete_physical_domain() {
 
 #[test]
 fn marriage_candidate_gift_responses_follow_player_spouse_eligibility() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, candidate, player_can_marry) in [
         ("MARY_FOMT_US", "Ann", true),
         ("MARY_FOMT_JP", "Ann", true),
@@ -35746,7 +34209,7 @@ fn marriage_candidate_gift_responses_follow_player_spouse_eligibility() {
 
 #[test]
 fn male_candidate_special_gifts_use_non_player_spouse_state_across_game_families() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -35796,7 +34259,7 @@ fn male_candidate_special_gifts_use_non_player_spouse_state_across_game_families
 
 #[test]
 fn mfomt_candidate_thanksgiving_responses_follow_season_and_marriage_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -35848,7 +34311,7 @@ fn mfomt_candidate_thanksgiving_responses_follow_season_and_marriage_state() {
 
 #[test]
 fn fomt_candidate_thanksgiving_responses_follow_marriage_and_prior_winter_gift() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -35877,7 +34340,7 @@ fn fomt_candidate_thanksgiving_responses_follow_marriage_and_prior_winter_gift()
 
 #[test]
 fn mfomt_female_npc_thanksgiving_responses_follow_season_and_text_sequence() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -35938,7 +34401,7 @@ fn mfomt_female_npc_thanksgiving_responses_follow_season_and_text_sequence() {
 
 #[test]
 fn mfomt_gourmet_and_won_thanksgiving_responses_preserve_reachability_and_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -35977,7 +34440,7 @@ fn mfomt_gourmet_and_won_thanksgiving_responses_preserve_reachability_and_state(
 
 #[test]
 fn fomt_won_dialogue_roles_follow_friendship_ranges() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -36010,7 +34473,7 @@ fn fomt_won_dialogue_roles_follow_friendship_ranges() {
 
 #[test]
 fn mfomt_won_gift_responses_follow_spouse_state_and_region_specific_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -36135,8 +34598,8 @@ fn mfomt_won_gift_responses_follow_spouse_state_and_region_specific_text_reuse()
 
 #[test]
 fn mfomt_local_event_result_domains_are_complete_and_target_correct() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
@@ -36191,8 +34654,8 @@ fn mfomt_local_event_result_domains_are_complete_and_target_correct() {
 
 #[test]
 fn mfomt_family_event_completion_locals_are_boolean_in_both_regions() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
     let script_names = [
         "EventScript_FamilyEvent_Cliff_BabyBirthdayDateDialogueChoice",
         "EventScript_FamilyEvent_Cliff_ChildInjury",
@@ -36245,7 +34708,7 @@ fn mfomt_family_event_completion_locals_are_boolean_in_both_regions() {
 
 #[test]
 fn mfomt_kappa_family_date_confirmations_name_the_correct_answer() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let expected = [
         (879, "SpouseBirthdayDialogue_ConfirmsChildBirthdayAnswer"),
         (888, "DateChoiceWithChild_ConfirmsKappaBirthdayAnswer"),
@@ -36273,7 +34736,7 @@ fn mfomt_kappa_family_date_confirmations_name_the_correct_answer() {
 
 #[test]
 fn remaining_duplicate_dialogue_names_follow_branch_topics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
@@ -36340,8 +34803,8 @@ fn remaining_duplicate_dialogue_names_follow_branch_topics() {
 
 #[test]
 fn minigame_round_and_apple_shuffle_local_domains_are_target_correct() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
 
     for (target, rps_slot, number_slot) in [
         ("MARY_FOMT_US", 1040, 1041),
@@ -36389,8 +34852,8 @@ fn minigame_round_and_apple_shuffle_local_domains_are_target_correct() {
 
 #[test]
 fn clinic_diagnosis_and_awl_profile_menu_domains_are_target_correct() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let header = common::constants_source();
+    let symbols_source = common::symbols_source();
 
     for (target, profile_slot, clinic_slot) in [
         ("MARY_FOMT_US", 316, 483),
@@ -36428,7 +34891,7 @@ fn clinic_diagnosis_and_awl_profile_menu_domains_are_target_correct() {
 
 #[test]
 fn music_festival_performance_animations_follow_each_game_family() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
 
     for (target, expected) in [
         (
@@ -36496,7 +34959,7 @@ fn music_festival_performance_animations_follow_each_game_family() {
 
 #[test]
 fn fomt_spouse_newborn_presentation_animations_are_target_scoped() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let expected = [
         ("ANIMATION_POPURI_WITH_NEWBORN", 583),
         ("ANIMATION_KAREN_WITH_NEWBORN", 1709),
@@ -36533,7 +34996,7 @@ fn fomt_spouse_newborn_presentation_animations_are_target_scoped() {
 
 #[test]
 fn harvest_sprite_wedding_ceremony_animations_follow_each_game_family() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let names = ["STAID", "TIMID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY"];
 
     for (target, values) in [
@@ -36557,7 +35020,7 @@ fn harvest_sprite_wedding_ceremony_animations_follow_each_game_family() {
 
 #[test]
 fn harvest_sprite_tea_party_animations_follow_each_game_family() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let names = ["STAID", "TIMID", "NAPPY", "BOLD", "CHEF", "AQUA", "HOGGY"];
 
     for (target, values) in [
@@ -36581,7 +35044,7 @@ fn harvest_sprite_tea_party_animations_follow_each_game_family() {
 
 #[test]
 fn mfomt_rick_and_cliff_item_handover_animations_do_not_collide_with_fomt_wedding_slots() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
 
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
@@ -36607,33 +35070,6 @@ fn mfomt_rick_and_cliff_item_handover_animations_do_not_collide_with_fomt_weddin
                 "{target} canonical {name}"
             );
         }
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
-        let scripts =
-            parse_script_table("mary_script_table { TestHandOverItem, };", &options).unwrap();
-        let legacy = parse_named_scripts(
-            "void TestHandOverItem(void) { SetEntityAnim(0, ANIMATION_ID_0539); SetEntityAnim(0, ANIMATION_ID_0655); }",
-            &options,
-            &callables.scope,
-            &scripts,
-        )
-        .unwrap();
-        let semantic = parse_named_scripts(
-            "void TestHandOverItem(void) { SetEntityAnim(0, ANIMATION_RICK_HAND_OVER_ITEM); SetEntityAnim(0, ANIMATION_CLIFF_HAND_OVER_ITEM); }",
-            &options,
-            &callables.scope,
-            &scripts,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&legacy.scripts[0].2),
-            encode_script(&semantic.scripts[0].2),
-            "{target} legacy aliases"
-        );
     }
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
@@ -36642,33 +35078,6 @@ fn mfomt_rick_and_cliff_item_handover_animations_do_not_collide_with_fomt_weddin
         assert_eq!(
             constants.const_int_value("ANIMATION_CLIFF_WEDDING_KISS"),
             Some(655)
-        );
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
-        let scripts =
-            parse_script_table("mary_script_table { TestWeddingKiss, };", &options).unwrap();
-        let legacy = parse_named_scripts(
-            "void TestWeddingKiss(void) { SetEntityAnim(0, ANIMATION_ID_0655); }",
-            &options,
-            &callables.scope,
-            &scripts,
-        )
-        .unwrap();
-        let semantic = parse_named_scripts(
-            "void TestWeddingKiss(void) { SetEntityAnim(0, ANIMATION_CLIFF_WEDDING_KISS); }",
-            &options,
-            &callables.scope,
-            &scripts,
-        )
-        .unwrap();
-        assert_eq!(
-            encode_script(&legacy.scripts[0].2),
-            encode_script(&semantic.scripts[0].2),
-            "{target} legacy alias"
         );
         assert_eq!(
             constants.const_int_value("ANIMATION_RICK_HAND_OVER_ITEM"),
@@ -36683,7 +35092,7 @@ fn mfomt_rick_and_cliff_item_handover_animations_do_not_collide_with_fomt_weddin
 
 #[test]
 fn mfomt_big_bed_sleep_over_animation_stages_are_target_scoped() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
     let expected = [
         ("ANIMATION_POPURI_BIG_BED_INITIAL_POSE", 587),
         ("ANIMATION_POPURI_BIG_BED_DIALOGUE_POSE", 591),
@@ -36748,7 +35157,7 @@ fn mfomt_big_bed_sleep_over_animation_stages_are_target_scoped() {
 
 #[test]
 fn special_spouse_and_harvest_goddess_event_animations_are_target_scoped() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let header = common::constants_source();
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
@@ -36830,11 +35239,7 @@ fn special_spouse_and_harvest_goddess_event_animations_are_target_scoped() {
 fn mfomt_reserved_link_pending_slots_preserve_positions_and_boolean_types() {
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let boolean_type = constants.constant_value_type("TRUE").unwrap();
 
@@ -36843,7 +35248,11 @@ fn mfomt_reserved_link_pending_slots_preserve_positions_and_boolean_types() {
             let canonical = format!("VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_{reserved_id}");
             let legacy = format!("VAR_UNKNOWN_SLOT_{slot:03}");
             assert_eq!(constants.const_int_value(&canonical), Some(slot));
-            assert_eq!(constants.const_int_value(&legacy), Some(slot));
+            assert_eq!(
+                constants.const_int_value(&legacy),
+                None,
+                "{target}: replaced unknown-slot name must not remain as an alias"
+            );
             assert_eq!(
                 constants.typed_int_const_name(variable_type, slot),
                 Some(canonical.as_str()),
@@ -36874,17 +35283,13 @@ fn unresolved_variable_inventory_is_explicit_for_every_target() {
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
         let unknowns = (0..=1024)
             .filter_map(|id| {
                 constants
                     .typed_int_const_name(variable_type, id)
-                    .filter(|name| name.starts_with("VAR_UNKNOWN_SLOT_"))
+                    .filter(|name| name.starts_with("VAR_UNKNOWN_"))
                     .map(|name| (id, name.to_owned()))
             })
             .collect::<Vec<_>>();
@@ -36899,7 +35304,16 @@ fn unresolved_variable_inventory_is_explicit_for_every_target() {
             "{target}: physical unknown-slot inventory"
         );
         for (id, name) in &unknowns {
-            assert_eq!(*name, format!("VAR_UNKNOWN_SLOT_{id:03}"), "{target}");
+            if name.starts_with("VAR_UNKNOWN_SLOT_") {
+                assert_eq!(*name, format!("VAR_UNKNOWN_SLOT_{id:03}"), "{target}");
+            } else {
+                assert!(
+                    name.strip_prefix("VAR_UNKNOWN_")
+                        .is_some_and(|suffix| suffix.len() == 3
+                            && suffix.chars().all(|c| c.is_ascii_digit())),
+                    "{target}: malformed logical unknown name {name}"
+                );
+            }
             let boolean_ids = if target.contains("MFOMT") {
                 MFOMT_BOOLEAN_UNKNOWN_IDS.as_slice()
             } else {
@@ -36927,6 +35341,7 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
     let cases = [
         (
             "decompiled_text/fomt_us",
+            "MARY_FOMT_US",
             &[
                 224, 225, 236, 237, 242, 276, 316, 317, 319, 320, 334, 335, 336, 344, 381, 382,
                 383, 385, 449,
@@ -36939,6 +35354,7 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
         ),
         (
             "decompiled_text/fomt_jp",
+            "MARY_FOMT_JP",
             &[
                 224, 225, 236, 237, 242, 276, 316, 317, 319, 320, 334, 335, 336, 344, 381, 382,
                 383, 385, 449,
@@ -36951,6 +35367,7 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
         ),
         (
             "decompiled_text/mfomt_us",
+            "MARY_MFOMT_US",
             &[
                 232, 233, 244, 245, 250, 284, 324, 325, 327, 328, 343, 344, 352, 411, 412, 413, 415,
             ][..],
@@ -36962,6 +35379,7 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
         ),
         (
             "decompiled_text/mfomt_jp",
+            "MARY_MFOMT_JP",
             &[
                 232, 233, 244, 245, 250, 284, 324, 325, 327, 328, 343, 344, 352, 411, 412, 413, 415,
             ][..],
@@ -36973,10 +35391,12 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
         ),
     ];
 
-    for (directory, generic_guard_ids, expected_guard_files, expected_exceptions) in cases {
+    for (directory, target, generic_guard_ids, expected_guard_files, expected_exceptions) in cases {
         if !std::path::Path::new(directory).is_dir() {
             continue;
         }
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let mut guard_files = 0;
         let mut exceptions = Vec::new();
         for entry in fs::read_dir(directory).unwrap().filter_map(Result::ok) {
@@ -36990,8 +35410,8 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
             let source = fs::read_to_string(entry.path()).unwrap();
             let mut ids = source
                 .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-                .filter_map(|token| token.strip_prefix("VAR_UNKNOWN_SLOT_"))
-                .map(|suffix| suffix.parse::<i64>().unwrap())
+                .filter(|token| token.starts_with("VAR_UNKNOWN_"))
+                .map(|token| constants.const_int_value(token).unwrap())
                 .collect::<Vec<_>>();
             ids.sort_unstable();
             ids.dedup();
@@ -37001,8 +35421,10 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
             if ids == generic_guard_ids {
                 guard_files += 1;
                 for id in &ids {
+                    let variable_type = constants.user_type("MaryVarId").unwrap();
+                    let symbol = constants.typed_int_const_name(variable_type, *id).unwrap();
                     assert!(
-                        source.contains(&format!("VarGet(VAR_UNKNOWN_SLOT_{id:03}) == 1")),
+                        source.contains(&format!("VarGet({symbol}) == 1")),
                         "{directory}: unknown slot {id} escaped the audited equality guard form in {}",
                         entry.file_name().to_string_lossy()
                     );
@@ -37024,16 +35446,18 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
 #[test]
 fn unknown_variable_script_writers_stay_limited_to_audited_daily_resets() {
     let cases = [
-        ("decompiled_text/fomt_us", &[423, 449][..]),
-        ("decompiled_text/fomt_jp", &[423, 449][..]),
-        ("decompiled_text/mfomt_us", &[467][..]),
-        ("decompiled_text/mfomt_jp", &[467][..]),
+        ("decompiled_text/fomt_us", "MARY_FOMT_US", &[423, 449][..]),
+        ("decompiled_text/fomt_jp", "MARY_FOMT_JP", &[423, 449][..]),
+        ("decompiled_text/mfomt_us", "MARY_MFOMT_US", &[467][..]),
+        ("decompiled_text/mfomt_jp", "MARY_MFOMT_JP", &[467][..]),
     ];
 
-    for (directory, expected_ids) in cases {
+    for (directory, target, expected_ids) in cases {
         if !std::path::Path::new(directory).is_dir() {
             continue;
         }
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
 
         let mut writers = Vec::new();
         for entry in fs::read_dir(directory).unwrap().filter_map(Result::ok) {
@@ -37050,20 +35474,19 @@ fn unknown_variable_script_writers_stay_limited_to_audited_daily_resets() {
                     let Some(arguments) = line.split_once(operation).map(|(_, rest)| rest) else {
                         continue;
                     };
-                    let Some(suffix) = arguments.strip_prefix("VAR_UNKNOWN_SLOT_") else {
+                    let Some(symbol) = arguments
+                        .split(|character: char| {
+                            !character.is_ascii_alphanumeric() && character != '_'
+                        })
+                        .next()
+                        .filter(|symbol| symbol.starts_with("VAR_UNKNOWN_"))
+                    else {
                         continue;
                     };
-                    let digits = suffix
-                        .bytes()
-                        .take_while(u8::is_ascii_digit)
-                        .collect::<Vec<_>>();
                     writers.push((
                         entry.file_name().to_string_lossy().into_owned(),
                         operation.trim_end_matches('(').to_owned(),
-                        std::str::from_utf8(&digits)
-                            .unwrap()
-                            .parse::<i64>()
-                            .unwrap(),
+                        constants.const_int_value(symbol).unwrap(),
                     ));
                 }
             }
@@ -37241,9 +35664,9 @@ fn vanilla_outputs_do_not_fall_back_to_numbered_game_domain_symbols() {
         "ENTITY_",
         "ANIMATION_",
         "ANIMATION_ID_",
-        "FOOD_",
-        "ARTICLE_",
-        "TOOL_",
+        "ITEM_FOOD_",
+        "ITEM_ARTICLE_",
+        "ITEM_TOOL_",
     ];
     for directory in [
         "decompiled_text/fomt_us",
@@ -37309,7 +35732,7 @@ fn vanilla_unknown_symbols_stay_in_the_audited_variable_domain() {
                 .filter(|token| token.contains("UNKNOWN") || token.contains("Unknown"))
             {
                 assert!(
-                    token.starts_with("VAR_UNKNOWN_SLOT_"),
+                    token.starts_with("VAR_UNKNOWN_"),
                     "{directory}: {} contains unaudited unknown symbol {token}",
                     entry.file_name().to_string_lossy()
                 );
@@ -37320,13 +35743,13 @@ fn vanilla_unknown_symbols_stay_in_the_audited_variable_domain() {
 
 #[test]
 fn non_variable_unknown_constants_are_a_closed_audited_inventory() {
-    let source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let source = common::constants_source();
     let mut actual = source
         .lines()
         .filter_map(|line| {
             let (declaration, _) = line.split_once('=')?;
             let name = declaration.split_whitespace().last()?;
-            (name.contains("UNKNOWN") && !name.starts_with("VAR_UNKNOWN_SLOT_"))
+            (name.contains("UNKNOWN") && !name.starts_with("VAR_UNKNOWN_"))
                 .then_some(name.to_owned())
         })
         .collect::<Vec<_>>();
@@ -37477,8 +35900,8 @@ fn vanilla_outputs_do_not_compare_typed_callable_returns_with_known_numeric_memb
         None
     }
 
-    let constants_source = include_str!("../goodies/mary_constants.mary.h");
-    let callables_source = include_str!("../goodies/mary_callables.mary.h");
+    let constants_source = &common::constants_source();
+    let callables_source = &common::callables_source();
     for (target, directory) in [
         ("MARY_FOMT_US", "decompiled_text/fomt_us"),
         ("MARY_FOMT_JP", "decompiled_text/fomt_jp"),
@@ -37610,7 +36033,7 @@ fn vanilla_outputs_do_not_compare_typed_callable_returns_with_known_numeric_memb
 
 #[test]
 fn early_farm_event_text_symbols_follow_their_full_event_identity() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let cases = [
         (5usize, "EventScript_FarmEvent_Foal_OfferToPlayer"),
         (6, "EventScript_FarmEvent_Horse_CareEvaluation"),
@@ -37647,34 +36070,8 @@ fn early_farm_event_text_symbols_follow_their_full_event_identity() {
 }
 
 #[test]
-fn fomt_cn_auxiliary_target_excludes_only_mannas_unused_trailing_text_slot() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let jp = Options::default().define("MARY_FOMT_JP").unwrap();
-    let cn = Options::default()
-        .define("MARY_FOMT_JP")
-        .unwrap()
-        .define("MARY_FOMT_CN")
-        .unwrap();
-    let jp = parse_text_name_table(&source, &jp).unwrap();
-    let cn = parse_text_name_table(&source, &cn).unwrap();
-
-    assert_eq!(jp.script_name(1021), cn.script_name(1021));
-    assert_eq!(jp.text_count(1021), 58);
-    assert_eq!(cn.text_count(1021), 57);
-    assert_eq!(
-        &jp.names(1021, 58)[..57],
-        cn.names(1021, 57).as_slice(),
-        "the modified layout may remove only the unused trailing slot"
-    );
-    assert_eq!(
-        jp.names(1021, 58)[57].as_deref(),
-        Some("gText_NPCEvent_Manna_DialogueAndGiftResponses_ChurchRepeatConversation")
-    );
-}
-
-#[test]
 fn dog_beach_frisbee_practice_texts_follow_the_farm_event_identity() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, script_id) in [
         ("MARY_FOMT_US", 492usize),
         ("MARY_FOMT_JP", 492),
@@ -37718,11 +36115,7 @@ fn mfomt_interleaved_unknowns_are_not_conflated_with_thanksgiving_bachelor_flags
         .collect::<Vec<_>>();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let variable_type = constants.user_type("MaryVarId").unwrap();
 
         for id in [482, 484, 486, 488, 490] {
@@ -37760,8 +36153,8 @@ fn mfomt_interleaved_unknowns_are_not_conflated_with_thanksgiving_bachelor_flags
 
 #[test]
 fn every_physical_callable_has_a_semantic_name_for_every_target() {
-    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let callables_source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let header = common::constants_source();
+    let callables_source = common::callables_source();
 
     let generic_parameters = callables_source
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
@@ -37810,7 +36203,7 @@ fn every_physical_callable_has_a_semantic_name_for_every_target() {
 
 #[test]
 fn harvest_goddess_link_meter_and_mfomt_countdown_symbols_keep_their_physical_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_HarvestGoddess_OfferingsAndMatchmakingChoices_";
 
     for (target, script_id, has_countdown) in [
@@ -37912,7 +36305,7 @@ fn harvest_goddess_link_meter_and_mfomt_countdown_symbols_keep_their_physical_ro
 
 #[test]
 fn text_symbols_do_not_hide_known_meaning_behind_nonverbal_reaction_fallbacks() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(
         !source.contains("NonverbalReaction"),
         "a generic nonverbal fallback remains after the four-ROM text-and-control-flow audit"
@@ -37941,7 +36334,7 @@ fn text_symbols_do_not_hide_known_meaning_behind_nonverbal_reaction_fallbacks() 
 
 #[test]
 fn timid_low_friendship_repeat_silences_preserve_the_regional_slot_difference() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let shared =
         "gText_NPCEvent_Timid_DialogueAndWorkChoices_LowFriendshipRepeatConversationSilentPause";
     let us_only = "gText_NPCEvent_Timid_DialogueAndWorkChoices_NonSpringLowFriendshipRepeatConversationLongSilentPause";
@@ -38004,7 +36397,7 @@ fn timid_low_friendship_repeat_silences_preserve_the_regional_slot_difference() 
 
 #[test]
 fn nappy_seasonal_dialogue_symbols_encode_conversation_and_friendship_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let suffixes = [
         "SpringFriendship000To050FirstConversationAnticipatesTeaParty",
         "SpringFriendship051To100FirstConversationExplainsTeaPartyWithFriends",
@@ -38050,7 +36443,7 @@ fn nappy_seasonal_dialogue_symbols_encode_conversation_and_friendship_state() {
 
 #[test]
 fn bold_seasonal_dialogue_symbols_encode_conversation_and_friendship_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let suffixes = [
         "SpringFriendship000To050FirstConversationDescribesTeaPartyTradition",
         "SpringFriendship051To100FirstConversationExplainsTeaPartyIsForFriends",
@@ -38096,7 +36489,7 @@ fn bold_seasonal_dialogue_symbols_encode_conversation_and_friendship_state() {
 
 #[test]
 fn bold_adult_animal_followup_and_chef_recipe_use_interaction_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, family_offset) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -38139,7 +36532,7 @@ fn bold_adult_animal_followup_and_chef_recipe_use_interaction_roles() {
 
 #[test]
 fn remaining_harvest_sprite_daily_dialogue_matrices_are_fully_state_scoped() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, family_offset) in [
         ("MARY_FOMT_US", 0),
         ("MARY_FOMT_JP", 0),
@@ -38203,7 +36596,7 @@ fn remaining_harvest_sprite_daily_dialogue_matrices_are_fully_state_scoped() {
 
 #[test]
 fn harvest_sprite_hiring_texts_encode_task_and_duration_without_numeric_suffixes() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, family_offset, mfomt, jp) in [
         ("MARY_FOMT_US", 0, false, false),
         ("MARY_FOMT_JP", 0, false, true),
@@ -38271,8 +36664,8 @@ fn harvest_sprite_hiring_texts_encode_task_and_duration_without_numeric_suffixes
 
 #[test]
 fn harvest_sprite_minigame_feedback_preserves_task_and_physical_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
-    let constant_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let source = common::symbols_source();
+    let constant_source = common::constants_source();
     for (target, family_offset, mfomt, jp) in [
         ("MARY_FOMT_US", 0, false, false),
         ("MARY_FOMT_JP", 0, false, true),
@@ -38514,7 +36907,7 @@ fn harvest_sprite_minigame_feedback_preserves_task_and_physical_reuse() {
 
 #[test]
 fn shooting_star_wish_event_preserves_shared_choices_and_target_slots() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "PlayerMakesWishUponShootingStars",
         "WishForHealthyAnimals",
@@ -38558,7 +36951,7 @@ fn shooting_star_wish_event_preserves_shared_choices_and_target_slots() {
 
 #[test]
 fn pedometer_and_shipping_milestones_preserve_complete_order_and_ring_difference() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let pedometer_steps = [
         "10000",
         "100000",
@@ -38626,7 +37019,7 @@ fn pedometer_and_shipping_milestones_preserve_complete_order_and_ring_difference
 
 #[test]
 fn mine_achievement_sequence_and_adjacent_empty_slots_stay_physical() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let achievements = [
         "SpringMine_ReachedB100",
         "SpringMine_ReachedB200",
@@ -38670,7 +37063,7 @@ fn mine_achievement_sequence_and_adjacent_empty_slots_stay_physical() {
 
 #[test]
 fn hidden_candidate_proposals_preserve_gender_split_and_dialogue_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -38747,7 +37140,7 @@ fn hidden_candidate_proposals_preserve_gender_split_and_dialogue_roles() {
 
 #[test]
 fn mfomt_hidden_candidate_weddings_preserve_speakers_nicknames_and_kappa_topology() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -38834,7 +37227,7 @@ fn mfomt_hidden_candidate_weddings_preserve_speakers_nicknames_and_kappa_topolog
 
 #[test]
 fn mfomt_hidden_spouse_childbirth_texts_follow_actual_speakers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -38909,7 +37302,7 @@ fn mfomt_hidden_spouse_childbirth_texts_follow_actual_speakers() {
 
 #[test]
 fn child_first_steps_callbacks_identify_their_bound_speaker() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     assert!(!source.contains("ChildFirstStepsDaDa"));
     assert!(!source.contains("ChildFirstStepsMama"));
 
@@ -38995,7 +37388,7 @@ fn child_first_steps_callbacks_identify_their_bound_speaker() {
 
 #[test]
 fn mfomt_hidden_spouse_first_steps_preserve_speakers_and_delegated_callbacks() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let symbols = parse_text_name_table(&source, &options).unwrap();
@@ -39070,7 +37463,7 @@ fn mfomt_hidden_spouse_first_steps_preserve_speakers_and_delegated_callbacks() {
 
 #[test]
 fn mfomt_hidden_spouse_child_injury_preserves_choice_consequences_and_speakers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let common_roles = [
         "ChildCriesAfterFall",
         "ChoiceAssumeChildIsFine",
@@ -39127,8 +37520,8 @@ fn mfomt_hidden_spouse_child_injury_preserves_choice_consequences_and_speakers()
 
 #[test]
 fn mfomt_opening_attack_loop_restores_private_tool_and_boolean_domains() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&constants_source, &options).unwrap();
@@ -39170,7 +37563,7 @@ fn mfomt_opening_attack_loop_restores_private_tool_and_boolean_domains() {
 
 #[test]
 fn mfomt_storm_power_outage_names_weather_trigger_and_non_spouse_fallback() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "PlayerGoesToBed",
         "RickReactsToBlackout",
@@ -39217,13 +37610,15 @@ fn mfomt_storm_power_outage_names_weather_trigger_and_non_spouse_fallback() {
 
 #[test]
 fn mfomt_gourmet_monthly_meals_are_family_events_with_food_icon_locals() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&constants_source, &options).unwrap();
         let symbols = parse_text_name_table(&symbols_source, &options).unwrap();
-        let food_type = constants.constant_value_type("FOOD_CURRY_POWDER").unwrap();
+        let food_type = constants
+            .constant_value_type("ITEM_FOOD_CURRY_POWDER")
+            .unwrap();
         for (slot, meal) in [(921, "Lunch"), (922, "Dinner")] {
             let event = format!("FamilyEvent_Gourmet_Monthly{meal}Visit");
             assert_eq!(
@@ -39260,7 +37655,7 @@ fn mfomt_gourmet_monthly_meals_are_family_events_with_food_icon_locals() {
 
 #[test]
 fn mfomt_zero_affection_dog_illness_texts_follow_speakers_and_diagnosis() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "PlayerDiscoversDogIllnessWithDoctorSpouse",
         "DoctorSpouseRequestsTakingDogToClinic",
@@ -39299,7 +37694,7 @@ fn mfomt_zero_affection_dog_illness_texts_follow_speakers_and_diagnosis() {
 
 #[test]
 fn mfomt_big_bed_sleepover_is_an_unsuccessful_attempt_with_named_speakers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "KnockAtDoor",
         "PopuriGreetsPlayer",
@@ -39355,7 +37750,7 @@ fn mfomt_big_bed_sleepover_is_an_unsuccessful_attempt_with_named_speakers() {
 
 #[test]
 fn mfomt_village_girls_cooking_invitation_texts_follow_speakers_and_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "GirlsKnockAtFarmhouseDoor",
         "PopuriRequestsPlayerCookForGroup",
@@ -39414,8 +37809,8 @@ fn mfomt_village_girls_cooking_invitation_texts_follow_speakers_and_branches() {
 
 #[test]
 fn mfomt_village_girls_cooking_orders_keep_character_specific_dish_domains() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     let cases = [
         (
             926,
@@ -39507,8 +37902,8 @@ fn mfomt_village_girls_cooking_orders_keep_character_specific_dish_domains() {
 
 #[test]
 fn mfomt_won_first_love_event_is_the_purple_heart_apple_mixup_secret() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     let roles = [
         "WonAdmitsMixingAppleVarieties",
         "WonDismissesMixupBecauseCustomersWillNotKnow",
@@ -39563,8 +37958,8 @@ fn mfomt_won_first_love_event_is_the_purple_heart_apple_mixup_secret() {
 
 #[test]
 fn mfomt_won_apple_shuffle_is_a_minigame_with_complete_transformation_domain() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     let transformations = [
         "APPLE_SHUFFLE_TRANSFORMATION_KEEP_POSITIONS",
         "APPLE_SHUFFLE_TRANSFORMATION_SWAP_CENTER_RIGHT",
@@ -39638,8 +38033,8 @@ fn mfomt_won_apple_shuffle_is_a_minigame_with_complete_transformation_domain() {
 
 #[test]
 fn mfomt_won_lottery_exposes_all_three_digit_lock_stages() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     let stages = [
         "WON_LOTTERY_DRAW_STAGE_ALL_DIGITS_SPINNING",
         "WON_LOTTERY_DRAW_STAGE_FIRST_DIGIT_LOCKED",
@@ -39682,8 +38077,8 @@ fn mfomt_won_lottery_exposes_all_three_digit_lock_stages() {
 
 #[test]
 fn mfomt_won_item_selling_uses_seasonal_and_weekday_price_schedules() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let constants_source = common::constants_source();
+    let symbols_source = common::symbols_source();
     let schedules = [
         (0, "WON_SELLING_PRICE_SCHEDULE_NONE"),
         (1, "WON_SELLING_PRICE_SCHEDULE_SPRING_PRODUCT"),
@@ -39740,8 +38135,8 @@ fn mfomt_won_item_selling_uses_seasonal_and_weekday_price_schedules() {
 
 #[test]
 fn romance_love_values_recover_all_seven_heart_colour_boundaries() {
-    let constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
-    let callables_source = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    let constants_source = common::constants_source();
+    let callables_source = common::callables_source();
     let boundaries = [
         (0, "LOVE_HEART_BLACK_MIN"),
         (10000, "LOVE_HEART_PURPLE_MIN"),
@@ -39811,7 +38206,7 @@ fn romance_love_values_recover_all_seven_heart_colour_boundaries() {
 
 #[test]
 fn rick_and_karen_rival_event_texts_share_speaker_and_story_roles() {
-    let symbols_source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let symbols_source = common::symbols_source();
     let stages = [
         (
             0,
@@ -39902,7 +38297,7 @@ fn rick_and_karen_rival_event_texts_share_speaker_and_story_roles() {
 
 #[test]
 fn rick_and_karen_wedding_group_keeps_shared_event_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let shared_slots = [
         (2, "Wedding_AttendanceChoice"),
         (3, "Wedding_FollowupRickDialogue"),
@@ -39985,7 +38380,7 @@ fn rick_and_karen_wedding_group_keeps_shared_event_roles() {
 
 #[test]
 fn popuri_and_kai_black_rival_event_is_named_for_lillias_meal_offer() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_PopuriAndKai_01_BlackHeart_CookingForLillia";
     let text_base = "gText_RivalEvent_PopuriAndKai_01_BlackHeart_CookingForLillia";
     let main_roles = [
@@ -40065,7 +38460,7 @@ fn popuri_and_kai_black_rival_event_is_named_for_lillias_meal_offer() {
 
 #[test]
 fn popuri_and_kai_blue_rival_event_is_named_for_ricks_interference() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_PopuriAndKai_02_BlueHeart_RicksConfrontation";
     let text_base = "gText_RivalEvent_PopuriAndKai_02_BlueHeart_RicksConfrontation";
     let roles = [
@@ -40134,7 +38529,7 @@ fn popuri_and_kai_blue_rival_event_is_named_for_ricks_interference() {
 
 #[test]
 fn popuri_and_kai_green_rival_event_is_named_for_family_and_freedom_conflict() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_PopuriAndKai_03_GreenHeart_FamilyDepartureConflict";
     let text_base = "gText_RivalEvent_PopuriAndKai_03_GreenHeart_FamilyDepartureConflict";
     let roles = [
@@ -40214,7 +38609,7 @@ fn popuri_and_kai_green_rival_event_is_named_for_family_and_freedom_conflict() {
 
 #[test]
 fn popuri_and_kai_orange_rival_event_preserves_shared_us_text_and_split_jp_reactions() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval";
     let text_base = "gText_RivalEvent_PopuriAndKai_04_OrangeHeart_LilliasApproval";
 
@@ -40288,7 +38683,7 @@ fn popuri_and_kai_orange_rival_event_preserves_shared_us_text_and_split_jp_react
 
 #[test]
 fn popuri_and_kai_wedding_group_keeps_shared_ceremony_roles_and_fomt_us_lillia_error() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "gText_RivalMarriageEvent_PopuriAndKai_05_";
     for (target, first_slot, fomt_us) in [
         ("MARY_FOMT_US", 898, true),
@@ -40375,7 +38770,7 @@ fn popuri_and_kai_wedding_group_keeps_shared_ceremony_roles_and_fomt_us_lillia_e
 
 #[test]
 fn ann_and_cliff_black_rival_event_is_named_for_anns_offer_of_help() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer";
     let text_base = "gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer";
     let roles = [
@@ -40442,7 +38837,7 @@ fn ann_and_cliff_black_rival_event_is_named_for_anns_offer_of_help() {
 
 #[test]
 fn ann_and_cliff_blue_rival_event_is_named_for_carters_friendship_request() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_AnnAndCliff_02_BlueHeart_ChurchFriendshipRequest";
     let text_base = "gText_RivalEvent_AnnAndCliff_02_BlueHeart_ChurchFriendshipRequest";
     let roles = [
@@ -40512,7 +38907,7 @@ fn ann_and_cliff_blue_rival_event_is_named_for_carters_friendship_request() {
 
 #[test]
 fn ann_and_cliff_green_rival_event_is_named_for_cliff_moving_into_the_inn() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_AnnAndCliff_03_GreenHeart_InnResidencyInvitation";
     let text_base = "gText_RivalEvent_AnnAndCliff_03_GreenHeart_InnResidencyInvitation";
     let roles = [
@@ -40572,7 +38967,7 @@ fn ann_and_cliff_green_rival_event_is_named_for_cliff_moving_into_the_inn() {
 
 #[test]
 fn ann_and_cliff_orange_rival_event_is_named_for_dukes_proposal_advice() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_AnnAndCliff_04_OrangeHeart_WineryProposalAdvice";
     let text_base = "gText_RivalEvent_AnnAndCliff_04_OrangeHeart_WineryProposalAdvice";
     let roles = [
@@ -40634,7 +39029,7 @@ fn ann_and_cliff_orange_rival_event_is_named_for_dukes_proposal_advice() {
 
 #[test]
 fn ann_and_cliff_wedding_group_keeps_shared_ceremony_and_followup_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let script_base = "EventScript_RivalMarriageEvent_AnnAndCliff_05_";
     let text_base = "gText_RivalMarriageEvent_AnnAndCliff_05_";
     let script_roles = [
@@ -40776,7 +39171,7 @@ fn ann_and_cliff_wedding_group_keeps_shared_ceremony_and_followup_roles() {
 
 #[test]
 fn mary_and_gray_black_rival_event_names_bandaging_roles_and_mfomt_us_localization_error() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_MaryAndGray_01_BlackHeart_BlacksmithHandInjury";
     let text_base = "gText_RivalEvent_MaryAndGray_01_BlackHeart_BlacksmithHandInjury";
     let common_roles = [
@@ -40867,7 +39262,7 @@ fn mary_and_gray_black_rival_event_names_bandaging_roles_and_mfomt_us_localizati
 
 #[test]
 fn mary_and_gray_blue_rival_event_is_named_for_marys_novel_offer() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer";
     let text_base = "gText_RivalEvent_MaryAndGray_02_BlueHeart_LibraryNovelOffer";
     let roles = [
@@ -40936,7 +39331,7 @@ fn mary_and_gray_blue_rival_event_is_named_for_marys_novel_offer() {
 
 #[test]
 fn mary_and_gray_green_rival_event_is_named_for_marys_blacksmithing_encouragement() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_MaryAndGray_03_GreenHeart_SummitEncouragement";
     let text_base = "gText_RivalEvent_MaryAndGray_03_GreenHeart_SummitEncouragement";
     let roles = [
@@ -40995,7 +39390,7 @@ fn mary_and_gray_green_rival_event_is_named_for_marys_blacksmithing_encouragemen
 
 #[test]
 fn mary_and_gray_orange_rival_event_stops_short_of_unspoken_proposal_semantics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_MaryAndGray_04_OrangeHeart_BlacksmithSkillTestPromise";
     let text_base = "gText_RivalEvent_MaryAndGray_04_OrangeHeart_BlacksmithSkillTestPromise";
     let roles = [
@@ -41069,7 +39464,7 @@ fn mary_and_gray_orange_rival_event_stops_short_of_unspoken_proposal_semantics()
 
 #[test]
 fn mary_and_gray_wedding_group_keeps_shared_ceremony_and_eight_slot_topology() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let script_base = "EventScript_RivalMarriageEvent_MaryAndGray_05_";
     let text_base = "gText_RivalMarriageEvent_MaryAndGray_05_";
     let scripts = [
@@ -41212,7 +39607,7 @@ fn mary_and_gray_wedding_group_keeps_shared_ceremony_and_eight_slot_topology() {
 
 #[test]
 fn elli_and_doctor_black_rival_event_is_named_for_ellis_mistaken_personal_concern() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_ElliAndDoctor_01_BlackHeart_ClinicMisunderstanding";
     let text_base = "gText_RivalEvent_ElliAndDoctor_01_BlackHeart_ClinicMisunderstanding";
     let roles = [
@@ -41282,7 +39677,7 @@ fn elli_and_doctor_black_rival_event_is_named_for_ellis_mistaken_personal_concer
 
 #[test]
 fn elli_and_doctor_blue_rival_event_is_named_for_doctors_visit_to_ellen() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall";
     let text_base = "gText_RivalEvent_ElliAndDoctor_02_BlueHeart_EllensHouseCall";
     let shared_roles = [
@@ -41360,7 +39755,7 @@ fn elli_and_doctor_blue_rival_event_is_named_for_doctors_visit_to_ellen() {
 
 #[test]
 fn elli_and_doctor_green_rival_event_preserves_the_us_mother_and_jp_wife_difference() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll";
     let text_base = "gText_RivalEvent_ElliAndDoctor_03_GreenHeart_DoctorFallsIll";
     for (target, first_slot, comparison_role) in [
@@ -41436,7 +39831,7 @@ fn elli_and_doctor_green_rival_event_preserves_the_us_mother_and_jp_wife_differe
 
 #[test]
 fn elli_and_doctor_orange_rival_event_is_named_for_doctors_love_confession() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalEvent_ElliAndDoctor_04_OrangeHeart_MineralBeachConfession";
     let text_base = "gText_RivalEvent_ElliAndDoctor_04_OrangeHeart_MineralBeachConfession";
     let roles = [
@@ -41508,7 +39903,7 @@ fn elli_and_doctor_orange_rival_event_is_named_for_doctors_love_confession() {
 
 #[test]
 fn elli_and_doctor_wedding_group_keeps_shared_ceremony_and_eight_slot_topology() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "EventScript_RivalMarriageEvent_ElliAndDoctor_05_";
     let text_base = "gText_RivalMarriageEvent_ElliAndDoctor_05_";
     for (target, first_slot) in [
@@ -41622,7 +40017,7 @@ fn elli_and_doctor_wedding_group_keeps_shared_ceremony_and_eight_slot_topology()
 
 #[test]
 fn zack_daily_shipping_pickup_names_the_empty_bin_advice_cycle_by_purpose() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let base = "gText_FarmEvent_Zack_DailyShippingPickup_";
     let roles = [
         "ZackCollectsTodaysShipment",
@@ -41680,7 +40075,7 @@ fn zack_daily_shipping_pickup_names_the_empty_bin_advice_cycle_by_purpose() {
 
 #[test]
 fn zack_empty_shipping_bin_advice_has_a_complete_typed_eight_value_cycle() {
-    let source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let source = common::constants_source();
     assert!(source.contains(
         "mary_var_type(VAR_ZACK_EMPTY_SHIPPING_BIN_ADVICE_CYCLE, MaryZackEmptyShippingBinAdvice);"
     ));
@@ -41721,7 +40116,7 @@ fn zack_empty_shipping_bin_advice_has_a_complete_typed_eight_value_cycle() {
 
 #[test]
 fn rick_base_dialogue_names_introduction_birthday_and_karen_progress_by_role() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let fomt_first_roles = [
         "RickIntroducesHimselfAndFamilyToNewFarmer",
@@ -41813,7 +40208,7 @@ fn rick_base_dialogue_names_introduction_birthday_and_karen_progress_by_role() {
 
 #[test]
 fn rick_mfomt_spouse_pregnancy_and_child_dialogue_names_follow_control_flow_stages() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let staged_roles = [
         "PlayerSpousePregnancyStage01FirstConversation",
@@ -41864,7 +40259,7 @@ fn rick_mfomt_spouse_pregnancy_and_child_dialogue_names_follow_control_flow_stag
 
 #[test]
 fn rick_mfomt_farmhouse_spouse_dialogue_names_follow_heart_time_and_repeat_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_PlayerSpouseFarmhouse";
     let staged_roles = [
         "BelowGreenHeartFirstConversation",
@@ -41918,7 +40313,7 @@ fn rick_mfomt_farmhouse_spouse_dialogue_names_follow_heart_time_and_repeat_branc
 
 #[test]
 fn rick_mfomt_away_from_farmhouse_spouse_dialogue_names_follow_location_and_heart() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let roles = [
         "PlayerSpouseSouthSideTownBelowGreenHeartFirstConversation",
@@ -41961,7 +40356,7 @@ fn rick_mfomt_away_from_farmhouse_spouse_dialogue_names_follow_location_and_hear
 
 #[test]
 fn rick_mfomt_proposal_and_starry_night_names_follow_event_side_effects() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let roles = [
         "RickAcceptsBlueFeatherProposalAndAsksToGoToFarmhouse",
@@ -42004,7 +40399,7 @@ fn rick_mfomt_proposal_and_starry_night_names_follow_event_side_effects() {
 
 #[test]
 fn rick_mfomt_unmarried_poultry_farm_dialogue_names_follow_full_heart_sequence() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let roles = [
         "PlayerFianceAwayFromFarmhouseFirstConversation",
@@ -42054,7 +40449,7 @@ fn rick_mfomt_unmarried_poultry_farm_dialogue_names_follow_full_heart_sequence()
 
 #[test]
 fn rick_family_and_north_side_dialogue_names_preserve_cross_game_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let common_roles = [
         "RickAndKarenRivalMarriageNorthSideTownSundayFirstConversation",
@@ -42111,7 +40506,7 @@ fn rick_family_and_north_side_dialogue_names_preserve_cross_game_roles() {
 
 #[test]
 fn rick_popuri_and_kai_dialogue_names_follow_rival_and_marriage_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let roles = [
         "RickOpposesKaiAfterPopuriAndKaiRivalEvent02FirstConversation",
@@ -42166,7 +40561,7 @@ fn rick_popuri_and_kai_dialogue_names_follow_rival_and_marriage_state() {
 
 #[test]
 fn rick_location_weather_and_spouse_dialogue_names_preserve_real_role_alignment() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Rick_DialogueAndGiftResponses_";
     let common_roles = [
         "RickPoultryFarmHouse2FBadWeatherFirstConversation",
@@ -42227,7 +40622,7 @@ fn rick_location_weather_and_spouse_dialogue_names_preserve_real_role_alignment(
 
 #[test]
 fn popuri_fomt_proposal_starry_night_and_pregnancy_names_follow_event_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let roles = [
         "PopuriAcceptsBlueFeatherProposalAndAsksToGoToFarmhouse",
@@ -42276,7 +40671,7 @@ fn popuri_fomt_proposal_starry_night_and_pregnancy_names_follow_event_control_fl
 
 #[test]
 fn popuri_fomt_farmhouse_spouse_dialogue_names_follow_heart_time_and_repeat_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpouseFarmhouse";
     let mut staged_roles = vec![
         "gText_NPCEvent_Popuri_DialogueAndGiftResponses_PlayerSpouseBelowGreenHeartFirstConversationAngrySilence".to_owned(),
@@ -42334,7 +40729,7 @@ fn popuri_fomt_farmhouse_spouse_dialogue_names_follow_heart_time_and_repeat_bran
 
 #[test]
 fn popuri_fomt_poultry_farm_spouse_names_preserve_region_specific_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let shared_first = format!("{prefix}PlayerSpouseBelowGreenHeartFirstConversationAngrySilence");
     let common_tail = [
@@ -42395,7 +40790,7 @@ fn popuri_fomt_poultry_farm_spouse_names_preserve_region_specific_text_reuse() {
 
 #[test]
 fn popuri_fomt_rival_spouse_poultry_farm_names_follow_day_weather_and_friendship() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_RivalSpousePoultryFarm";
     let staged_roles = [
         "SundayFirstConversation",
@@ -42444,7 +40839,7 @@ fn popuri_fomt_rival_spouse_poultry_farm_names_follow_day_weather_and_friendship
 
 #[test]
 fn popuri_fomt_player_married_other_candidate_names_preserve_jp_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let shared_low = format!("{prefix}PoultryFarmSharedGeneralGreetingFirstConversation");
     let shared_high = format!("{prefix}PoultryFarmSharedFarmProgressFirstConversation");
@@ -42483,7 +40878,7 @@ fn popuri_fomt_player_married_other_candidate_names_preserve_jp_text_reuse() {
 
 #[test]
 fn popuri_fomt_fiancee_and_unmarried_names_follow_proposal_and_heart_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let staged_roles = [
         "FianceeFirstConversationBeforeWedding",
@@ -42525,7 +40920,7 @@ fn popuri_fomt_fiancee_and_unmarried_names_follow_proposal_and_heart_state() {
 
 #[test]
 fn popuri_fomt_location_names_follow_map_and_rival_marriage_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let location_roles = [
         "PoultryFarmBedroomFirstConversation",
@@ -42560,7 +40955,7 @@ fn popuri_fomt_location_names_follow_map_and_rival_marriage_branches() {
 
 #[test]
 fn character_birthday_callable_and_popuri_birthday_texts_use_actual_semantics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     for target in [
         "MARY_FOMT_US",
@@ -42569,17 +40964,10 @@ fn character_birthday_callable_and_popuri_birthday_texts_use_actual_semantics() 
         "MARY_MFOMT_JP",
     ] {
         let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(
-            &fs::read_to_string("goodies/mary_constants.mary.h").unwrap(),
-            &options,
-        )
-        .unwrap();
-        let callables = parse_callable_table_with_scope(
-            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
-            &options,
-            &constants,
-        )
-        .unwrap();
+        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
+        let callables =
+            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
+                .unwrap();
         let expected_id = if target.contains("MFOMT") {
             0x07E
         } else {
@@ -42593,9 +40981,7 @@ fn character_birthday_callable_and_popuri_birthday_texts_use_actual_semantics() 
             "{target}"
         );
     }
-    assert!(!fs::read_to_string("goodies/mary_callables.mary.h")
-        .unwrap()
-        .contains("IsCharacterAtPlayerLocation"));
+    assert!(!common::callables_source().contains("IsCharacterAtPlayerLocation"));
 
     for role in [
         "PopuriIntroducesHerselfToPlayer",
@@ -42611,7 +40997,7 @@ fn character_birthday_callable_and_popuri_birthday_texts_use_actual_semantics() 
 
 #[test]
 fn popuri_mfomt_birthday_and_rival_spouse_roles_align_with_fomt_semantics() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let roles = [
         "PopuriIntroducesHerselfToPlayer",
@@ -42658,7 +41044,7 @@ fn popuri_mfomt_birthday_and_rival_spouse_roles_align_with_fomt_semantics() {
 
 #[test]
 fn popuri_mfomt_unmarried_and_location_names_follow_friendship_and_map_branches() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let roles = [
         "UnmarriedPoultryFarmFriendship000To099FirstConversation",
@@ -42705,7 +41091,7 @@ fn popuri_mfomt_unmarried_and_location_names_follow_friendship_and_map_branches(
 
 #[test]
 fn popuri_mfomt_starry_night_rick_family_and_other_spouse_roles_follow_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Popuri_DialogueAndGiftResponses_";
     let common_roles = [
         "PopuriRejectsBlueFeatherAndSuggestsEligibleBachelor",
@@ -42759,7 +41145,7 @@ fn popuri_mfomt_starry_night_rick_family_and_other_spouse_roles_follow_state() {
 
 #[test]
 fn lillia_common_dialogue_roles_follow_gift_link_and_location_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Lillia_DialogueAndGiftResponses_";
     let roles = [
         "Introduction",
@@ -42804,7 +41190,7 @@ fn lillia_common_dialogue_roles_follow_gift_link_and_location_control_flow() {
 
 #[test]
 fn lillia_family_dialogue_roles_preserve_fomt_and_mfomt_spouse_differences() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Lillia_DialogueAndGiftResponses_";
 
     for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
@@ -42859,7 +41245,7 @@ fn lillia_family_dialogue_roles_preserve_fomt_and_mfomt_spouse_differences() {
 
 #[test]
 fn cliff_introduction_birthday_proposal_and_grape_job_roles_follow_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Cliff_DialogueAndGiftResponses_";
     let shared_roles = [
         "IntroductionPart1",
@@ -42920,7 +41306,7 @@ fn cliff_introduction_birthday_proposal_and_grape_job_roles_follow_control_flow(
 
 #[test]
 fn cliff_mfomt_starry_night_pregnancy_and_child_roles_follow_state_order() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Cliff_DialogueAndGiftResponses_";
     let ordered_roles = [
         "InvitesPlayerToStarryNightFestival",
@@ -43032,7 +41418,7 @@ fn cliff_mfomt_starry_night_pregnancy_and_child_roles_follow_state_order() {
 
 #[test]
 fn cliff_mfomt_south_town_roles_expose_the_original_unreachable_threshold_chain() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Cliff_DialogueAndGiftResponses_";
     let common_roles = [
         "SouthTownMorningPregnancyFirstConversation",
@@ -43093,7 +41479,7 @@ fn cliff_mfomt_south_town_roles_expose_the_original_unreachable_threshold_chain(
 
 #[test]
 fn cliff_mfomt_rival_spouse_and_unmarried_roles_preserve_regional_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Cliff_DialogueAndGiftResponses_";
     let common_roles = [
         "RivalSpouseNorthTownFirstConversation",
@@ -43153,7 +41539,7 @@ fn cliff_mfomt_rival_spouse_and_unmarried_roles_preserve_regional_reuse() {
 
 #[test]
 fn cliff_fomt_church_job_and_departure_roles_follow_event_state() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Cliff_DialogueAndGiftResponses_";
     let roles = [
         "RivalSpouseChurchFirstConversation",
@@ -43195,7 +41581,7 @@ fn cliff_fomt_church_job_and_departure_roles_follow_event_state() {
 
 #[test]
 fn doctor_introduction_recipe_link_proposal_and_starry_night_roles_follow_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Doctor_DialogueAndGiftResponses_";
     let common_roles = [
         "Introduction",
@@ -43278,7 +41664,7 @@ fn doctor_introduction_recipe_link_proposal_and_starry_night_roles_follow_contro
 
 #[test]
 fn ellen_dialogue_roles_follow_family_and_season_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Ellen_DialogueAndGiftResponses_";
     let roles = [
         "Introduction",
@@ -43339,7 +41725,7 @@ fn ellen_dialogue_roles_follow_family_and_season_control_flow() {
 
 #[test]
 fn harvest_sprite_introductions_and_gamecube_link_dialogues_are_event_scoped() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let sprites = ["Staid", "Timid", "Nappy", "Bold", "Chef", "Aqua", "Hoggy"];
     for (target, first_script_id) in [
         ("MARY_FOMT_US", 999),
@@ -43372,7 +41758,7 @@ fn harvest_sprite_introductions_and_gamecube_link_dialogues_are_event_scoped() {
 
 #[test]
 fn doctor_fomt_clinic_rival_and_location_roles_follow_control_flow() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Doctor_DialogueAndGiftResponses_";
     let ordered_roles = [
         "ElliPlayerSpouseClinicFirstConversation",
@@ -43423,7 +41809,7 @@ fn doctor_fomt_clinic_rival_and_location_roles_follow_control_flow() {
 
 #[test]
 fn doctor_mfomt_pregnancy_and_child_roles_follow_state_order() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let prefix = "gText_NPCEvent_Doctor_DialogueAndGiftResponses_";
     let ordered_roles = [
         "PregnancyStage1FirstConversation",
@@ -43674,7 +42060,7 @@ fn doctor_mfomt_pregnancy_and_child_roles_follow_state_order() {
 
 #[test]
 fn ann_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             655,
@@ -43778,7 +42164,7 @@ fn ann_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
 
 #[test]
 fn elli_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             656,
@@ -43880,7 +42266,7 @@ fn elli_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
 
 #[test]
 fn karen_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             657,
@@ -43983,7 +42369,7 @@ fn karen_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
 
 #[test]
 fn popuri_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             654,
@@ -44086,7 +42472,7 @@ fn popuri_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
 
 #[test]
 fn mary_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             658,
@@ -44189,7 +42575,7 @@ fn mary_family_pregnancy_childbirth_and_child_events_use_speaker_roles() {
 
 #[test]
 fn fomt_spouse_collapse_recovery_texts_use_character_specific_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts = [
         (
             679,
@@ -44241,7 +42627,7 @@ fn fomt_spouse_collapse_recovery_texts_use_character_specific_roles() {
 
 #[test]
 fn festival_entrance_announcements_use_event_roles_on_all_targets() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let festivals = [
         "NewYearsFestivalAnnouncement",
         "SpringHorseRaceAnnouncement",
@@ -44326,7 +42712,7 @@ fn festival_entrance_announcements_use_event_roles_on_all_targets() {
 
 #[test]
 fn fomt_lillia_illness_event_texts_preserve_speaker_and_story_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let main_roles = [
         "LilliaClosesStoreDueToIllness",
         "LilliaSaysChildrenRushedAway",
@@ -44372,7 +42758,7 @@ fn fomt_lillia_illness_event_texts_preserve_speaker_and_story_roles() {
 
 #[test]
 fn fomt_rods_letter_event_texts_preserve_speaker_and_story_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "LilliaGreetsPlayer",
         "RickGreetsPlayer",
@@ -44414,7 +42800,7 @@ fn fomt_rods_letter_event_texts_preserve_speaker_and_story_roles() {
 
 #[test]
 fn fomt_rick_karen_and_popuri_kai_events_use_speaker_story_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts: &[(usize, &str, &[&str])] = &[
         (
             703,
@@ -44515,7 +42901,7 @@ fn fomt_rick_karen_and_popuri_kai_events_use_speaker_story_roles() {
 
 #[test]
 fn fomt_popuri_lillia_birthday_gift_event_uses_speaker_and_choice_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "ZackGreetsPlayer",
         "ZackGreetsPopuri",
@@ -44558,7 +42944,7 @@ fn fomt_popuri_lillia_birthday_gift_event_uses_speaker_and_choice_roles() {
 
 #[test]
 fn fomt_joanna_phone_events_use_speaker_and_family_story_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts: &[(usize, &str, &[&str])] = &[
         (
             710,
@@ -44619,7 +43005,7 @@ fn fomt_joanna_phone_events_use_speaker_and_family_story_roles() {
 
 #[test]
 fn fomt_saibara_ellen_visits_use_speaker_and_relationship_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let scripts: &[(usize, &str, &[&str])] = &[
         (
             712,
@@ -44675,7 +43061,7 @@ fn fomt_saibara_ellen_visits_use_speaker_and_relationship_roles() {
 
 #[test]
 fn fomt_kai_cooks_for_gray_event_uses_speaker_and_meal_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "GraySaysHeIsHungry",
         "KaiOffersDishForTasting",
@@ -44717,7 +43103,7 @@ fn fomt_kai_cooks_for_gray_event_uses_speaker_and_meal_roles() {
 
 #[test]
 fn fomt_duke_grape_harvest_invitation_uses_choice_and_recruitment_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "DukeInvitesPlayerToGrapeHarvest",
         "ChoiceAcceptHelp",
@@ -44743,7 +43129,7 @@ fn fomt_duke_grape_harvest_invitation_uses_choice_and_recruitment_roles() {
 
 #[test]
 fn fomt_duke_manna_missing_juice_argument_uses_speaker_and_conflict_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let roles = [
         "MannaAccusesDukeOfDrinkingWineryStock",
         "DukeDeniesDrinkingStock",
@@ -44785,7 +43171,7 @@ fn fomt_duke_manna_missing_juice_argument_uses_speaker_and_conflict_roles() {
 
 #[test]
 fn high_similarity_dialogue_scripts_keep_verified_mfomt_insertions() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, gotz_id, may_id, thomas_id, mary_gray_id, jeff_id, doctor_id, is_mfomt) in [
         ("MARY_FOMT_US", 1028, 1029, 738, 926, 769, 767, false),
         ("MARY_FOMT_JP", 1028, 1029, 738, 926, 769, 767, false),
@@ -44838,7 +43224,7 @@ fn high_similarity_dialogue_scripts_keep_verified_mfomt_insertions() {
 
 #[test]
 fn family_specific_equal_count_scripts_keep_real_semantic_differences() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, beach_exit_id, beach_dispatch_id, sasha_id, is_mfomt) in [
         ("MARY_FOMT_US", 107, 106, 1009, false),
         ("MARY_FOMT_JP", 107, 106, 1009, false),
@@ -44899,7 +43285,7 @@ fn family_specific_equal_count_scripts_keep_real_semantic_differences() {
 
 #[test]
 fn harvest_sprite_work_dialogue_preserves_family_specific_insertions() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, is_mfomt, is_us) in [
         ("MARY_FOMT_US", false, true),
         ("MARY_FOMT_JP", false, false),
@@ -44987,7 +43373,7 @@ fn harvest_sprite_work_dialogue_preserves_family_specific_insertions() {
 
 #[test]
 fn life_on_the_farm_preserves_mfomt_only_program_headers() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (region, fomt_target, mfomt_target) in [
         ("US", "MARY_FOMT_US", "MARY_MFOMT_US"),
         ("JP", "MARY_FOMT_JP", "MARY_MFOMT_JP"),
@@ -45057,7 +43443,7 @@ fn life_on_the_farm_preserves_mfomt_only_program_headers() {
 
 #[test]
 fn mfomt_tv_program_headers_and_f314_us_preview_slots_keep_physical_scope() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, is_mfomt, is_us) in [
         ("MARY_FOMT_US", false, true),
         ("MARY_FOMT_JP", false, false),
@@ -45142,7 +43528,7 @@ fn mfomt_tv_program_headers_and_f314_us_preview_slots_keep_physical_scope() {
 
 #[test]
 fn entertainment_channel_weather_forecast_preserves_snowstorm_text_reuse() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     for (target, slot, split_snowstorm_texts) in [
         ("MARY_FOMT_US", 1058, false),
         ("MARY_FOMT_JP", 1058, false),
@@ -45184,7 +43570,7 @@ fn entertainment_channel_weather_forecast_preserves_snowstorm_text_reuse() {
 
 #[test]
 fn matching_shop_counters_preserve_family_specific_text_order() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let matching_role_sets = [
         (465, 474),
         (466, 475),
@@ -45223,7 +43609,7 @@ fn matching_shop_counters_preserve_family_specific_text_order() {
 
 #[test]
 fn matching_fomt_mfomt_town_events_share_semantic_text_roles() {
-    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let source = common::symbols_source();
     let matching_slots = [
         (104, 112),
         (150, 158),
