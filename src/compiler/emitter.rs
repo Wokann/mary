@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{AssignOperation, ConstVal, Expr, NameAccess, NameRef, Stmt, SwitchCase},
+    ast::{
+        stmt_sequence_terminates, AssignOperation, ConstVal, Expr, NameAccess, NameRef, Stmt,
+        SwitchCase,
+    },
     const_scope::ConstScope,
     ir::{is_encodable_int, CaseEnum, Ins, IntValue, JumpId, Script, StrValue, VarId},
 };
@@ -580,8 +583,7 @@ impl Emit {
                 for case in cases {
                     match case {
                         SwitchCase::Case(exprs, stmts) => {
-                            let ends_in_exit =
-                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
+                            let ends_in_exit = stmt_sequence_terminates(&stmts);
 
                             for expr in exprs {
                                 match ConstVal::eval_expr(&expr, scope) {
@@ -625,8 +627,7 @@ impl Emit {
                                 self.errors.push(MultipleDefaults);
                             }
 
-                            let ends_in_exit =
-                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
+                            let ends_in_exit = stmt_sequence_terminates(&stmts);
 
                             found_default = true;
                             self.ins(Ins::Case(switch_id, CaseEnum::Default));
@@ -652,8 +653,7 @@ impl Emit {
                                 self.errors.push(MultipleDefaults);
                             }
                             found_default = true;
-                            let ends_in_exit =
-                                matches!(stmts.last(), Some(Stmt::Exit | Stmt::Break));
+                            let ends_in_exit = stmt_sequence_terminates(&stmts);
                             self.block_stmts(scope, stmts);
                             if !ends_in_exit {
                                 self.ins(Ins::Jmp(next_lab));

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use mary::{
     bytecode::{decode_script_with_backing, encode_script},
     charmap::Charmap,
+    const_scope::ConstScope,
     decompiler::decompile_script_with_metadata,
     ir::Ins,
     mary_c::{
@@ -246,6 +247,58 @@ fn native_new_record_audio_slots_exist_only_in_mfomt() {
 }
 
 #[test]
+fn native_sickle_audio_family_uses_one_program_on_all_targets() {
+    const TABLES: [(&str, usize); 4] = [
+        ("rom/fomt.gba", 0x13ABF0),
+        ("rom/fomtjp.gba", 0x13BD34),
+        ("rom/mfomt.gba", 0x144FF4),
+        ("rom/mfomtjp.gba", 0x146A64),
+    ];
+
+    for (path, table_offset) in TABLES {
+        let rom = fs::read(local_rom_path(path)).unwrap();
+        for slot in 111..=117 {
+            let sequence_address = u32::from_le_bytes(
+                rom[table_offset + slot * 8..table_offset + slot * 8 + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            let sequence_offset = (sequence_address - 0x0800_0000) as usize;
+            assert_eq!(rom[sequence_offset], 1, "{path} slot {slot} track count");
+            let track_address = u32::from_le_bytes(
+                rom[sequence_offset + 8..sequence_offset + 12]
+                    .try_into()
+                    .unwrap(),
+            );
+            let track_offset = (track_address - 0x0800_0000) as usize;
+            let program = rom[track_offset..track_offset + 96]
+                .windows(2)
+                .find_map(|bytes| (bytes[0] == 0xBD).then_some(bytes[1]))
+                .unwrap();
+            assert_eq!(program, 0x50, "{path} slot {slot} program");
+        }
+
+        let next_sequence_address = u32::from_le_bytes(
+            rom[table_offset + 118 * 8..table_offset + 118 * 8 + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let next_sequence_offset = (next_sequence_address - 0x0800_0000) as usize;
+        let next_track_address = u32::from_le_bytes(
+            rom[next_sequence_offset + 8..next_sequence_offset + 12]
+                .try_into()
+                .unwrap(),
+        );
+        let next_track_offset = (next_track_address - 0x0800_0000) as usize;
+        let next_program = rom[next_track_offset..next_track_offset + 96]
+            .windows(2)
+            .find_map(|bytes| (bytes[0] == 0xBD).then_some(bytes[1]))
+            .unwrap();
+        assert_eq!(next_program, 0x4B, "{path} slot 118 family boundary");
+    }
+}
+
+#[test]
 fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
     const TABLES: [(&str, usize); 4] = [
         ("rom/fomt.gba", 0x0E9605),
@@ -324,7 +377,7 @@ fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
         ("rom/mfomt.gba", 0x144FF4),
         ("rom/mfomtjp.gba", 0x146A64),
     ];
-    const TRACKS: [(usize, usize, &[u8]); 7] = [
+    const TRACKS: [(usize, usize, &[u8]); 8] = [
         (
             131,
             1,
@@ -382,6 +435,14 @@ fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
             &[
                 0xBC, 0x00, 0xBB, 0x4B, 0xBD, 0x71, 0xBE, 0x7F, 0xC0, 0x40, 0xE1, 0x3C, 0x7F, 0x86,
                 0x86, 0x86, 0xB1, 0x00, 0x00, 0x00,
+            ],
+        ),
+        (
+            198,
+            1,
+            &[
+                0xBC, 0x00, 0xBB, 0x4B, 0xBD, 0x62, 0xBE, 0x5A, 0xC0, 0x40, 0xF3, 0x3C, 0x7F, 0xA4,
+                0x82, 0xB1,
             ],
         ),
     ];
@@ -486,6 +547,137 @@ fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
             &wave_data,
             "{path} direct PCM wave data differs"
         );
+    }
+}
+
+#[test]
+fn native_audio_198_is_the_b_button_menu_cancel_cue_on_all_targets() {
+    for (case, (start, call_sites)) in CASES.iter().zip([
+        (0x8B6Cusize, [0x4770usize, 0x47A4]),
+        (0x8BD4, [0x4784, 0x47B8]),
+        (0x8B74, [0x4788, 0x47BC]),
+        (0x8B88, [0x479C, 0x47D0]),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        let direct_starts = (0..0xD0000usize - 6)
+            .step_by(2)
+            .filter(|&offset| {
+                rom[offset] == 0xC6
+                    && (0x20..=0x27).contains(&rom[offset + 1])
+                    && (u16::from_le_bytes(rom[offset + 2..offset + 4].try_into().unwrap())
+                        & 0xF800)
+                        == 0xF000
+                    && (u16::from_le_bytes(rom[offset + 4..offset + 6].try_into().unwrap())
+                        & 0xF800)
+                        == 0xF800
+                    && thumb_call_target(&rom, offset + 2) == start
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            direct_starts.len(),
+            11,
+            "{} direct native menu-cancel starts",
+            case.name
+        );
+        for call_site in call_sites {
+            assert_eq!(
+                &rom[call_site - 4..call_site],
+                &[0x30, 0x1C, 0x18, 0x30],
+                "{} menu audio-player address",
+                case.name
+            );
+            assert_eq!(
+                &rom[call_site..call_site + 2],
+                &[0xC6, 0x21],
+                "{} menu cancel sequence ID",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, call_site + 2),
+                start,
+                "{} menu cancel audio start",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_audio_168_is_the_horse_race_neigh_on_all_targets() {
+    for (case, (start, call_sites)) in CASES.iter().zip([
+        (0x8B6Cusize, [0x5CD3Ausize, 0x5CE0C]),
+        (0x8BD4, [0x5FABA, 0x5FB8C]),
+        (0x8B74, [0x5CA82, 0x5CB54]),
+        (0x8B88, [0x5F736, 0x5F808]),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for call_site in call_sites {
+            assert_eq!(
+                &rom[call_site..call_site + 2],
+                &[0xA8, 0x21],
+                "{} horse-race neigh sequence ID",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, call_site + 2),
+                start,
+                "{} horse-race neigh audio start",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
+fn native_audio_187_is_the_shared_minigame_time_up_cue_on_all_targets() {
+    for (case, (start, call_sites)) in CASES.iter().zip([
+        (
+            0x8B6Cusize,
+            [
+                0x52E1Eusize,
+                0xB090C,
+                0xB1D56,
+                0xBE934,
+                0xBF310,
+                0xC3AF0,
+                0xC56BA,
+                0xC7A8A,
+            ],
+        ),
+        (
+            0x8BD4,
+            [
+                0x553D6, 0xB5B58, 0xB6F86, 0xC486C, 0xC522C, 0xC9A04, 0xCB5B2, 0xCD982,
+            ],
+        ),
+        (
+            0x8B74,
+            [
+                0x52BAE, 0xB0350, 0xB178A, 0xBE370, 0xBED3C, 0xC3524, 0xC50DE, 0xC74AE,
+            ],
+        ),
+        (
+            0x8B88,
+            [
+                0x5509A, 0xB55A4, 0xB69DE, 0xC42CC, 0xC4C98, 0xC9478, 0xCB032, 0xCD402,
+            ],
+        ),
+    ]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for call_site in call_sites {
+            assert_eq!(
+                &rom[call_site..call_site + 2],
+                &[0xBB, 0x21],
+                "{} minigame time-up sequence ID",
+                case.name
+            );
+            assert_eq!(
+                thumb_call_target(&rom, call_site + 2),
+                start,
+                "{} minigame time-up audio start",
+                case.name
+            );
+        }
     }
 }
 
@@ -1245,6 +1437,11 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|error| format!("{} script {id} decompile: {error}", case.name))?;
         let source = format_named_script_with_charmap(&name, &ast, &charmap)
             .map_err(|error| format!("{} script {id} format: {error}", case.name))?;
+        assert!(
+            !source.contains("ENTITY_EMOTE_08"),
+            "{} script {id} uses unverified entity-emote ID 8",
+            case.name
+        );
         if name == "EventScript_SystemEvent_OneHundredQuestionQuiz" {
             assert!(
                 source.contains("switch (RandomIntInclusive(1, 255))"),
@@ -1565,47 +1762,473 @@ fn verify(case: &RomCase) -> Result<(), Box<dyn std::error::Error>> {
         "{} did not render any CallScript target as a script symbol",
         case.name
     );
-    let expected_numbered_audio = if case.target.contains("MFOMT") {
-        HashSet::from([
-            "AUDIO_SEQUENCE_144".to_owned(),
-            "AUDIO_SEQUENCE_170".to_owned(),
-        ])
-    } else {
-        HashSet::new()
-    };
+    let expected_numbered_audio = HashSet::new();
     assert_eq!(
         numbered_audio_sequences, expected_numbered_audio,
         "{} numbered audio inventory changed and needs semantic review",
         case.name
     );
-    let expected_numbered_audio_usage = if case.target.contains("MFOMT") {
-        HashMap::from([
-            (
-                "AUDIO_SEQUENCE_144".to_owned(),
-                HashMap::from([(
-                    "EventScript_WeatherEvent_TyphoonOrSnowstormFarmhousePowerOutage".to_owned(),
-                    4,
-                )]),
-            ),
-            (
-                "AUDIO_SEQUENCE_170".to_owned(),
-                HashMap::from([(
-                    "EventScript_FestivalEvent_NewYearsEve_BadDreams".to_owned(),
-                    1,
-                )]),
-            ),
-        ])
-    } else {
-        HashMap::new()
-    };
+    let expected_numbered_audio_usage = HashMap::new();
     assert_eq!(
         numbered_audio_usage, expected_numbered_audio_usage,
         "{} numbered audio call sites changed and need renewed semantic review",
         case.name
     );
+    assert_generated_output_invariants(case, &outputs, &callables.scope);
     publish_verified_outputs(case.name, &outputs)?;
     println!("{} Mary-C strict round-trip: {verified} scripts", case.name);
     Ok(())
+}
+
+fn assert_generated_output_invariants(
+    case: &RomCase,
+    outputs: &[(String, String)],
+    scope: &ConstScope,
+) {
+    const NUMBERED_DOMAIN_PREFIXES: [&str; 9] = [
+        "MAP_",
+        "CHARACTER_",
+        "TALK_PORTRAIT_",
+        "ENTITY_",
+        "ANIMATION_",
+        "ANIMATION_ID_",
+        "FOOD_",
+        "ARTICLE_",
+        "TOOL_",
+    ];
+    const SEMANTIC_VARIABLE_SUFFIXES: [&str; 9] = [
+        "STATE",
+        "RESULT",
+        "STATUS",
+        "PHASE",
+        "TYPE",
+        "KIND",
+        "MODE",
+        "CHOICE",
+        "SELECTION",
+    ];
+
+    fn starts_with_integer(source: &str) -> bool {
+        let source = source.trim_start();
+        let source = source.strip_prefix('-').unwrap_or(source);
+        source.as_bytes().first().is_some_and(u8::is_ascii_digit)
+    }
+
+    fn parse_integer_prefix(source: &str) -> Option<i64> {
+        let source = source.trim_start();
+        let (negative, source) = source
+            .strip_prefix('-')
+            .map_or((false, source), |source| (true, source));
+        let (radix, digits) = source
+            .strip_prefix("0x")
+            .or_else(|| source.strip_prefix("0X"))
+            .map_or((10, source), |source| (16, source));
+        let length = digits
+            .bytes()
+            .take_while(|byte| match radix {
+                16 => byte.is_ascii_hexdigit(),
+                _ => byte.is_ascii_digit(),
+            })
+            .count();
+        if length == 0 {
+            return None;
+        }
+        let value = i64::from_str_radix(&digits[..length], radix).ok()?;
+        Some(if negative { -value } else { value })
+    }
+
+    fn matching_parenthesis(source: &str, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        let mut string = false;
+        let mut escaped = false;
+        for (offset, byte) in source.as_bytes()[open..].iter().copied().enumerate() {
+            if string {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    string = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => string = true,
+                b'(' => depth += 1,
+                b')' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(open + offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    let scripts = outputs
+        .iter()
+        .filter(|(filename, _)| filename.ends_with(".mary.c"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scripts.len(),
+        case.slots,
+        "{} generated slot files",
+        case.name
+    );
+
+    let generic_guard_ids: &[i64] = if case.target.contains("MFOMT") {
+        &[
+            232, 233, 244, 245, 250, 284, 324, 325, 327, 328, 343, 344, 352, 411, 412, 413, 415,
+        ]
+    } else {
+        &[
+            224, 225, 236, 237, 242, 276, 316, 317, 319, 320, 334, 335, 336, 344, 381, 382, 383,
+            385, 449,
+        ]
+    };
+    let expected_guard_files = if case.target.contains("MFOMT") {
+        28
+    } else {
+        27
+    };
+    let expected_exceptions: HashMap<&str, Vec<i64>> = if case.target.contains("MFOMT") {
+        HashMap::from([(
+            "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+            vec![467],
+        )])
+    } else {
+        HashMap::from([(
+            "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+            vec![423, 449],
+        )])
+    };
+    let expected_writers: Vec<i64> = if case.target.contains("MFOMT") {
+        vec![467]
+    } else {
+        vec![423, 449]
+    };
+
+    let mut guard_files = 0usize;
+    let mut exceptions = HashMap::<String, Vec<i64>>::new();
+    let mut writers = Vec::<(String, String, i64)>::new();
+    let mut event_context_callers = Vec::<String>::new();
+    let mut staff_credit_callers = Vec::<String>::new();
+
+    for (filename, source) in scripts {
+        assert!(
+            !source.contains("ANIMATION_ID_"),
+            "{} {filename} emits a numbered animation placeholder",
+            case.name
+        );
+
+        for token in
+            source.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        {
+            let numbered_domain = NUMBERED_DOMAIN_PREFIXES.iter().any(|prefix| {
+                token.strip_prefix(prefix).is_some_and(|suffix| {
+                    !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            });
+            assert!(
+                !numbered_domain,
+                "{} {filename} regressed to numbered game-domain symbol {token}",
+                case.name
+            );
+            if token.contains("UNKNOWN") || token.contains("Unknown") {
+                assert!(
+                    token.starts_with("VAR_UNKNOWN_SLOT_"),
+                    "{} {filename} contains unaudited unknown symbol {token}",
+                    case.name
+                );
+            }
+        }
+
+        for line in source.lines() {
+            for call in ["VarGet(VAR_", "VarSet(VAR_"] {
+                let mut remainder = line;
+                while let Some(start) = remainder.find(call) {
+                    remainder = &remainder[start + call.len()..];
+                    let Some(name_end) = remainder.find(|character: char| {
+                        !character.is_ascii_alphanumeric() && character != '_'
+                    }) else {
+                        break;
+                    };
+                    let name = &remainder[..name_end];
+                    remainder = &remainder[name_end..];
+                    if !SEMANTIC_VARIABLE_SUFFIXES
+                        .iter()
+                        .any(|suffix| name.ends_with(suffix))
+                    {
+                        continue;
+                    }
+                    let numeric_value = if call.starts_with("VarGet") {
+                        remainder
+                            .strip_prefix(')')
+                            .map(str::trim_start)
+                            .and_then(|tail| {
+                                ["==", "!=", "<=", ">=", "<", ">"]
+                                    .into_iter()
+                                    .find_map(|operator| tail.strip_prefix(operator))
+                            })
+                            .is_some_and(starts_with_integer)
+                    } else {
+                        remainder.strip_prefix(',').is_some_and(starts_with_integer)
+                    };
+                    assert!(
+                        !numeric_value,
+                        "{} {filename} lost the symbolic value domain for VAR_{name}: {line}",
+                        case.name
+                    );
+                }
+            }
+        }
+
+        for (line_number, line) in source.lines().enumerate() {
+            for (name, (_, shape)) in scope.callable_map() {
+                let mary::ir::ValueType::UserType(type_id) = shape.return_type() else {
+                    continue;
+                };
+                let needle = format!("{name}(");
+                let mut search_start = 0usize;
+                while let Some(relative_open) = line[search_start..].find(&needle) {
+                    let open = search_start + relative_open + name.len();
+                    let Some(close) = matching_parenthesis(line, open) else {
+                        break;
+                    };
+                    let tail = line[close + 1..].trim_start();
+                    let numeric = ["==", "!=", "<=", ">=", "<", ">"]
+                        .into_iter()
+                        .find_map(|operator| tail.strip_prefix(operator))
+                        .and_then(parse_integer_prefix);
+                    if let Some(value) = numeric {
+                        assert!(
+                            scope.typed_int_const_name(type_id, value).is_none(),
+                            "{} {filename}:{} compares {name}'s typed return with known numeric member {value}: {line}",
+                            case.name,
+                            line_number + 1
+                        );
+                    }
+                    search_start = close + 1;
+                }
+            }
+        }
+
+        let mut local_return_types = HashMap::<String, Option<usize>>::new();
+        for line in source.lines() {
+            let line = line.trim();
+            let Some((local, value)) = line.split_once(" = ") else {
+                continue;
+            };
+            if !local.starts_with("var_")
+                || !local
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            {
+                continue;
+            }
+            let callable = value.split_once('(').and_then(|(name, arguments)| {
+                let open = value.len() - arguments.len() - 1;
+                let close = matching_parenthesis(value, open)?;
+                (value[close + 1..].trim() == ";").then(|| name.trim())
+            });
+            let assigned_type = callable
+                .and_then(|name| scope.callable_map().get(name))
+                .and_then(|(_, shape)| match shape.return_type() {
+                    mary::ir::ValueType::UserType(type_id) => Some(type_id),
+                    _ => None,
+                });
+            local_return_types
+                .entry(local.to_owned())
+                .and_modify(|current| {
+                    if *current != assigned_type {
+                        *current = None;
+                    }
+                })
+                .or_insert(assigned_type);
+        }
+        for (local, type_id) in local_return_types {
+            let Some(type_id) = type_id else {
+                continue;
+            };
+            let needle = format!("switch ({local})");
+            let mut remainder = source.as_str();
+            while let Some(switch_start) = remainder.find(&needle) {
+                remainder = &remainder[switch_start + needle.len()..];
+                let Some(open) = remainder.find('{') else {
+                    break;
+                };
+                let mut depth = 1usize;
+                for line in remainder[open + 1..].lines() {
+                    if depth == 1 {
+                        if let Some(case_label) = line.trim().strip_prefix("case ") {
+                            if let Some(value) = parse_integer_prefix(case_label) {
+                                assert!(
+                                    scope.typed_int_const_name(type_id, value).is_none(),
+                                    "{} {filename} switches on {local}'s typed callable return with known numeric member {value}: {line}",
+                                    case.name
+                                );
+                            }
+                        }
+                    }
+                    for byte in line.bytes() {
+                        match byte {
+                            b'{' => depth += 1,
+                            b'}' => depth = depth.saturating_sub(1),
+                            _ => {}
+                        }
+                    }
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut unknown_ids = source
+            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .filter_map(|token| token.strip_prefix("VAR_UNKNOWN_SLOT_"))
+            .map(|suffix| suffix.parse::<i64>().unwrap())
+            .collect::<Vec<_>>();
+        unknown_ids.sort_unstable();
+        unknown_ids.dedup();
+        if unknown_ids == generic_guard_ids {
+            guard_files += 1;
+            for id in &unknown_ids {
+                assert!(
+                    source.contains(&format!("VarGet(VAR_UNKNOWN_SLOT_{id:03}) == 1")),
+                    "{} {filename}: unknown slot {id} escaped the audited guard form",
+                    case.name
+                );
+            }
+        } else if !unknown_ids.is_empty() {
+            exceptions.insert(filename.clone(), unknown_ids);
+        }
+
+        for line in source.lines() {
+            for operation in ["VarSet(", "VarAdd(", "VarSub("] {
+                let Some(arguments) = line.split_once(operation).map(|(_, rest)| rest) else {
+                    continue;
+                };
+                let Some(suffix) = arguments.strip_prefix("VAR_UNKNOWN_SLOT_") else {
+                    continue;
+                };
+                let digits = suffix
+                    .bytes()
+                    .take_while(u8::is_ascii_digit)
+                    .collect::<Vec<_>>();
+                writers.push((
+                    filename.clone(),
+                    operation.trim_end_matches('(').to_owned(),
+                    std::str::from_utf8(&digits).unwrap().parse().unwrap(),
+                ));
+            }
+        }
+
+        let context_calls = source.matches("GetEventContextValue()").count();
+        if context_calls != 0 {
+            assert_eq!(context_calls, 1, "{} {filename}", case.name);
+            event_context_callers.push(filename.clone());
+        }
+        let credit_calls = source.matches("RunStaffCredits();").count();
+        if credit_calls != 0 {
+            assert_eq!(credit_calls, 1, "{} {filename}", case.name);
+            assert!(
+                source
+                    .find("FadeOutScreen(")
+                    .is_some_and(|fade| fade < source.find("RunStaffCredits();").unwrap()),
+                "{} {filename}: staff credits lost the preceding fade",
+                case.name
+            );
+            staff_credit_callers.push(filename.clone());
+        }
+    }
+
+    assert_eq!(
+        guard_files, expected_guard_files,
+        "{} unknown guards",
+        case.name
+    );
+    assert_eq!(
+        exceptions,
+        expected_exceptions
+            .into_iter()
+            .map(|(filename, ids)| (filename.to_owned(), ids))
+            .collect(),
+        "{} unknown exceptions",
+        case.name
+    );
+    writers.sort_unstable();
+    let expected_writers = expected_writers
+        .into_iter()
+        .map(|id| {
+            (
+                "EventScript_SystemEvent_ResetDailyWorldState.mary.c".to_owned(),
+                "VarSet".to_owned(),
+                id,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(writers, expected_writers, "{} unknown writers", case.name);
+
+    event_context_callers.sort_unstable();
+    let mut expected_context_callers = [
+        "EventScript_AchievementEvent_Shipping_10000Items.mary.c",
+        "EventScript_AchievementEvent_Shipping_100000Items.mary.c",
+        "EventScript_AchievementEvent_Shipping_1000000Items.mary.c",
+        "EventScript_AchievementEvent_Shipping_10000000Items.mary.c",
+        "EventScript_AchievementEvent_Shipping_100000000Items.mary.c",
+        "EventScript_AchievementEvent_Shipping_1000000000Items.mary.c",
+        "EventScript_FarmEvent_Zack_DailyShippingPickup.mary.c",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    expected_context_callers.sort_unstable();
+    assert_eq!(
+        event_context_callers, expected_context_callers,
+        "{} event-context consumers",
+        case.name
+    );
+
+    staff_credit_callers.sort_unstable();
+    let (expected_credit_calls, expected_weddings, expect_opening, expect_thomas) =
+        if case.target.contains("MFOMT") {
+            (10, 8, true, true)
+        } else {
+            (6, 6, false, false)
+        };
+    assert_eq!(
+        staff_credit_callers.len(),
+        expected_credit_calls,
+        "{} staff-credit callers",
+        case.name
+    );
+    assert_eq!(
+        staff_credit_callers
+            .iter()
+            .filter(|name| name.contains("_Wedding"))
+            .count(),
+        expected_weddings,
+        "{} wedding credits",
+        case.name
+    );
+    assert_eq!(
+        staff_credit_callers
+            .iter()
+            .any(|name| name.contains("MFoMTOpening")),
+        expect_opening,
+        "{} opening credits",
+        case.name
+    );
+    assert_eq!(
+        staff_credit_callers
+            .iter()
+            .any(|name| name.contains("Thomas_Dialogue")),
+        expect_thomas,
+        "{} Thomas credits",
+        case.name
+    );
 }
 
 fn assert_numbered_script_name_matches_slot(name: &str, id: usize) {
@@ -2039,6 +2662,47 @@ fn native_callable_stack_pop_counts_match_every_public_declaration() {
             }
         }
     }
+}
+
+#[test]
+fn mfomt_var_access_vm_wrappers_match_between_regions() {
+    let us = fs::read(local_rom_path(CASES[1].rom)).unwrap();
+    let jp = fs::read(local_rom_path(CASES[3].rom)).unwrap();
+    let us_dispatch = 0x3FAF0usize;
+    let jp_dispatch = 0x3F84Cusize;
+
+    fn handler_at(rom: &[u8], dispatch: usize, slot: usize) -> usize {
+        (u32::from_le_bytes(
+            rom[dispatch + slot * 4..dispatch + slot * 4 + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize
+            & !1)
+            - 0x0800_0000
+    }
+
+    let us_get = handler_at(&us, us_dispatch, 0x03E);
+    let us_set = handler_at(&us, us_dispatch, 0x03F);
+    let jp_get = handler_at(&jp, jp_dispatch, 0x03E);
+    let jp_set = handler_at(&jp, jp_dispatch, 0x03F);
+    assert_eq!((us_get, us_set), (0x41390, 0x413B6));
+    assert_eq!((jp_get, jp_set), (0x410EC, 0x41112));
+
+    // Both regions pop the same VM operands in byte-identical wrappers. The
+    // BL displacements are also identical because the downstream native
+    // routines move by the same regional relocation delta.
+    assert_eq!(&us[us_get..us_get + 0x26], &jp[jp_get..jp_get + 0x26]);
+    assert_eq!(&us[us_set..us_set + 0x38], &jp[jp_set..jp_set + 0x38]);
+
+    assert_eq!(thumb_call_target(&us, us_get + 0x1E), 0x46024);
+    assert_eq!(thumb_call_target(&us, us_get + 0x22), 0x45908);
+    assert_eq!(thumb_call_target(&jp, jp_get + 0x1E), 0x45D80);
+    assert_eq!(thumb_call_target(&jp, jp_get + 0x22), 0x45664);
+
+    assert_eq!(thumb_call_target(&us, us_set + 0x30), 0x4A3F8);
+    assert_eq!(thumb_call_target(&us, us_set + 0x34), 0x45C88);
+    assert_eq!(thumb_call_target(&jp, jp_set + 0x30), 0x4A154);
+    assert_eq!(thumb_call_target(&jp, jp_set + 0x34), 0x459E4);
 }
 
 #[test]
@@ -16457,6 +17121,74 @@ fn native_entity_effect_lifetime_uses_animation_wrap_on_all_targets() {
             &rom[stepper..stepper + 0xA8],
             &reference[0x5E8F0..0x5E998],
             "{} animation wrap producer",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn native_entity_emote_animation_8_is_sleep_on_all_targets() {
+    for (case, definition) in CASES.iter().zip([0x71D51C, 0x6C2F38, 0x4A3678, 0x6BF8B0]) {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        assert_eq!(
+            u32::from_le_bytes(rom[definition..definition + 4].try_into().unwrap()),
+            11,
+            "{} emote animation count",
+            case.name
+        );
+        let animation_8 = definition + 4 + 8 * 4;
+        assert_eq!(
+            &rom[animation_8..animation_8 + 4],
+            &[6, 0, 28, 0],
+            "{} sleep animation range",
+            case.name
+        );
+
+        let frame_count_offset = definition + 4 + 11 * 4;
+        let frame_count = u32::from_le_bytes(
+            rom[frame_count_offset..frame_count_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let frame_metadata_end = frame_count_offset + 4 + frame_count as usize * 16;
+        let oam_count = u32::from_le_bytes(
+            rom[frame_metadata_end..frame_metadata_end + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let tile_count_offset = frame_metadata_end + 4 + oam_count * 8;
+        let tile_count = u32::from_le_bytes(
+            rom[tile_count_offset..tile_count_offset + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let palette_count_offset = tile_count_offset + 4 + tile_count * 32;
+        let palette_count = u32::from_le_bytes(
+            rom[palette_count_offset..palette_count_offset + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let affine_count_offset = palette_count_offset + 4 + palette_count * 32;
+        let affine_count = u32::from_le_bytes(
+            rom[affine_count_offset..affine_count_offset + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let instruction_count_offset = affine_count_offset + 4 + affine_count * 8;
+        let instruction_pool = instruction_count_offset + 4;
+        let frames: Vec<u16> = (28..34)
+            .map(|index| {
+                u16::from_le_bytes(
+                    rom[instruction_pool + index * 4..instruction_pool + index * 4 + 2]
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            frames,
+            [23, 20, 21, 22, 21, 20],
+            "{} sleep frames",
             case.name
         );
     }

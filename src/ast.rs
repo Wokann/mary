@@ -108,6 +108,19 @@ pub enum Stmt {
     Exit,
 }
 
+/// Whether the last reachable statement in a structured sequence transfers
+/// control unconditionally. This intentionally covers only forms whose two
+/// branches are explicit; loops and switches require separate flow analysis.
+pub fn stmt_sequence_terminates(statements: &[Stmt]) -> bool {
+    match statements.last() {
+        Some(Stmt::Exit | Stmt::Break) => true,
+        Some(Stmt::IfElse(_, yes, no)) => {
+            stmt_sequence_terminates(yes) && stmt_sequence_terminates(no)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SwitchLayout {
     /// The compiler's usual layout includes a dead jump after all case bodies.

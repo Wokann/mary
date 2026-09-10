@@ -401,11 +401,11 @@ mary_script_symbols
         gText_LoveEvent_Popuri_01_BlackHeart_ChoiceDislikesChickens,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_HappyPlayerLikesChickens,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_PreparesToReturnChicken,
-        gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesPlayerToReturnChicken,
+        gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesRunawayChickenHome,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_QuestionsChickenDislike,
         gText_LoveEvent_Popuri_01_BlackHeart_Popuri_QuestionsFarmVisit,
         #if defined(MARY_US)
-            gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesPlayerToReturnChickens_US,
+            gText_LoveEvent_Popuri_01_BlackHeart_Popuri_InvitesChickensHomeAfterDislikedChoice,
         #endif
     },
 

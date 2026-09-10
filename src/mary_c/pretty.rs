@@ -3,7 +3,7 @@ use std::fmt::{self, Write};
 use thiserror::Error;
 
 use crate::{
-    ast::{Expr, Stmt, SwitchCase, SwitchLayout},
+    ast::{stmt_sequence_terminates, Expr, Stmt, SwitchCase, SwitchLayout},
     charmap::Charmap,
     ir::IntValue,
     pretty_print::{PrettyExpr, PrettyStringLit},
@@ -15,6 +15,10 @@ pub enum PrettyCError {
     LowLevelIr,
     #[error("jump-next cannot be represented as lossless high-level Mary-C")]
     JumpNext,
+    #[error(
+        "unreachable statement after return or break cannot be represented as round-trip Mary-C"
+    )]
+    UnreachableStatement,
     #[error("formatting failed")]
     Format,
 }
@@ -138,7 +142,10 @@ fn format_stmts(
     indent: usize,
     controls: &mut Vec<Control>,
 ) -> Result<(), PrettyCError> {
-    for stmt in statements {
+    for (index, stmt) in statements.iter().enumerate() {
+        if index != 0 && stmt_sequence_terminates(&statements[..index]) {
+            return Err(PrettyCError::UnreachableStatement);
+        }
         format_stmt(out, stmt, indent, controls)?;
     }
     Ok(())
@@ -336,7 +343,7 @@ fn format_case(
         }
     };
     format_stmts(out, body, n + 1, controls)?;
-    if automatic_break && !matches!(body.last(), Some(Stmt::Break | Stmt::Exit)) {
+    if automatic_break && !stmt_sequence_terminates(body) {
         pad(out, n + 1);
         out.push_str("break;\n")
     }
@@ -397,6 +404,12 @@ mod tests {
         assert_eq!(
             format_named_script("NestedIr", &nested_ir),
             Err(PrettyCError::LowLevelIr)
+        );
+
+        let unreachable = vec![Stmt::Exit, Stmt::Call(Invoke::new("P".into(), vec![]))];
+        assert_eq!(
+            format_named_script("Unreachable", &unreachable),
+            Err(PrettyCError::UnreachableStatement)
         );
     }
 }

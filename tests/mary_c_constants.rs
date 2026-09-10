@@ -2,13 +2,37 @@ use std::{collections::HashMap, fs, path::Path};
 
 use mary::{
     bytecode::encode_script,
-    decompiler::decompile_script_named,
-    ir::{Ins, VarId},
+    decompiler::{decompile_script_named, decompile_script_with_metadata},
+    ir::{Ins, ValueType, VarId},
     mary_c::{
         format_named_script, parse_callable_table_with_scope, parse_constant_header,
         parse_named_scripts, parse_script_table, parse_text_name_table, Options,
     },
 };
+
+#[test]
+fn semantic_script_and_text_names_do_not_end_in_duplicate_ordinals() {
+    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    let mut offenders = source
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .filter(|token| token.starts_with("EventScript_") || token.starts_with("gText_"))
+        .filter(|token| {
+            let Some(suffix) = token.rsplit('_').next() else {
+                return false;
+            };
+            suffix.len() == 2
+                && suffix.bytes().all(|byte| byte.is_ascii_digit())
+                && !token.contains("_Question")
+                && !token.contains("_Answer_")
+        })
+        .collect::<Vec<_>>();
+    offenders.sort_unstable();
+    offenders.dedup();
+    assert!(
+        offenders.is_empty(),
+        "semantic symbols retain mechanical duplicate ordinals: {offenders:?}"
+    );
+}
 
 #[test]
 fn every_text_bearing_script_has_an_event_level_semantic_name() {
@@ -2350,10 +2374,10 @@ fn unknown_variable_inventory_matches_the_published_audit_counts() {
     let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
     let mut inventories = HashMap::new();
     for (target, expected) in [
-        ("MARY_FOMT_US", 25),
-        ("MARY_FOMT_JP", 25),
-        ("MARY_MFOMT_US", 34),
-        ("MARY_MFOMT_JP", 34),
+        ("MARY_FOMT_US", 24),
+        ("MARY_FOMT_JP", 24),
+        ("MARY_MFOMT_US", 33),
+        ("MARY_MFOMT_JP", 33),
     ] {
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(&header, &options).unwrap();
@@ -2478,6 +2502,46 @@ fn same_numbered_unknown_slots_do_not_share_unproven_types_across_game_families(
             encode_script(&rebuilt.scripts[0].2),
             "{target}: slot 343 symbolic rendering changed bytecode"
         );
+    }
+}
+
+#[test]
+fn fomt_reference_labels_do_not_leak_into_same_numbered_mfomt_slots() {
+    let header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+    let expected = [
+        (53, "VAR_SPOUSE_CONTINUES_FAMILY_WORK"),
+        (94, "VAR_ANN_PROPOSAL_EVENT_STATE"),
+        (322, "VAR_HARVEST_GODDESS_FIRST_OFFERING_EVENT_STATE"),
+        (351, "VAR_ACHIEVEMENT_SHIPPED_10000_ITEMS_STATE"),
+        (412, "VAR_COW_FESTIVAL_SESSION_STATE"),
+        (415, "VAR_FIREWORKS_FESTIVAL_PARTNER"),
+    ];
+
+    for target in ["MARY_FOMT_US", "MARY_FOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        let variable_type = constants.user_type("MaryVarId").unwrap();
+        for (id, name) in expected {
+            assert_eq!(
+                constants.typed_int_const_name(variable_type, id),
+                Some(name),
+                "{target}: verified FoMT variable {id} lost its semantic name"
+            );
+        }
+    }
+
+    for target in ["MARY_MFOMT_US", "MARY_MFOMT_JP"] {
+        let options = Options::default().define(target).unwrap();
+        let constants = parse_constant_header(&header, &options).unwrap();
+        let variable_type = constants.user_type("MaryVarId").unwrap();
+        for (id, _) in expected {
+            let unknown = format!("VAR_UNKNOWN_SLOT_{id:03}");
+            assert_eq!(
+                constants.typed_int_const_name(variable_type, id),
+                Some(unknown.as_str()),
+                "{target}: FoMT meaning leaked into unrelated MFoMT variable {id}"
+            );
+        }
     }
 }
 
@@ -5251,8 +5315,8 @@ fn cliff_collapse_followup_delay_counter_follows_the_gender_shift() {
 }
 
 #[test]
-fn ellen_stocking_eligibility_gate_stays_explicitly_unknown() {
-    for (target, id, symbol) in [
+fn ellen_stocking_yarn_gate_uses_its_proven_blocking_behavior() {
+    for (target, id, legacy_symbol) in [
         ("MARY_FOMT_US", 275, "VAR_UNKNOWN_SLOT_275"),
         ("MARY_FOMT_JP", 275, "VAR_UNKNOWN_SLOT_275"),
         ("MARY_MFOMT_US", 283, "VAR_UNKNOWN_SLOT_283"),
@@ -5267,9 +5331,10 @@ fn ellen_stocking_eligibility_gate_stays_explicitly_unknown() {
         let variable_type = constants.user_type("MaryVarId").unwrap();
         assert_eq!(
             constants.typed_int_const_name(variable_type, id),
-            Some(symbol),
-            "{target}: variable {id} must not inherit a guessed stocking meaning"
+            Some("VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED"),
+            "{target}: variable {id} must describe only its proven blocking behavior"
         );
+        assert_eq!(constants.const_int_value(legacy_symbol), Some(id));
     }
 }
 
@@ -7492,6 +7557,370 @@ fn typed_callable_return_decorates_enum_base_but_not_numeric_offset() {
         source.contains("var_0 < MAP_SPRING_MINE_FLOOR_0 + 256"),
         "{source}"
     );
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn arithmetic_on_a_typed_callable_return_drops_the_enum_domain() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, }\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = GetMap() + 1; if (value == 53) { GetMap(); } switch (value) { case 53: return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("var_0 = GetMap() + 1;"), "{source}");
+    assert!(source.contains("var_0 == 53"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(source.contains("case 53:"), "{source}");
+    assert!(!source.contains("case MAP_"), "{source}");
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn unary_and_compound_operations_drop_a_typed_callable_return_domain() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, }\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = -GetMap(); if (value == 52) { GetMap(); } value = GetMap(); value += 1; switch (value) { case 52: return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("var_0 = -GetMap();"), "{source}");
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(source.contains("var_0 += 1;"), "{source}");
+    assert!(source.contains("case 52:"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(!source.contains("case MAP_"), "{source}");
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn compound_assignment_paths_join_typed_locals_conservatively() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetCondition, GetMap, }\n\
+         int GetCondition(void);\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int merged; int surviving; merged = GetMap(); if (GetCondition()) { merged += 1; } if (merged == 52) { GetCondition(); } surviving = GetMap(); if (GetCondition()) { surviving += 1; return; } if (surviving == 52) { return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(
+        source.contains("var_1 == MAP_SPRING_MINE_FLOOR_0"),
+        "{source}"
+    );
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn explicit_local_type_survives_compound_assignment() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, }\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = GetMap(); value += 1; if (value == 52) { return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let map_type = ValueType::UserType(callables.scope.user_type("MaryMapId").unwrap());
+    let raised = decompile_script_with_metadata(
+        &numeric.scripts[0].2,
+        &callables.scope,
+        "TestMap",
+        &[],
+        &HashMap::from([("var_0".to_owned(), map_type)]),
+    )
+    .unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(
+        source.contains("var_0 == MAP_SPRING_MINE_FLOOR_0"),
+        "{source}"
+    );
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn increment_and_decrement_drop_an_inferred_enum_domain() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, }\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = GetMap(); value++; if (value == 52) { GetMap(); } value = GetMap(); --value; switch (value) { case 52: return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("var_0++;"), "{source}");
+    assert!(source.contains("--var_0;"), "{source}");
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(source.contains("case 52:"), "{source}");
+    assert!(!source.contains("case MAP_"), "{source}");
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn explicit_local_type_survives_increment_and_decrement() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, }\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = GetMap(); value++; --value; if (value == 52) { return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let map_type = ValueType::UserType(callables.scope.user_type("MaryMapId").unwrap());
+    let raised = decompile_script_with_metadata(
+        &numeric.scripts[0].2,
+        &callables.scope,
+        "TestMap",
+        &[],
+        &HashMap::from([("var_0".to_owned(), map_type)]),
+    )
+    .unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(
+        source.contains("var_0 == MAP_SPRING_MINE_FLOOR_0"),
+        "{source}"
+    );
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn nested_and_loop_increment_writes_do_not_preserve_inferred_enum_types() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetCondition, GetMap, Consume, }\n\
+         int GetCondition(void);\n\
+         MaryMapId GetMap(void);\n\
+         void Consume(int value);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int nested; int looped; nested = GetMap(); Consume(nested++); if (nested == 52) { GetCondition(); } looped = GetMap(); for (int i = 0; GetCondition(); i++) { Consume(looped++); } switch (looped) { case 52: return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("Consume(var_0++);"), "{source}");
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(source.contains("Consume(var_1++);"), "{source}");
+    assert!(source.contains("case 52:"), "{source}");
+    assert!(!source.contains("case MAP_"), "{source}");
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn short_circuit_mutations_join_the_skipped_and_executed_paths() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetCondition, GetMap, }\n\
+         int GetCondition(void);\n\
+         MaryMapId GetMap(void);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int and_value; int or_value; int lhs_value; and_value = GetMap(); if (GetCondition() && and_value++) { GetCondition(); } if (and_value == 52) { GetCondition(); } or_value = GetMap(); if (GetCondition() || --or_value) { GetCondition(); } switch (or_value) { case 52: GetCondition(); break; } lhs_value = GetMap(); if (lhs_value++ && GetCondition()) { GetCondition(); } if (lhs_value == 52) { return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
+    assert!(source.contains("case 52:"), "{source}");
+    assert!(!source.contains("case MAP_"), "{source}");
+    assert!(source.contains("var_2 == 52"), "{source}");
+    assert!(!source.contains("var_2 == MAP_"), "{source}");
+    let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+    assert_eq!(
+        encode_script(&numeric.scripts[0].2),
+        encode_script(&symbolic.scripts[0].2)
+    );
+}
+
+#[test]
+fn typed_identity_wrappers_do_not_hide_nested_local_mutations() {
+    let options = Options::default().define("MARY_FOMT_US").unwrap();
+    let constants = parse_constant_header(
+        "typedef enum MaryMapId {\nMAP_SPRING_MINE_FLOOR_0 = 52,\n} MaryMapId;\n\
+         typedef int MaryMapSpaceX;\n\
+         mary_typed_identity(MaryMapSpaceX, X);\n",
+        &options,
+    )
+    .unwrap();
+    let callables = parse_callable_table_with_scope(
+        "mary_callable_table { GetMap, ConsumeX, }\n\
+         MaryMapId GetMap(void);\n\
+         void ConsumeX(MaryMapSpaceX x);\n",
+        &options,
+        &constants,
+    )
+    .unwrap();
+    let script_table = parse_script_table("mary_script_table { TestMap, };\n", &options).unwrap();
+    let numeric = parse_named_scripts(
+        "void TestMap(void) { int value; value = GetMap(); ConsumeX(X(value++)); if (value == 52) { return; } }\n",
+        &options,
+        &callables.scope,
+        &script_table,
+    )
+    .unwrap();
+    let raised =
+        decompile_script_named(&numeric.scripts[0].2, &callables.scope, "TestMap").unwrap();
+    let source = format_named_script("TestMap", &raised).unwrap();
+    assert!(source.contains("ConsumeX(X(var_0++));"), "{source}");
+    assert!(source.contains("var_0 == 52"), "{source}");
+    assert!(!source.contains("var_0 == MAP_"), "{source}");
     let symbolic = parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
     assert_eq!(
         encode_script(&numeric.scripts[0].2),
@@ -10306,6 +10735,134 @@ fn terminating_switch_cases_do_not_pollute_the_surviving_exit_state() {
 }
 
 #[test]
+fn conditional_switch_break_paths_are_not_hidden_by_later_returns() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        constants_source.push_str(
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+        );
+        let constants = parse_constant_header(&constants_source, &options).unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table = parse_script_table(
+            "mary_script_table { TestConditionalBreak, TestConditionalBreakDirect, };",
+            &options,
+        )
+        .unwrap();
+        let numeric = parse_named_scripts(
+            "void TestConditionalBreak(void) { int id = GetPresentedItemId(); switch (IsPresentedItemGiftWrapped()) { case FALSE: if (IsPlayerHoldingNothing()) { mary_break_switch; } return; case TRUE: return; default: return; } switch (id) { case 0: TalkClose(); break; default: break; } } void TestConditionalBreakDirect(void) { switch (IsPresentedItemGiftWrapped()) { case FALSE: if (IsPlayerHoldingNothing()) { mary_break_switch; } return; case TRUE: return; default: return; } switch (GetPresentedItemId()) { case 0: TalkClose(); break; default: break; } }",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestConditionalBreak",
+        )
+        .unwrap();
+        let source = format_named_script("TestConditionalBreak", &raised).unwrap();
+        assert!(
+            source.contains("case FOOD_TURNIP:"),
+            "{target}: conditional switch break was hidden by a later return: {source}"
+        );
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: conditional switch-break flow changed emitted bytecode"
+        );
+
+        let raised_direct = decompile_script_named(
+            &numeric.scripts[1].2,
+            &callables.scope,
+            "TestConditionalBreakDirect",
+        )
+        .unwrap();
+        let source_direct =
+            format_named_script("TestConditionalBreakDirect", &raised_direct).unwrap();
+        assert!(
+            source_direct.contains("case FOOD_TURNIP:"),
+            "{target}: the switch label's entry refinement was lost on its break path: {source_direct}"
+        );
+        let rebuilt_direct =
+            parse_named_scripts(&source_direct, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[1].2),
+            encode_script(&rebuilt_direct.scripts[0].2),
+            "{target}: direct conditional switch-break refinement changed emitted bytecode"
+        );
+    }
+}
+
+#[test]
+fn conditional_switch_break_does_not_inherit_later_path_assignments() {
+    for target in [
+        "MARY_FOMT_US",
+        "MARY_FOMT_JP",
+        "MARY_MFOMT_US",
+        "MARY_MFOMT_JP",
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let mut constants_source = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
+        constants_source.push_str(
+            "\nmary_callable_return_type_when_callable(GetPresentedItemId, IsPresentedItemGiftWrapped, FALSE, MaryFoodId);\n",
+        );
+        let constants = parse_constant_header(&constants_source, &options).unwrap();
+        let callables = parse_callable_table_with_scope(
+            &fs::read_to_string("goodies/mary_callables.mary.h").unwrap(),
+            &options,
+            &constants,
+        )
+        .unwrap();
+        let script_table = parse_script_table(
+            "mary_script_table { TestConditionalBreakAssignment, };",
+            &options,
+        )
+        .unwrap();
+        let numeric = parse_named_scripts(
+            "void TestConditionalBreakAssignment(void) { int id = GetPresentedItemId(); switch (IsPresentedItemGiftWrapped()) { case FALSE: id = GetPreservedPlayerMapId(); if (IsPlayerHoldingNothing()) { mary_break_switch; } id = GetPresentedItemId(); return; case TRUE: return; default: return; } switch (id) { case 0: TalkClose(); break; default: break; } }",
+            &options,
+            &callables.scope,
+            &script_table,
+        )
+        .unwrap();
+        let raised = decompile_script_named(
+            &numeric.scripts[0].2,
+            &callables.scope,
+            "TestConditionalBreakAssignment",
+        )
+        .unwrap();
+        let source = format_named_script("TestConditionalBreakAssignment", &raised).unwrap();
+        assert!(
+            source.contains("case 0:")
+                && !source.contains("case FOOD_TURNIP:")
+                && !source.contains("case ARTICLE_FLOWER_MOON_DROP:"),
+            "{target}: the break exit inherited a later unreachable-path type: {source}"
+        );
+        let rebuilt =
+            parse_named_scripts(&source, &options, &callables.scope, &script_table).unwrap();
+        assert_eq!(
+            encode_script(&numeric.scripts[0].2),
+            encode_script(&rebuilt.scripts[0].2),
+            "{target}: conditional break assignment flow changed emitted bytecode"
+        );
+    }
+}
+
+#[test]
 fn related_callable_origins_survive_local_copies_without_leaking() {
     for target in [
         "MARY_FOMT_US",
@@ -11747,6 +12304,17 @@ fn regional_script_names_match_at_every_physical_slot() {
         }
     }
     assert!(differences.is_empty(), "{}", differences.join("\n"));
+
+    for line in source.lines() {
+        let symbol = line.trim().trim_end_matches(',');
+        if !symbol.starts_with("gText_") {
+            continue;
+        }
+        assert!(
+            !symbol.ends_with("_US") && !symbol.ends_with("_JP"),
+            "text-role symbols must describe the role rather than its region: {symbol}"
+        );
+    }
 }
 
 #[test]
@@ -11890,6 +12458,42 @@ fn text_symbols_are_case_insensitively_unique_within_each_target() {
             "{target} has ambiguous text symbols on a case-insensitive filesystem:\n{}",
             duplicates.join("\n")
         );
+    }
+}
+
+#[test]
+fn every_text_symbol_stays_in_its_owning_scripts_event_category() {
+    let source = fs::read_to_string("goodies/mary_scripts_text.mary.sym").unwrap();
+    for (target, slot_count) in [
+        ("MARY_FOMT_US", 1329),
+        ("MARY_FOMT_JP", 1329),
+        ("MARY_MFOMT_US", 1416),
+        ("MARY_MFOMT_JP", 1416),
+    ] {
+        let options = Options::default().define(target).unwrap();
+        let symbols = parse_text_name_table(&source, &options).unwrap();
+        for script_id in 0..slot_count {
+            let Some(script_name) = symbols.script_name(script_id) else {
+                continue;
+            };
+            let Some(semantic_name) = script_name.strip_prefix("EventScript_") else {
+                panic!("{target} slot {script_id:04} lacks EventScript_ prefix: {script_name}");
+            };
+            let category = semantic_name.split('_').next().unwrap();
+            let expected_prefix = format!("gText_{category}_");
+            let exact_name = format!("gText_{category}");
+
+            for text_name in symbols
+                .names(script_id, symbols.text_count(script_id))
+                .into_iter()
+                .flatten()
+            {
+                assert!(
+                    text_name == exact_name || text_name.starts_with(&expected_prefix),
+                    "{target} slot {script_id:04} {script_name} owns cross-category text {text_name}"
+                );
+            }
+        }
     }
 }
 
@@ -23604,8 +24208,8 @@ fn camera_movement_callables_keep_their_target_ids() {
 fn entity_effect_callables_keep_their_target_ids() {
     let constants_header = fs::read_to_string("goodies/mary_constants.mary.h").unwrap();
     assert!(
-        !constants_header.contains("ENTITY_EMOTE_SLEEP"),
-        "unused emote ID 8 must not regain an unverified community label"
+        constants_header.contains("ENTITY_EMOTE_SLEEP = 8"),
+        "decoded physical animation 8 must retain its proven sleep label"
     );
 
     for target in [
@@ -23643,7 +24247,7 @@ fn entity_effect_callables_keep_their_target_ids() {
             "{target}: {source}"
         );
         assert!(
-            source.contains("StartEntityEffect(ENTITY_LILLIA, ENTITY_EMOTE_08, TRUE)"),
+            source.contains("StartEntityEffect(ENTITY_LILLIA, ENTITY_EMOTE_SLEEP, TRUE)"),
             "{target}: {source}"
         );
         assert!(
@@ -30836,6 +31440,22 @@ fn public_callables_do_not_use_mechanical_parameter_names() {
 }
 
 #[test]
+fn retail_no_op_parameters_do_not_claim_unread_native_semantics() {
+    let header = fs::read_to_string("goodies/mary_callables.mary.h").unwrap();
+    for expected in [
+        "void NoOpTutorialFieldTile(\n    int unused_operand_1,\n    int unused_operand_2,\n    int unused_operand_3,\n    int unused_operand_4,\n    int unused_operand_5\n);",
+        "void NoOpTutorialFieldObject(int unused_operand_1, int unused_operand_2, int unused_operand_3);",
+        "void NoOpTutorialEggDefinition(int unused_operand_1, int unused_operand_2, int unused_operand_3);",
+        "void NoOpTutorialEggSelection(int unused_operand);",
+    ] {
+        assert!(
+            header.contains(expected),
+            "a verified retail no-op regained a fabricated parameter contract: {expected}"
+        );
+    }
+}
+
+#[test]
 fn callable_tables_cover_every_non_internal_physical_slot_exactly_once() {
     for (target, expected_next_id) in [
         ("MARY_FOMT_US", 0x147),
@@ -31747,21 +32367,40 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
                 102 => Some("AUDIO_SFX_DRINK"),
                 105 => Some("AUDIO_SFX_ENTER_HOT_SPRING"),
                 106 => Some("AUDIO_SFX_PICK_UP_ITEM"),
+                107 => Some("AUDIO_SFX_RUCKSACK_ITEM_TRANSFER"),
                 108 => Some("AUDIO_SFX_THROW_ITEM"),
                 109 => Some("AUDIO_SFX_THROWN_ITEM_LANDS"),
                 110 => Some("AUDIO_SFX_SHIPMENT_DEPOSIT"),
                 111 => Some("AUDIO_SFX_SICKLE_CUT"),
+                112 => Some("AUDIO_SFX_SICKLE_VARIANT_1"),
+                113 => Some("AUDIO_SFX_SICKLE_VARIANT_2"),
+                114 => Some("AUDIO_SFX_SICKLE_VARIANT_3"),
+                115 => Some("AUDIO_SFX_SICKLE_VARIANT_4"),
+                116 => Some("AUDIO_SFX_SICKLE_VARIANT_5"),
+                117 => Some("AUDIO_SFX_SICKLE_VARIANT_6"),
                 118 => Some("AUDIO_SFX_HOE_TILL"),
                 121 => Some("AUDIO_SFX_LIGHT_FIREPLACE"),
                 124 => Some("AUDIO_SFX_ADD_ITEM_TO_FIRE"),
                 125 => Some("AUDIO_SFX_HAMMER_SMALL_STONE"),
                 126 => Some("AUDIO_SFX_HAMMER_LARGE_STONE"),
                 127 => Some("AUDIO_SFX_HAMMER_HUGE_STONE"),
+                128 => Some("AUDIO_SFX_HAMMER_VARIANT_1"),
+                129 => Some("AUDIO_SFX_HAMMER_VARIANT_2"),
+                130 => Some("AUDIO_SFX_HAMMER_VARIANT_3"),
                 131 => Some("AUDIO_SFX_HAMMER_MAX_CHARGED_SWING"),
                 132 => Some("AUDIO_SFX_AXE_BRANCH_CHOP"),
                 133 => Some("AUDIO_SFX_AXE_STUMP_CHOP"),
+                134 => Some("AUDIO_SFX_AXE_VARIANT_1"),
+                135 => Some("AUDIO_SFX_AXE_VARIANT_2"),
+                136 => Some("AUDIO_SFX_AXE_VARIANT_3"),
+                137 => Some("AUDIO_SFX_AXE_VARIANT_4"),
                 138 => Some("AUDIO_SFX_AXE_MAX_CHARGED_SWING"),
                 139 => Some("AUDIO_SFX_WATERING_CAN_POUR"),
+                140 => Some("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_1"),
+                141 => Some("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_2"),
+                142 => Some("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_3"),
+                143 => Some("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_4"),
+                144 => Some("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_5"),
                 145 => Some("AUDIO_SFX_WATERING_CAN_MAX_CHARGED_POUR"),
                 146 => Some("AUDIO_SFX_WATER_SPLASH"),
                 147 => Some("AUDIO_SFX_BRUSH_LIVESTOCK"),
@@ -31774,7 +32413,9 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
                 161 => Some("AUDIO_SFX_COW_MOO"),
                 163 => Some("AUDIO_SFX_SHEEP_BLEAT"),
                 167 => Some("AUDIO_SFX_FOAL_NEIGH"),
+                168 => Some("AUDIO_SFX_HORSE_NEIGH"),
                 169 => Some("AUDIO_SFX_DOG_BARK"),
+                170 => Some("AUDIO_SFX_MENU_CANCEL_DUPLICATE"),
                 172 => Some("AUDIO_SFX_BABY_CRY"),
                 173 => Some("AUDIO_SFX_HARVEST_SPRITE_FUSION_FINISH"),
                 174 => Some("AUDIO_SFX_HARVEST_SPRITE_FUSION_PULSE"),
@@ -31786,12 +32427,16 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
                 181 => Some("AUDIO_SFX_VICTORY"),
                 182 => Some("AUDIO_SFX_ITEM_OBTAINED"),
                 184 => Some("AUDIO_SFX_ATTENTION_CHIME"),
+                187 => Some("AUDIO_SFX_MINIGAME_TIME_UP"),
                 188 => Some("AUDIO_SFX_STAR_SPARKLE"),
                 190 => Some("AUDIO_SFX_HARVEST_GODDESS_APPEARS"),
                 192 => Some("AUDIO_SFX_QUESTION_EMOTE"),
                 193 => Some("AUDIO_SFX_APPLAUSE"),
+                197 => Some("AUDIO_SFX_MENU_CONFIRM"),
+                198 => Some("AUDIO_SFX_MENU_CANCEL"),
                 199 => Some("AUDIO_SFX_INCORRECT_ANSWER"),
                 200 => Some("AUDIO_SFX_KAPPA_SURPRISE"),
+                203 => Some("AUDIO_SFX_MENU_CURSOR"),
                 204 => Some("AUDIO_SFX_CHICKEN_CLUCK"),
                 205 => Some("AUDIO_SFX_CLOSE_DOOR"),
                 _ => None,
@@ -31821,7 +32466,7 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
             );
         }
         assert_eq!(
-            numbered_nonempty_slots, 56,
+            numbered_nonempty_slots, 31,
             "{target}: unresolved nonempty audio inventory changed"
         );
         assert!(
@@ -31866,9 +32511,7 @@ fn audio_sequence_table_preserves_all_211_physical_slots() {
 }
 
 #[test]
-fn ambiguous_reused_audio_sequences_remain_numbered() {
-    const VANILLA_REFERENCED_NUMBERED_AUDIO: [i64; 2] = [144, 170];
-
+fn watering_can_intermediate_audio_uses_family_names_without_claiming_tool_tiers() {
     for target in [
         "MARY_FOMT_US",
         "MARY_FOMT_JP",
@@ -31883,15 +32526,22 @@ fn ambiguous_reused_audio_sequences_remain_numbered() {
         .unwrap();
         let sequence_type = constants.user_type("MaryAudioSequenceId").unwrap();
 
-        // These slots have useful call-time evidence, but not one reliable,
-        // scene-independent English identity. Keep their physical names until
-        // the sequence data and every reuse can support a narrower name.
-        for id in VANILLA_REFERENCED_NUMBERED_AUDIO {
-            let numbered = format!("AUDIO_SEQUENCE_{id:03}");
+        // Track structure proves a single watering-can family, while the
+        // indirect native selector does not yet prove a tool-tier mapping.
+        for (id, variant) in (140..=144).zip(1..=5) {
+            let expected = format!("AUDIO_SFX_WATERING_CAN_POUR_VARIANT_{variant}");
             assert_eq!(
                 constants.typed_int_const_name(sequence_type, id),
-                Some(numbered.as_str()),
-                "{target}: ambiguous audio sequence {id} acquired a misleading semantic name"
+                Some(expected.as_str()),
+                "{target}: watering-can audio sequence {id} lost its conservative family name"
+            );
+        }
+        for unproven in ["COPPER", "SILVER", "GOLD", "MYSTRILE", "BLESSED", "MYTHIC"] {
+            assert!(
+                !(140..=144).any(|id| constants
+                    .typed_int_const_name(sequence_type, id)
+                    .is_some_and(|name| name.contains(unproven))),
+                "{target}: intermediate watering audio guessed the unproven tier {unproven}"
             );
         }
     }
@@ -31902,8 +32552,8 @@ fn vanilla_referenced_numbered_audio_is_a_closed_allowlist() {
     for (directory, expected) in [
         ("decompiled_text/fomt_us", &[][..]),
         ("decompiled_text/fomt_jp", &[][..]),
-        ("decompiled_text/mfomt_us", &[144, 170][..]),
-        ("decompiled_text/mfomt_jp", &[144, 170][..]),
+        ("decompiled_text/mfomt_us", &[][..]),
+        ("decompiled_text/mfomt_jp", &[][..]),
     ] {
         if !std::path::Path::new(directory).is_dir() {
             continue;
@@ -32792,9 +33442,15 @@ fn ellen_adjacent_unknown_slots_keep_only_the_proven_boolean_domain() {
         "MARY_MFOMT_JP",
     ] {
         let (gate, state) = if target.starts_with("MARY_FOMT_") {
-            ("VAR_UNKNOWN_SLOT_275", "VAR_UNKNOWN_SLOT_276")
+            (
+                "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+                "VAR_UNKNOWN_SLOT_276",
+            )
         } else {
-            ("VAR_UNKNOWN_SLOT_283", "VAR_UNKNOWN_SLOT_284")
+            (
+                "VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED",
+                "VAR_UNKNOWN_SLOT_284",
+            )
         };
         let options = Options::default().define(target).unwrap();
         let constants = parse_constant_header(
@@ -33337,6 +33993,15 @@ fn every_callable_declaration_has_its_own_bilingual_documentation_block() {
             comment.contains("参数："),
             "callable lacks an explicit Chinese parameter contract: {trimmed}"
         );
+        let english_parameter_start = comment
+            .find("Parameter:")
+            .or_else(|| comment.find("Parameters:"))
+            .unwrap();
+        let chinese_parameter_start = comment.find("参数：").unwrap();
+        assert!(
+            english_parameter_start < chinese_parameter_start,
+            "callable documentation must place its complete English contract before Chinese: {trimmed}"
+        );
 
         let declaration = lines[line_index..]
             .iter()
@@ -33430,6 +34095,10 @@ fn every_callable_declaration_has_its_own_bilingual_documentation_block() {
             assert!(
                 comment.contains("返回值："),
                 "value-returning callable lacks an explicit Chinese return contract: {trimmed}"
+            );
+            assert!(
+                comment.find("Return value:").unwrap() < comment.find("返回值：").unwrap(),
+                "callable documentation must place its English return contract before Chinese: {trimmed}"
             );
         }
     }
@@ -34972,7 +35641,7 @@ fn npc_held_item_interaction_category_preserves_the_complete_physical_domain() {
         }
         assert_eq!(
             constants.typed_int_const_name(interaction_type, 12),
-            Some("NPC_INTERACTION_UNKNOWN_12"),
+            Some("NPC_INTERACTION_UNUSED_12"),
             "{target}: category 12 acquired an unproven semantic name"
         );
     }
@@ -36187,16 +36856,16 @@ fn mfomt_reserved_link_pending_slots_preserve_positions_and_boolean_types() {
 
 #[test]
 fn unresolved_variable_inventory_is_explicit_for_every_target() {
-    const FOMT_UNKNOWN_IDS: [i64; 25] = [
-        224, 225, 236, 237, 242, 275, 276, 314, 316, 317, 319, 320, 327, 333, 334, 335, 336, 343,
-        344, 381, 382, 383, 385, 423, 449,
+    const FOMT_UNKNOWN_IDS: [i64; 24] = [
+        224, 225, 236, 237, 242, 276, 314, 316, 317, 319, 320, 327, 333, 334, 335, 336, 343, 344,
+        381, 382, 383, 385, 423, 449,
     ];
-    const MFOMT_UNKNOWN_IDS: [i64; 34] = [
-        53, 94, 96, 115, 232, 233, 244, 245, 250, 283, 284, 322, 324, 325, 327, 328, 335, 341, 343,
-        344, 351, 352, 411, 412, 413, 415, 467, 482, 484, 486, 488, 490, 697, 705,
+    const MFOMT_UNKNOWN_IDS: [i64; 33] = [
+        53, 94, 96, 115, 232, 233, 244, 245, 250, 284, 322, 324, 325, 327, 328, 335, 341, 343, 344,
+        351, 352, 411, 412, 413, 415, 467, 482, 484, 486, 488, 490, 697, 705,
     ];
-    const FOMT_BOOLEAN_UNKNOWN_IDS: [i64; 3] = [275, 343, 423];
-    const MFOMT_BOOLEAN_UNKNOWN_IDS: [i64; 8] = [94, 96, 115, 283, 351, 467, 697, 705];
+    const FOMT_BOOLEAN_UNKNOWN_IDS: [i64; 2] = [343, 423];
+    const MFOMT_BOOLEAN_UNKNOWN_IDS: [i64; 7] = [94, 96, 115, 351, 467, 697, 705];
     let mut inventories = Vec::new();
     for target in [
         "MARY_FOMT_US",
@@ -36263,16 +36932,10 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
                 383, 385, 449,
             ][..],
             27,
-            &[
-                (
-                    "EventScript_NPCEvent_Ellen_DialogueAndGiftResponses.mary.c",
-                    &[275][..],
-                ),
-                (
-                    "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
-                    &[423, 449][..],
-                ),
-            ][..],
+            &[(
+                "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+                &[423, 449][..],
+            )][..],
         ),
         (
             "decompiled_text/fomt_jp",
@@ -36281,16 +36944,10 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
                 383, 385, 449,
             ][..],
             27,
-            &[
-                (
-                    "EventScript_NPCEvent_Ellen_DialogueAndGiftResponses.mary.c",
-                    &[275][..],
-                ),
-                (
-                    "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
-                    &[423, 449][..],
-                ),
-            ][..],
+            &[(
+                "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+                &[423, 449][..],
+            )][..],
         ),
         (
             "decompiled_text/mfomt_us",
@@ -36298,16 +36955,10 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
                 232, 233, 244, 245, 250, 284, 324, 325, 327, 328, 343, 344, 352, 411, 412, 413, 415,
             ][..],
             28,
-            &[
-                (
-                    "EventScript_NPCEvent_Ellen_DialogueAndGiftResponses.mary.c",
-                    &[283][..],
-                ),
-                (
-                    "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
-                    &[467][..],
-                ),
-            ][..],
+            &[(
+                "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+                &[467][..],
+            )][..],
         ),
         (
             "decompiled_text/mfomt_jp",
@@ -36315,16 +36966,10 @@ fn unknown_variable_script_references_stay_inside_audited_contexts() {
                 232, 233, 244, 245, 250, 284, 324, 325, 327, 328, 343, 344, 352, 411, 412, 413, 415,
             ][..],
             28,
-            &[
-                (
-                    "EventScript_NPCEvent_Ellen_DialogueAndGiftResponses.mary.c",
-                    &[283][..],
-                ),
-                (
-                    "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
-                    &[467][..],
-                ),
-            ][..],
+            &[(
+                "EventScript_SystemEvent_ResetDailyWorldState.mary.c",
+                &[467][..],
+            )][..],
         ),
     ];
 
@@ -36688,10 +37333,9 @@ fn non_variable_unknown_constants_are_a_closed_audited_inventory() {
     actual.sort_unstable();
     actual.dedup();
 
-    assert_eq!(
-        actual,
-        ["NPC_INTERACTION_UNKNOWN_12"],
-        "a non-variable UNKNOWN constant was added, removed, or renamed without an evidence-backed audit"
+    assert!(
+        actual.is_empty(),
+        "a non-variable UNKNOWN constant was added without an evidence-backed audit: {actual:?}"
     );
 }
 

@@ -288,6 +288,21 @@ for (int i = 0; i < 10 && keep_running; i++)
 
 `mary_break_switch;` is not a substitute for loop `break`; it represents a specific original-ROM jump from inside a loop to the end of an enclosing switch.
 
+#### Lexically unreachable statements after control transfer
+
+A statement cannot follow a direct `return;`, `break;`, or an `if/else` whose two branches both terminate within the same block:
+
+```c
+switch (state)
+{
+    case STATE_DONE:
+        break;
+        Cleanup(); /* Error: this can never execute. */
+}
+```
+
+Mary-C reports `unreachable statement after return or break`. Accepting this input would produce trailing control flow that the structured decompiler cannot represent again, breaking source round trips. The source formatter also rejects legacy ASTs with such trailing statements instead of emitting Mary-C that cannot be compiled again. This restriction concerns code physically placed after a terminating statement; original-ROM branches that are unreachable only because of runtime conditions are still preserved exactly and are not optimized or rewritten.
+
 #### `goto`, user labels, and arbitrary jumps
 
 Currently unsupported:

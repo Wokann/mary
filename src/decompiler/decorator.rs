@@ -74,6 +74,7 @@ fn invoke_parameter_types(
 struct LocalTypeBackpropagator<'a> {
     const_scope: &'a ConstScope,
     definition_hints: HashMap<String, VecDeque<Option<TypeRequirement>>>,
+    compound_assigned_locals: HashSet<String>,
     explicit_local_types: &'a HashMap<String, ValueType>,
 }
 
@@ -85,6 +86,7 @@ impl<'a> LocalTypeBackpropagator<'a> {
         Self {
             const_scope,
             definition_hints: HashMap::new(),
+            compound_assigned_locals: HashSet::new(),
             explicit_local_types,
         }
     }
@@ -173,7 +175,7 @@ impl<'a> LocalTypeBackpropagator<'a> {
     }
 
     fn require_expr(
-        &self,
+        &mut self,
         expr: &mut Expr,
         value_type: ValueType,
         requirements: &mut TypeRequirements,
@@ -225,7 +227,7 @@ impl<'a> LocalTypeBackpropagator<'a> {
         }
     }
 
-    fn visit_invoke(&self, invoke: &mut Invoke, requirements: &mut TypeRequirements) {
+    fn visit_invoke(&mut self, invoke: &mut Invoke, requirements: &mut TypeRequirements) {
         let Some((_, shape)) = self.const_scope.callable_map().get(&invoke.func) else {
             for argument in &mut invoke.args {
                 self.visit_expr(argument, requirements);
@@ -239,7 +241,7 @@ impl<'a> LocalTypeBackpropagator<'a> {
         }
     }
 
-    fn visit_expr(&self, expr: &mut Expr, requirements: &mut TypeRequirements) {
+    fn visit_expr(&mut self, expr: &mut Expr, requirements: &mut TypeRequirements) {
         match expr {
             Expr::Call(invoke) => self.visit_invoke(invoke, requirements),
             Expr::CmpEq(pair)
@@ -264,13 +266,14 @@ impl<'a> LocalTypeBackpropagator<'a> {
                 self.visit_expr(&mut pair.1, requirements);
             }
             Expr::OpNeg(inner) | Expr::OpNot(inner) => self.visit_expr(inner, requirements),
-            Expr::Name(_)
-            | Expr::Int(_)
-            | Expr::Str(_)
-            | Expr::PostIncrement(_)
-            | Expr::PreIncrement(_)
-            | Expr::PostDecrement(_)
-            | Expr::PreDecrement(_) => {}
+            Expr::PostIncrement(name)
+            | Expr::PreIncrement(name)
+            | Expr::PostDecrement(name)
+            | Expr::PreDecrement(name) => {
+                self.compound_assigned_locals.insert(name.clone());
+                requirements.remove(name);
+            }
+            Expr::Name(_) | Expr::Int(_) | Expr::Str(_) => {}
         }
     }
 
@@ -333,6 +336,7 @@ impl<'a> LocalTypeBackpropagator<'a> {
                 if *operation == AssignOperation::None {
                     self.transfer_definition(name, expr, &mut requirements);
                 } else {
+                    self.compound_assigned_locals.insert(name.clone());
                     requirements.remove(name);
                     self.visit_expr(expr, &mut requirements);
                 }
@@ -439,10 +443,12 @@ impl<'a> StringDecorateVisitor<'a> {
         constant_names: Vec<String>,
         const_scope: &'a ConstScope,
         definition_hints: HashMap<String, VecDeque<Option<TypeRequirement>>>,
+        compound_assigned_locals: &HashSet<String>,
         explicit_local_types: &HashMap<String, ValueType>,
     ) -> Self {
         let mut stable_hint_types: HashMap<String, ValueType> = definition_hints
             .iter()
+            .filter(|(name, _)| !compound_assigned_locals.contains(*name))
             .filter_map(|(name, hints)| {
                 let mut common = None;
                 for hint in hints {
@@ -524,6 +530,9 @@ impl<'a> StringDecorateVisitor<'a> {
         if invoke.func == "mary_negated_int"
             || self.const_scope.typed_identity_type(&invoke.func).is_some()
         {
+            for argument in &mut invoke.args {
+                self.visit_expr(argument)?;
+            }
             return Ok(());
         }
         let (_, shape) = &self.const_scope.callable_map()[&invoke.func];
@@ -1008,29 +1017,81 @@ impl<'a> StringDecorateVisitor<'a> {
     fn collect_assigned_locals(stmts: &[Stmt], names: &mut HashSet<String>) {
         for stmt in stmts {
             match stmt {
-                Stmt::Vars(items) => names.extend(items.iter().map(|(name, _)| name.clone())),
-                Stmt::Assign(_, name, _) | Stmt::AssignNoDisc(_, name, _) => {
-                    names.insert(name.clone());
+                Stmt::Vars(items) => {
+                    names.extend(items.iter().map(|(name, _)| name.clone()));
+                    for (_, initializer) in items {
+                        if let Some(initializer) = initializer {
+                            Self::collect_mutated_expr(initializer, names);
+                        }
+                    }
                 }
-                Stmt::If(_, body) | Stmt::DoWhile(_, body) => {
+                Stmt::Assign(_, name, expr) | Stmt::AssignNoDisc(_, name, expr) => {
+                    names.insert(name.clone());
+                    Self::collect_mutated_expr(expr, names);
+                }
+                Stmt::Expr(expr) => Self::collect_mutated_expr(expr, names),
+                Stmt::Call(invoke) => {
+                    for argument in &invoke.args {
+                        Self::collect_mutated_expr(argument, names);
+                    }
+                }
+                Stmt::If(condition, body) | Stmt::DoWhile(condition, body) => {
+                    Self::collect_mutated_expr(condition, names);
                     Self::collect_assigned_locals(body, names);
                 }
-                Stmt::IfElse(_, yes, no) => {
+                Stmt::IfElse(condition, yes, no) => {
+                    Self::collect_mutated_expr(condition, names);
                     Self::collect_assigned_locals(yes, names);
                     Self::collect_assigned_locals(no, names);
                 }
                 Stmt::For(elements) => {
+                    Self::collect_mutated_expr(&elements.0, names);
                     Self::collect_assigned_locals(std::slice::from_ref(&elements.1), names);
                     Self::collect_assigned_locals(std::slice::from_ref(&elements.2), names);
                     Self::collect_assigned_locals(&elements.3, names);
                 }
-                Stmt::Switch(_, cases, _, _) => {
+                Stmt::Switch(selector, cases, _, _) => {
+                    Self::collect_mutated_expr(selector, names);
                     for case in cases {
                         Self::collect_assigned_locals(case.stmts(), names);
                     }
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn collect_mutated_expr(expr: &Expr, names: &mut HashSet<String>) {
+        match expr {
+            Expr::PostIncrement(name)
+            | Expr::PreIncrement(name)
+            | Expr::PostDecrement(name)
+            | Expr::PreDecrement(name) => {
+                names.insert(name.clone());
+            }
+            Expr::OpAdd(pair)
+            | Expr::OpSub(pair)
+            | Expr::OpMul(pair)
+            | Expr::OpDiv(pair)
+            | Expr::OpMod(pair)
+            | Expr::OpOr(pair)
+            | Expr::OpAnd(pair)
+            | Expr::CmpEq(pair)
+            | Expr::CmpNe(pair)
+            | Expr::CmpLt(pair)
+            | Expr::CmpLe(pair)
+            | Expr::CmpGe(pair)
+            | Expr::CmpGt(pair) => {
+                Self::collect_mutated_expr(&pair.0, names);
+                Self::collect_mutated_expr(&pair.1, names);
+            }
+            Expr::OpNeg(inner) | Expr::OpNot(inner) => Self::collect_mutated_expr(inner, names),
+            Expr::Call(invoke) => {
+                for argument in &invoke.args {
+                    Self::collect_mutated_expr(argument, names);
+                }
+            }
+            Expr::Name(_) | Expr::Int(_) | Expr::Str(_) => {}
         }
     }
 
@@ -1052,46 +1113,94 @@ impl<'a> StringDecorateVisitor<'a> {
         })
     }
 
-    fn stmts_may_fall_through(stmts: &[Stmt]) -> bool {
-        stmts.iter().all(|stmt| match stmt {
-            Stmt::Exit => false,
-            // `mary_break_switch` does not exit the script. It may rejoin at
-            // an enclosing switch outside the construct currently being
-            // inspected, so treating it as a dead branch would let local
-            // refinements leak onto that rejoined path.
-            Stmt::Break => true,
-            Stmt::IfElse(_, yes, no) => {
-                Self::stmts_may_fall_through(yes) || Self::stmts_may_fall_through(no)
+    /// Returns `(falls_through, exits_script, escapes_to_switch)` for every
+    /// reachable path through a statement sequence.  Keeping the three
+    /// outcomes separate matters for sequences such as
+    /// `if (condition) { mary_break_switch; } return;`: the return is not
+    /// reachable on the break path, so that sequence does not definitely exit
+    /// the script.
+    fn stmt_sequence_outcomes(stmts: &[Stmt]) -> (bool, bool, bool) {
+        let mut falls_through = true;
+        let mut exits_script = false;
+        let mut escapes_to_switch = false;
+
+        for stmt in stmts {
+            if !falls_through {
+                break;
             }
-            // A condition without else can always be false. Loops and
-            // switches are likewise kept conservative here: proving that
-            // they cannot complete requires a separate control-flow model.
-            _ => true,
-        })
+
+            let (stmt_falls_through, stmt_exits_script, stmt_escapes_to_switch) = match stmt {
+                Stmt::Exit => (false, true, false),
+                Stmt::Break => (false, false, true),
+                Stmt::If(_, body) => {
+                    let (_, body_exits, body_escapes) = Self::stmt_sequence_outcomes(body);
+                    // The false condition always remains a fallthrough path.
+                    (true, body_exits, body_escapes)
+                }
+                Stmt::IfElse(_, yes, no) => {
+                    let (yes_falls, yes_exits, yes_escapes) = Self::stmt_sequence_outcomes(yes);
+                    let (no_falls, no_exits, no_escapes) = Self::stmt_sequence_outcomes(no);
+                    (
+                        yes_falls || no_falls,
+                        yes_exits || no_exits,
+                        yes_escapes || no_escapes,
+                    )
+                }
+                Stmt::For(elements) => (
+                    true,
+                    false,
+                    Self::contains_break_outside_nested_switch(&elements.3),
+                ),
+                Stmt::DoWhile(_, body) => (
+                    true,
+                    false,
+                    Self::contains_break_outside_nested_switch(body),
+                ),
+                // A nested switch consumes its own breaks. Loops and switches
+                // otherwise remain conservative: they may complete normally.
+                Stmt::Switch(_, _, _, _) => (true, false, false),
+                Stmt::Vars(_)
+                | Stmt::Consts(_)
+                | Stmt::Assign(_, _, _)
+                | Stmt::AssignNoDisc(_, _, _)
+                | Stmt::Expr(_)
+                | Stmt::Call(_)
+                | Stmt::Ir(_)
+                | Stmt::JumpNext => (true, false, false),
+            };
+
+            exits_script |= stmt_exits_script;
+            escapes_to_switch |= stmt_escapes_to_switch;
+            falls_through = stmt_falls_through;
+        }
+
+        (falls_through, exits_script, escapes_to_switch)
+    }
+
+    fn stmts_may_fall_through(stmts: &[Stmt]) -> bool {
+        let (falls_through, _, escapes_to_switch) = Self::stmt_sequence_outcomes(stmts);
+        // `mary_break_switch` rejoins at an enclosing switch exit, so it is a
+        // live continuation for the local-state analyses using this helper.
+        falls_through || escapes_to_switch
     }
 
     fn stmts_definitely_exit_script(stmts: &[Stmt]) -> bool {
-        stmts.iter().any(|stmt| match stmt {
-            Stmt::Exit => true,
-            Stmt::IfElse(_, yes, no) => {
-                Self::stmts_definitely_exit_script(yes) && Self::stmts_definitely_exit_script(no)
-            }
-            // Break reaches the enclosing switch exit. Proving that a nested
-            // switch or loop cannot complete needs richer control-flow state,
-            // so those constructs deliberately remain conservative.
-            _ => false,
-        })
+        let (falls_through, exits_script, escapes_to_switch) = Self::stmt_sequence_outcomes(stmts);
+        !falls_through && exits_script && !escapes_to_switch
     }
 
     fn visit_expr(&mut self, expr: &mut Expr) -> Result<(), DecompileError> {
         match expr {
-            Expr::Name(_)
-            | Expr::Int(_)
-            | Expr::Str(_)
-            | Expr::PostIncrement(_)
-            | Expr::PreIncrement(_)
-            | Expr::PostDecrement(_)
-            | Expr::PreDecrement(_) => Ok(()),
+            Expr::PostIncrement(name)
+            | Expr::PreIncrement(name)
+            | Expr::PostDecrement(name)
+            | Expr::PreDecrement(name) => {
+                self.local_types.remove(name);
+                self.local_origins.remove(name);
+                self.local_values.remove(name);
+                Ok(())
+            }
+            Expr::Name(_) | Expr::Int(_) | Expr::Str(_) => Ok(()),
 
             Expr::OpAdd(exprs)
             | Expr::OpSub(exprs)
@@ -1109,12 +1218,24 @@ impl<'a> StringDecorateVisitor<'a> {
                 let outer_values = self.local_values.clone();
                 let outer_overrides = self.callable_return_overrides.clone();
                 self.apply_related_refinements(&exprs.0, true);
-                let result = self.visit_expr(&mut exprs.1);
-                self.local_types = outer_types;
-                self.local_origins = outer_origins;
-                self.local_values = outer_values;
-                self.callable_return_overrides = outer_overrides;
-                result
+                self.visit_expr(&mut exprs.1)?;
+                self.local_types = self.join_local_value_types(
+                    &outer_types,
+                    &outer_values,
+                    &self.local_types,
+                    &self.local_values,
+                );
+                self.local_origins = Self::join_local_types([
+                    outer_origins,
+                    std::mem::take(&mut self.local_origins),
+                ]);
+                self.local_values =
+                    Self::join_local_types([outer_values, std::mem::take(&mut self.local_values)]);
+                self.callable_return_overrides = Self::join_local_types([
+                    outer_overrides,
+                    std::mem::take(&mut self.callable_return_overrides),
+                ]);
+                Ok(())
             }
 
             Expr::OpOr(exprs) => {
@@ -1124,12 +1245,24 @@ impl<'a> StringDecorateVisitor<'a> {
                 let outer_values = self.local_values.clone();
                 let outer_overrides = self.callable_return_overrides.clone();
                 self.apply_related_refinements(&exprs.0, false);
-                let result = self.visit_expr(&mut exprs.1);
-                self.local_types = outer_types;
-                self.local_origins = outer_origins;
-                self.local_values = outer_values;
-                self.callable_return_overrides = outer_overrides;
-                result
+                self.visit_expr(&mut exprs.1)?;
+                self.local_types = self.join_local_value_types(
+                    &outer_types,
+                    &outer_values,
+                    &self.local_types,
+                    &self.local_values,
+                );
+                self.local_origins = Self::join_local_types([
+                    outer_origins,
+                    std::mem::take(&mut self.local_origins),
+                ]);
+                self.local_values =
+                    Self::join_local_types([outer_values, std::mem::take(&mut self.local_values)]);
+                self.callable_return_overrides = Self::join_local_types([
+                    outer_overrides,
+                    std::mem::take(&mut self.callable_return_overrides),
+                ]);
+                Ok(())
             }
 
             Expr::CmpEq(exprs)
@@ -1517,7 +1650,28 @@ impl<'a> StringDecorateVisitor<'a> {
                         ]);
                     }
 
+                    let case_outcomes = Self::stmt_sequence_outcomes(switch_case.stmts());
+                    let mut case_assigned = HashSet::new();
+                    Self::collect_assigned_locals(switch_case.stmts(), &mut case_assigned);
+                    let case_entry_overrides = self.callable_return_overrides.clone();
                     self.visit_stmts(switch_case.stmts_mut())?;
+                    let mixed_switch_escape =
+                        case_outcomes.2 && (case_outcomes.0 || case_outcomes.1);
+                    if mixed_switch_escape {
+                        // The sequential visitor ends in the non-break path.
+                        // A conditional break may have escaped earlier with a
+                        // different value/type for any local written in this
+                        // case, so none of those facts are valid at the switch
+                        // join. Case-local related-callable refinements can be
+                        // path-dependent for the same reason; retain only the
+                        // facts that were already true before the switch.
+                        for name in case_assigned {
+                            self.local_types.remove(&name);
+                            self.local_origins.remove(&name);
+                            self.local_values.remove(&name);
+                        }
+                        self.callable_return_overrides = case_entry_overrides;
+                    }
                     let definitely_exits = Self::stmts_definitely_exit_script(switch_case.stmts());
                     if definitely_exits {
                         fallthrough_types = None;
@@ -1571,11 +1725,37 @@ impl<'a> StringDecorateVisitor<'a> {
 
     fn visit_stmts(&mut self, stmts: &mut [Stmt]) -> Result<(), DecompileError> {
         let mut result = Ok(());
+        let mut terminal_state = None;
 
         for stmt in stmts {
             if let Err(err) = self.visit_stmt(stmt) {
                 result = Err(err);
             }
+
+            if terminal_state.is_none() {
+                let (falls_through, exits_script, escapes_to_switch) =
+                    Self::stmt_sequence_outcomes(std::slice::from_ref(stmt));
+                if !falls_through && (exits_script || escapes_to_switch) {
+                    terminal_state = Some((
+                        self.local_types.clone(),
+                        self.local_origins.clone(),
+                        self.local_values.clone(),
+                        self.callable_return_overrides.clone(),
+                    ));
+                }
+            }
+        }
+
+        if let Some((types, origins, values, overrides)) = terminal_state {
+            // Statements after an unconditional control transfer may still
+            // contain physical string references that must be decorated for
+            // lossless output. They are therefore visited above, but their
+            // unreachable assignments cannot define the state observed at
+            // the real exit from this sequence.
+            self.local_types = types;
+            self.local_origins = origins;
+            self.local_values = values;
+            self.callable_return_overrides = overrides;
         }
 
         result
@@ -1628,6 +1808,7 @@ pub(super) fn decorate_stmts_with_strings(
         string_constants,
         const_scope,
         backpropagator.definition_hints,
+        &backpropagator.compound_assigned_locals,
         explicit_local_types,
     );
     visitor.visit_stmts(stmts)?;

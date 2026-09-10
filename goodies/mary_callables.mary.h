@@ -414,8 +414,9 @@ mary_callable_table
  * Play/Stop for audio, Start/Wait/Finish for multi-step operations, and
  * Create/Destroy for runtime objects. Related callables use the same domain
  * noun and differ only by the operation, so names remain searchable as a
- * family. A numbered FuncXXX/ProcXXX name is retained until source, ROM handler,
- * and script context establish a stable contract.
+ * family. The current public table contains no FuncXXX/ProcXXX placeholder;
+ * where a business identity is not proven, the name states only the verified
+ * physical or no-op behavior instead of inventing a semantic contract.
  *
  * callable 命名约定
  *
@@ -423,8 +424,9 @@ mary_callable_table
  * Get/Set，条件判断使用 Is/Has/Can，状态修改使用 Add/Remove/Clear，界面表现
  * 使用 Show/Hide/Open/Close，音频使用 Play/Stop，多阶段操作使用
  * Start/Wait/Finish，运行时对象使用 Create/Destroy。同一功能域的关联函数
- * 共用相同名词，仅以操作动词区分，以便按功能族检索。只有源码、ROM handler
- * 与脚本上下文共同证明稳定契约后，才会将 FuncXXX/ProcXXX 替换为语义名。
+ * 共用相同名词，仅以操作动词区分，以便按功能族检索。当前公开表已不存在
+ * FuncXXX/ProcXXX 机械占位；业务身份尚未证实时，名称只陈述已确认的物理行为或
+ * 空操作属性，不编造语义契约。
  */
 
 /*
@@ -5633,49 +5635,59 @@ MaryEventIconId GetToolIconId(MaryToolId tool_id);
  * pushes five values that resemble grid x/y, tile state, object ID, and
  * variant, but all four ROMs dispatch this slot directly to the common return
  * block. The handler does not pop or inspect them and changes no field state.
- * Parameters: x, y, tile_state, object_id, and variant preserve the five
- * original stack operands; none is consumed by the native handler.
+ * Parameters: unused_operand_1 through unused_operand_5 preserve the five
+ * original stack operands; none is consumed by the native handler. Their
+ * positional values often resemble tutorial grid fields, but the no-op cannot
+ * establish those as native parameter types.
  *
  * 种田教程字节码中保留的已确认零售版空操作。VM 会压入五个看似网格 x/y、
  * 格子状态、对象 ID 与变体的值，但四个 ROM 都把该槽直接派发到共用返回块；
  * handler 不弹出也不检查这些值，不会改变农田状态。
- * 参数：x、y、tile_state、object_id、variant 保留五个原始栈操作数；原生
- * handler 不消费其中任何一个。
+ * 参数：unused_operand_1 至 unused_operand_5 保留五个原始栈操作数；原生
+ * handler 不消费其中任何一个。各位置数值经常看似教程网格字段，但空操作本身
+ * 无法证明它们是原生参数类型。
  */
-void NoOpTutorialFieldTile(int x, int y, int tile_state, int object_id, int variant);
+void NoOpTutorialFieldTile(
+    int unused_operand_1,
+    int unused_operand_2,
+    int unused_operand_3,
+    int unused_operand_4,
+    int unused_operand_5
+);
 
 /*
  * Verified three-operand retail no-op adjacent to NoOpTutorialFieldTile. Its
  * coordinate-like operands are retained only to preserve the original stack
  * program and emitted bytes.
- * Parameters: x, y, and object_state preserve the three original stack
+ * Parameters: unused_operand_1 through unused_operand_3 preserve the three original stack
  * operands; none is consumed by the native handler.
  *
  * 与 NoOpTutorialFieldTile 相邻的已确认三操作数零售版空操作。看似坐标与状态的
  * 操作数仅为保存原始栈程序及编译字节而保留。
- * 参数：x、y、object_state 保留三个原始栈操作数；原生 handler 不消费它们。
+ * 参数：unused_operand_1 至 unused_operand_3 保留三个原始栈操作数；原生
+ * handler 不消费它们。
  */
-void NoOpTutorialFieldObject(int x, int y, int object_state);
+void NoOpTutorialFieldObject(int unused_operand_1, int unused_operand_2, int unused_operand_3);
 
 /*
  * Verified three-operand retail no-op found in the chicken tutorial. The
  * coordinate- and slot-like values are not consumed by the native handler.
- * Parameters: x, y, and egg_slot preserve the three original stack operands.
+ * Parameters: unused_operand_1 through unused_operand_3 preserve the three original stack operands.
  *
  * 养鸡教程中的已确认三操作数零售版空操作。看似坐标与槽位的值不会被原生
  * handler 消费。
- * 参数：x、y、egg_slot 保留三个原始栈操作数。
+ * 参数：unused_operand_1 至 unused_operand_3 保留三个原始栈操作数。
  */
-void NoOpTutorialEggDefinition(int x, int y, int egg_slot);
+void NoOpTutorialEggDefinition(int unused_operand_1, int unused_operand_2, int unused_operand_3);
 
 /* Verified one-operand retail no-op paired with NoOpTutorialEggDefinition.
- * Parameter: egg_slot preserves the original stack operand; the native
+ * Parameter: unused_operand preserves the original stack operand; the native
  * handler does not consume it.
  *
  * 与 NoOpTutorialEggDefinition 配对的已确认单操作数零售版空操作。
- * 参数：egg_slot 保留原始栈操作数；原生 handler 不消费它。
+ * 参数：unused_operand 保留原始栈操作数；原生 handler 不消费它。
  */
-void NoOpTutorialEggSelection(int egg_slot);
+void NoOpTutorialEggSelection(int unused_operand);
 
 /*
  * Puts the player into the scripted state for holding an actor graphic above

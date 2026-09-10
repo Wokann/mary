@@ -5308,19 +5308,21 @@ typedef enum MaryTextVariableSlot
 /* Entity emote-bubble animation IDs shared by all four targets. Callable
  * 0x011 forwards this value unchanged to the entity's emote DefinedSprite;
  * FOMT-DOC identifies that resource, and equivalent US/JP scripts in both game
- * families establish the meanings used below. ID 8 is present in the physical
- * 0-10 domain but is not used by any of the four vanilla script sets. Its
- * `Sleep` label occurs only in FOMT_Studio's community catalog and has not been
- * confirmed through a correct graphics binding or a native call site, so Mary
- * deliberately keeps that member numbered. HEART corrects the source
+ * families establish the meanings used below. Although ID 8 is unused by all
+ * four vanilla script sets, its physical animation is now independently bound
+ * and decoded in every ROM: animation 8 uses frames 23, 20, 21, 22, 21, 20,
+ * whose identical graphics show a blank lead-in followed by one, two and three
+ * `Z` sleep marks. This confirms SLEEP without relying on the community label.
+ * HEART corrects the source
  * catalog's `Hearth` typo, with the heart-event call sites as the primary
  * evidence for the corrected meaning.
  *
  * 四个目标版本共用的实体表情气泡动画 ID。callable 0x011 会把该值原样交给
  * 实体的 emote DefinedSprite；FOMT-DOC 确认资源身份，男女版 US/JP 的对应脚本
- * 则证实下列已命名成员的含义。ID 8 属于物理 0-10 域，但四套原版脚本均未使用；
- * `Sleep` 只见于 FOMT_Studio 社区目录，尚未由正确图形绑定或原生调用点证实，
- * 因此 Mary 有意保留编号名称。HEART 修正来源目录中的 `Hearth` 拼写错误，
+ * 则证实下列已命名成员的含义。ID 8 虽未被四套原版脚本使用，但现已在每套 ROM
+ * 中独立绑定并解码其物理动画：动画 8 依次使用帧 23、20、21、22、21、20，
+ * 四版一致的图形从空白引入帧逐步显示一、二、三个 `Z` 睡眠符号。因此 SLEEP
+ * 不再依赖社区标签。HEART 修正来源目录中的 `Hearth` 拼写错误，
  * 其主要依据是实际爱心事件调用点。 */
 typedef enum MaryEntityEmoteId
 {
@@ -5332,7 +5334,7 @@ typedef enum MaryEntityEmoteId
     ENTITY_EMOTE_HAPPY = 5,
     ENTITY_EMOTE_THINKING = 6,
     ENTITY_EMOTE_SKULL = 7,
-    ENTITY_EMOTE_08 = 8,
+    ENTITY_EMOTE_SLEEP = 8,
     ENTITY_EMOTE_GOOD = 9,
     ENTITY_EMOTE_BAD = 10,
 } MaryEntityEmoteId;
@@ -5510,17 +5512,17 @@ typedef enum MaryAudioSequenceId
     AUDIO_SEQUENCE_104 = 104,
     AUDIO_SFX_ENTER_HOT_SPRING = 105,
     AUDIO_SFX_PICK_UP_ITEM = 106,
-    AUDIO_SEQUENCE_107 = 107,
+    AUDIO_SFX_RUCKSACK_ITEM_TRANSFER = 107,
     AUDIO_SFX_THROW_ITEM = 108,
     AUDIO_SFX_THROWN_ITEM_LANDS = 109,
     AUDIO_SFX_SHIPMENT_DEPOSIT = 110,
     AUDIO_SFX_SICKLE_CUT = 111,
-    AUDIO_SEQUENCE_112 = 112,
-    AUDIO_SEQUENCE_113 = 113,
-    AUDIO_SEQUENCE_114 = 114,
-    AUDIO_SEQUENCE_115 = 115,
-    AUDIO_SEQUENCE_116 = 116,
-    AUDIO_SEQUENCE_117 = 117,
+    AUDIO_SFX_SICKLE_VARIANT_1 = 112,
+    AUDIO_SFX_SICKLE_VARIANT_2 = 113,
+    AUDIO_SFX_SICKLE_VARIANT_3 = 114,
+    AUDIO_SFX_SICKLE_VARIANT_4 = 115,
+    AUDIO_SFX_SICKLE_VARIANT_5 = 116,
+    AUDIO_SFX_SICKLE_VARIANT_6 = 117,
     AUDIO_SFX_HOE_TILL = 118,
     AUDIO_SEQUENCE_119 = 119,
     AUDIO_SEQUENCE_120 = 120,
@@ -5531,23 +5533,23 @@ typedef enum MaryAudioSequenceId
     AUDIO_SFX_HAMMER_SMALL_STONE = 125,
     AUDIO_SFX_HAMMER_LARGE_STONE = 126,
     AUDIO_SFX_HAMMER_HUGE_STONE = 127,
-    AUDIO_SEQUENCE_128 = 128,
-    AUDIO_SEQUENCE_129 = 129,
-    AUDIO_SEQUENCE_130 = 130,
+    AUDIO_SFX_HAMMER_VARIANT_1 = 128,
+    AUDIO_SFX_HAMMER_VARIANT_2 = 129,
+    AUDIO_SFX_HAMMER_VARIANT_3 = 130,
     AUDIO_SFX_HAMMER_MAX_CHARGED_SWING = 131,
     AUDIO_SFX_AXE_BRANCH_CHOP = 132,
     AUDIO_SFX_AXE_STUMP_CHOP = 133,
-    AUDIO_SEQUENCE_134 = 134,
-    AUDIO_SEQUENCE_135 = 135,
-    AUDIO_SEQUENCE_136 = 136,
-    AUDIO_SEQUENCE_137 = 137,
+    AUDIO_SFX_AXE_VARIANT_1 = 134,
+    AUDIO_SFX_AXE_VARIANT_2 = 135,
+    AUDIO_SFX_AXE_VARIANT_3 = 136,
+    AUDIO_SFX_AXE_VARIANT_4 = 137,
     AUDIO_SFX_AXE_MAX_CHARGED_SWING = 138,
     AUDIO_SFX_WATERING_CAN_POUR = 139,
-    AUDIO_SEQUENCE_140 = 140,
-    AUDIO_SEQUENCE_141 = 141,
-    AUDIO_SEQUENCE_142 = 142,
-    AUDIO_SEQUENCE_143 = 143,
-    AUDIO_SEQUENCE_144 = 144,
+    AUDIO_SFX_WATERING_CAN_POUR_VARIANT_1 = 140,
+    AUDIO_SFX_WATERING_CAN_POUR_VARIANT_2 = 141,
+    AUDIO_SFX_WATERING_CAN_POUR_VARIANT_3 = 142,
+    AUDIO_SFX_WATERING_CAN_POUR_VARIANT_4 = 143,
+    AUDIO_SFX_WATERING_CAN_POUR_VARIANT_5 = 144,
     AUDIO_SFX_WATERING_CAN_MAX_CHARGED_POUR = 145,
     AUDIO_SFX_WATER_SPLASH = 146,
     AUDIO_SFX_BRUSH_LIVESTOCK = 147,
@@ -5571,9 +5573,9 @@ typedef enum MaryAudioSequenceId
     AUDIO_SEQUENCE_165 = 165,
     AUDIO_SEQUENCE_166 = 166,
     AUDIO_SFX_FOAL_NEIGH = 167,
-    AUDIO_SEQUENCE_168 = 168,
+    AUDIO_SFX_HORSE_NEIGH = 168,
     AUDIO_SFX_DOG_BARK = 169,
-    AUDIO_SEQUENCE_170 = 170,
+    AUDIO_SFX_MENU_CANCEL_DUPLICATE = 170,
     AUDIO_SEQUENCE_171 = 171,
     AUDIO_SFX_BABY_CRY = 172,
     AUDIO_SFX_HARVEST_SPRITE_FUSION_FINISH = 173,
@@ -5590,7 +5592,7 @@ typedef enum MaryAudioSequenceId
     AUDIO_SFX_ATTENTION_CHIME = 184,
     AUDIO_SEQUENCE_185 = 185,
     AUDIO_SEQUENCE_186 = 186,
-    AUDIO_SEQUENCE_187 = 187,
+    AUDIO_SFX_MINIGAME_TIME_UP = 187,
     AUDIO_SFX_STAR_SPARKLE = 188,
     AUDIO_SEQUENCE_189 = 189,
     AUDIO_SFX_HARVEST_GODDESS_APPEARS = 190,
@@ -5600,13 +5602,13 @@ typedef enum MaryAudioSequenceId
     AUDIO_UNUSED_SLOT_194 = 194,
     AUDIO_UNUSED_SLOT_195 = 195,
     AUDIO_UNUSED_SLOT_196 = 196,
-    AUDIO_SEQUENCE_197 = 197,
-    AUDIO_SEQUENCE_198 = 198,
+    AUDIO_SFX_MENU_CONFIRM = 197,
+    AUDIO_SFX_MENU_CANCEL = 198,
     AUDIO_SFX_INCORRECT_ANSWER = 199,
     AUDIO_SFX_KAPPA_SURPRISE = 200,
     AUDIO_SEQUENCE_201 = 201,
     AUDIO_SEQUENCE_202 = 202,
-    AUDIO_SEQUENCE_203 = 203,
+    AUDIO_SFX_MENU_CURSOR = 203,
     AUDIO_SFX_CHICKEN_CLUCK = 204,
     AUDIO_SFX_CLOSE_DOOR = 205,
     AUDIO_SEQUENCE_206 = 206,
@@ -5649,20 +5651,25 @@ typedef enum MaryAudioSequenceId
  * immediately before assigning the next scene-state value. Consequently
  * 131 is therefore a hammer sound reused for the blackout rather than a
  * blackout-specific identity. ID 144 lacks a corresponding watering action
- * call and remains numbered.
+ * call, so it uses only the proven family-level VARIANT_5 name rather than a
+ * guessed tool-tier label.
  * Call-site timing is audited separately from sequence identity: in MFoMT's
  * New Year's Eve bad-dream event, 170 plays immediately before Karen's attack
- * animation and a screen flash. ID 174 is a short noise pulse repeated as each
+ * animation and a screen flash. Direct native input paths independently use
+ * byte-identical slot 198 whenever the B button cancels or backs out of a menu;
+ * all four ROMs contain the same eleven direct slot-198 audio-start sites. Slot
+ * 170 therefore receives the explicit MENU_CANCEL_DUPLICATE name: it identifies
+ * the duplicated physical slot without pretending the bad-dream scene itself is
+ * a menu operation. ID 174 is a short noise pulse repeated as each
  * Harvest Sprite vanishes with a colored flash and once more when the grouped
  * fusion effect appears. The two-track ID 173 follows that final pulse and
  * closes the fusion immediately before the white fade. Their complete call
  * topology and rendered sequence envelopes therefore support the broad
  * FUSION_PULSE and FUSION_FINISH names without inventing an official onomatopoeia.
- * ID 170 still has only one composite attack-scene use and remains numbered.
- * An exhaustive scan of the four vanilla Mary-C script sets leaves exactly two
- * referenced sequences under neutral numbered names: 144 and 170.
- * Every other sequence referenced by an event
- * script has a call-site-supported semantic name. Slots 0, 43-100, and
+ * An exhaustive scan of the four vanilla Mary-C script sets now leaves no
+ * referenced sequence under a neutral numbered name. Every sequence referenced
+ * by an event script has either a call-site-supported semantic identity or, for
+ * 144, the resource-proven watering-family variant name. Slots 0, 43-100, and
  * 194-196 in all four ROMs point to the same zero-track SongEnt and are named
  * as unused physical slots. FoMT slots 38-42 also point to that zero-track
  * entry, whereas MFoMT replaces them with five real New Record sequences.
@@ -5730,13 +5737,15 @@ typedef enum MaryAudioSequenceId
  * 写入下一个场景状态之前分别调用 138 与 145。因此 131 是被停电演出复用的锤击音，
  * 不是停电专用音效；144 缺少对应的洒水动作调用，继续保留编号。调用时机与
  * 序列身份分开审计：在 MFoMT 的除夕噩梦事件中，
- * 170 紧接在 Karen 的攻击动画和屏幕闪烁之前。174 是短噪声脉冲，会在每个小矮人
+ * 170 紧接在 Karen 的攻击动画和屏幕闪烁之前。独立的原生输入路径进一步证明：
+ * B 键取消或返回菜单时会播放与 170 逐字节相同的槽 198；四套 ROM 都存在相同的
+ * 11 个槽 198 直接播放点。因此 170 明确命名为 MENU_CANCEL_DUPLICATE，既表达其
+ * 物理重复关系，也不把噩梦剧情伪装成菜单操作。174 是短噪声脉冲，会在每个小矮人
  * 伴随彩色闪光消失时重复播放，并在组合融合特效出现时再播放一次；双轨 173 紧随
  * 最后一次脉冲，在白色淡出前结束融合。完整调用拓扑及实际渲染包络足以支持宽泛的
- * FUSION_PULSE 与 FUSION_FINISH 名称，而无需杜撰官方拟声词。170 仍只有一个复合攻击
- * 场景用途，继续保留编号。
- * 对四套原版 Mary-C 脚本进行完整扫描后，仍以中性编号形式被脚本引用的序列恰好只有
- * 两个：144、170。其余被事件脚本调用的
+ * FUSION_PULSE 与 FUSION_FINISH 名称，而无需杜撰官方拟声词。
+ * 对四套原版 Mary-C 脚本进行完整扫描后，仍以中性编号形式被脚本引用的序列只剩
+ * 144。其余被事件脚本调用的
  * 序列均已获得调用位置支持的语义名称。四套 ROM 的 0、43-100、194-196 槽都指向
  * 同一个零音轨 SongEnt，因此命名为未使用物理槽；FoMT 的 38-42 也指向该空项，
  * MFoMT 则在这五个槽中放入真实的 New Record 序列。其他未被脚本引用但实际非空的
@@ -5875,22 +5884,41 @@ mary_const_alias(AUDIO_SEQUENCE_101, AUDIO_SFX_EAT);
 mary_const_alias(AUDIO_SEQUENCE_102, AUDIO_SFX_DRINK);
 mary_const_alias(AUDIO_SEQUENCE_105, AUDIO_SFX_ENTER_HOT_SPRING);
 mary_const_alias(AUDIO_SEQUENCE_106, AUDIO_SFX_PICK_UP_ITEM);
+mary_const_alias(AUDIO_SEQUENCE_107, AUDIO_SFX_RUCKSACK_ITEM_TRANSFER);
 mary_const_alias(AUDIO_SEQUENCE_108, AUDIO_SFX_THROW_ITEM);
 mary_const_alias(AUDIO_SEQUENCE_109, AUDIO_SFX_THROWN_ITEM_LANDS);
 mary_const_alias(AUDIO_SEQUENCE_110, AUDIO_SFX_SHIPMENT_DEPOSIT);
 mary_const_alias(AUDIO_SEQUENCE_111, AUDIO_SFX_SICKLE_CUT);
+mary_const_alias(AUDIO_SEQUENCE_112, AUDIO_SFX_SICKLE_VARIANT_1);
+mary_const_alias(AUDIO_SEQUENCE_113, AUDIO_SFX_SICKLE_VARIANT_2);
+mary_const_alias(AUDIO_SEQUENCE_114, AUDIO_SFX_SICKLE_VARIANT_3);
+mary_const_alias(AUDIO_SEQUENCE_115, AUDIO_SFX_SICKLE_VARIANT_4);
+mary_const_alias(AUDIO_SEQUENCE_116, AUDIO_SFX_SICKLE_VARIANT_5);
+mary_const_alias(AUDIO_SEQUENCE_117, AUDIO_SFX_SICKLE_VARIANT_6);
 mary_const_alias(AUDIO_SEQUENCE_118, AUDIO_SFX_HOE_TILL);
 mary_const_alias(AUDIO_SEQUENCE_121, AUDIO_SFX_LIGHT_FIREPLACE);
 mary_const_alias(AUDIO_SEQUENCE_124, AUDIO_SFX_ADD_ITEM_TO_FIRE);
 mary_const_alias(AUDIO_SEQUENCE_125, AUDIO_SFX_HAMMER_SMALL_STONE);
 mary_const_alias(AUDIO_SEQUENCE_126, AUDIO_SFX_HAMMER_LARGE_STONE);
 mary_const_alias(AUDIO_SEQUENCE_127, AUDIO_SFX_HAMMER_HUGE_STONE);
+mary_const_alias(AUDIO_SEQUENCE_128, AUDIO_SFX_HAMMER_VARIANT_1);
+mary_const_alias(AUDIO_SEQUENCE_129, AUDIO_SFX_HAMMER_VARIANT_2);
+mary_const_alias(AUDIO_SEQUENCE_130, AUDIO_SFX_HAMMER_VARIANT_3);
 mary_const_alias(AUDIO_SEQUENCE_131, AUDIO_SFX_HAMMER_MAX_CHARGED_SWING);
 mary_const_alias(AUDIO_SEQUENCE_132, AUDIO_SFX_AXE_BRANCH_CHOP);
 mary_const_alias(AUDIO_SFX_AXE_CHOP, AUDIO_SFX_AXE_BRANCH_CHOP);
 mary_const_alias(AUDIO_SEQUENCE_133, AUDIO_SFX_AXE_STUMP_CHOP);
+mary_const_alias(AUDIO_SEQUENCE_134, AUDIO_SFX_AXE_VARIANT_1);
+mary_const_alias(AUDIO_SEQUENCE_135, AUDIO_SFX_AXE_VARIANT_2);
+mary_const_alias(AUDIO_SEQUENCE_136, AUDIO_SFX_AXE_VARIANT_3);
+mary_const_alias(AUDIO_SEQUENCE_137, AUDIO_SFX_AXE_VARIANT_4);
 mary_const_alias(AUDIO_SEQUENCE_138, AUDIO_SFX_AXE_MAX_CHARGED_SWING);
 mary_const_alias(AUDIO_SEQUENCE_139, AUDIO_SFX_WATERING_CAN_POUR);
+mary_const_alias(AUDIO_SEQUENCE_140, AUDIO_SFX_WATERING_CAN_POUR_VARIANT_1);
+mary_const_alias(AUDIO_SEQUENCE_141, AUDIO_SFX_WATERING_CAN_POUR_VARIANT_2);
+mary_const_alias(AUDIO_SEQUENCE_142, AUDIO_SFX_WATERING_CAN_POUR_VARIANT_3);
+mary_const_alias(AUDIO_SEQUENCE_143, AUDIO_SFX_WATERING_CAN_POUR_VARIANT_4);
+mary_const_alias(AUDIO_SEQUENCE_144, AUDIO_SFX_WATERING_CAN_POUR_VARIANT_5);
 mary_const_alias(AUDIO_SEQUENCE_145, AUDIO_SFX_WATERING_CAN_MAX_CHARGED_POUR);
 mary_const_alias(AUDIO_SEQUENCE_146, AUDIO_SFX_WATER_SPLASH);
 mary_const_alias(AUDIO_SEQUENCE_147, AUDIO_SFX_BRUSH_LIVESTOCK);
@@ -5903,7 +5931,9 @@ mary_const_alias(AUDIO_SEQUENCE_160, AUDIO_SFX_SHEAR_SHEEP);
 mary_const_alias(AUDIO_SEQUENCE_161, AUDIO_SFX_COW_MOO);
 mary_const_alias(AUDIO_SEQUENCE_163, AUDIO_SFX_SHEEP_BLEAT);
 mary_const_alias(AUDIO_SEQUENCE_167, AUDIO_SFX_FOAL_NEIGH);
+mary_const_alias(AUDIO_SEQUENCE_168, AUDIO_SFX_HORSE_NEIGH);
 mary_const_alias(AUDIO_SEQUENCE_169, AUDIO_SFX_DOG_BARK);
+mary_const_alias(AUDIO_SEQUENCE_170, AUDIO_SFX_MENU_CANCEL_DUPLICATE);
 mary_const_alias(AUDIO_SEQUENCE_172, AUDIO_SFX_BABY_CRY);
 mary_const_alias(AUDIO_SEQUENCE_173, AUDIO_SFX_HARVEST_SPRITE_FUSION_FINISH);
 mary_const_alias(AUDIO_SEQUENCE_174, AUDIO_SFX_HARVEST_SPRITE_FUSION_PULSE);
@@ -5915,6 +5945,7 @@ mary_const_alias(AUDIO_SEQUENCE_179, AUDIO_SFX_CEREMONIAL_CHIME);
 mary_const_alias(AUDIO_SEQUENCE_181, AUDIO_SFX_VICTORY);
 mary_const_alias(AUDIO_SEQUENCE_182, AUDIO_SFX_ITEM_OBTAINED);
 mary_const_alias(AUDIO_SEQUENCE_184, AUDIO_SFX_ATTENTION_CHIME);
+mary_const_alias(AUDIO_SEQUENCE_187, AUDIO_SFX_MINIGAME_TIME_UP);
 mary_const_alias(AUDIO_SEQUENCE_188, AUDIO_SFX_STAR_SPARKLE);
 mary_const_alias(AUDIO_SEQUENCE_190, AUDIO_SFX_HARVEST_GODDESS_APPEARS);
 mary_const_alias(AUDIO_SEQUENCE_192, AUDIO_SFX_QUESTION_EMOTE);
@@ -5922,8 +5953,11 @@ mary_const_alias(AUDIO_SEQUENCE_193, AUDIO_SFX_APPLAUSE);
 mary_const_alias(AUDIO_SEQUENCE_194, AUDIO_UNUSED_SLOT_194);
 mary_const_alias(AUDIO_SEQUENCE_195, AUDIO_UNUSED_SLOT_195);
 mary_const_alias(AUDIO_SEQUENCE_196, AUDIO_UNUSED_SLOT_196);
+mary_const_alias(AUDIO_SEQUENCE_197, AUDIO_SFX_MENU_CONFIRM);
+mary_const_alias(AUDIO_SEQUENCE_198, AUDIO_SFX_MENU_CANCEL);
 mary_const_alias(AUDIO_SEQUENCE_199, AUDIO_SFX_INCORRECT_ANSWER);
 mary_const_alias(AUDIO_SEQUENCE_200, AUDIO_SFX_KAPPA_SURPRISE);
+mary_const_alias(AUDIO_SEQUENCE_203, AUDIO_SFX_MENU_CURSOR);
 mary_const_alias(AUDIO_SEQUENCE_204, AUDIO_SFX_CHICKEN_CLUCK);
 mary_const_alias(AUDIO_SEQUENCE_205, AUDIO_SFX_CLOSE_DOOR);
 
@@ -7866,13 +7900,19 @@ typedef enum MaryFireworksFestivalPartner
  * Ellen's yarn-gift path: both regions require the slot to equal zero before
  * calling the stocking-knitting event. No vanilla script writes either slot,
  * and the event separately writes VAR_HAS_STOCKING and
- * VAR_ELLEN_KNITS_STOCKING_EVENT_STATE. The slot therefore remains an explicit
- * UNKNOWN_SLOT until its native producer and value contract are proven; it
- * must not be guessed to mean either of those neighboring concepts. The native
+ * VAR_ELLEN_KNITS_STOCKING_EVENT_STATE. Its production cause remains unknown,
+ * but its sole proven consumer supports the narrower behavioral name
+ * VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED: when set, yarn falls back
+ * to the ordinary favorite-gift response. It must not be named as either of
+ * those neighboring storage concepts. FOMT
+ * Studio's FoMT flag database also leaves physical slot 275 (`0x113`) as the
+ * generic `Flag_0x113`; its similarly numbered animation and script tables are
+ * different ID domains and provide no variable semantics. The native
  * VarGet dispatchers store an indirect pointer to the first table entry; using
  * that real base and following the shared accessors proves a one-bit field
  * in all four targets: FoMT save byte 0x217C bit 7, MFoMT byte 0x2195 bit 5.
- * The Mary-C boolean bindings do not imply a proven event identity.
+ * The Mary-C boolean binding and behavioral name do not imply a producer or
+ * broader event identity.
  * A complete scan of all four vanilla script sets finds no other semantic
  * event producer for a still-unknown event-range slot. Their apparent repeated
  * reads come only from the shared shop-counter guard, which ORs every candidate
@@ -8100,7 +8140,11 @@ typedef enum MaryFireworksFestivalPartner
  * 两个地区版本都要求该槽为 0，才会调用编织袜子事件。四套原版脚本均不写入
  * 该槽，而事件本身另行写入 VAR_HAS_STOCKING 与
  * VAR_ELLEN_KNITS_STOCKING_EVENT_STATE。因此，在原生生产者和值域契约得到证实
- * 之前，该槽继续保留明确的 UNKNOWN_SLOT，不能把它猜成上述任一相邻概念。
+ * 之前，仍不能推断它由哪个流程设置；但唯一已证实的消费者足以采用更窄的行为名
+ * VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED：该位为真时，毛线会退回普通
+ * “最喜欢礼物”响应。该名称不能被解释为上述任一相邻存储概念。FOMT
+ * Studio 的 FoMT 标记数据库同样只把物理槽 275（`0x113`）记为通用
+ * `Flag_0x113`；其中同编号的动画表和脚本表属于不同 ID 域，不能提供变量语义。
  * 原生 VarGet 分派器保存的是指向首个表项的间接指针；按该真实表首对齐后可证明：
  * 跟踪共享读写辅助函数后，四版均为一位字段：FoMT 为存档字节 0x217C 的位 7，
  * MFoMT 为字节 0x2195 的位 5。Mary-C 的布尔绑定不代表已证实具体事件归属。
@@ -8815,7 +8859,7 @@ typedef enum MaryVarId
     VAR_UNKNOWN_SLOT_236 = 236,
     VAR_UNKNOWN_SLOT_237 = 237,
     VAR_UNKNOWN_SLOT_242 = 242,
-    VAR_UNKNOWN_SLOT_275 = 275,
+    VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED = 275,
     VAR_UNKNOWN_SLOT_276 = 276,
     VAR_UNKNOWN_SLOT_314 = 314,
     VAR_UNKNOWN_SLOT_316 = 316,
@@ -9470,7 +9514,7 @@ typedef enum MaryVarId
     VAR_UNKNOWN_SLOT_244 = 244,
     VAR_UNKNOWN_SLOT_245 = 245,
     VAR_UNKNOWN_SLOT_250 = 250,
-    VAR_UNKNOWN_SLOT_283 = 283,
+    VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED = 283,
     VAR_UNKNOWN_SLOT_284 = 284,
     VAR_UNKNOWN_SLOT_322 = 322,
     VAR_UNKNOWN_SLOT_324 = 324,
@@ -9545,6 +9589,7 @@ typedef enum MaryVarId
 } MaryVarId;
 
 #if defined(MARY_FOMT)
+mary_const_alias(VAR_UNKNOWN_SLOT_275, VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED);
 mary_const_alias(VAR_DAYS_SINCE_KAREN_FINAL_LOVE_EVENT, VAR_BUGGED_KAREN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
 mary_const_alias(VAR_DAYS_SINCE_POPURI_FINAL_LOVE_EVENT, VAR_BUGGED_POPURI_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
 mary_const_alias(VAR_DAYS_SINCE_MARY_FINAL_LOVE_EVENT, VAR_BUGGED_MARY_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
@@ -9552,6 +9597,7 @@ mary_const_alias(VAR_DAYS_SINCE_ELLI_FINAL_LOVE_EVENT, VAR_BUGGED_ELLI_FINAL_PLA
 mary_const_alias(VAR_DAYS_SINCE_ANN_FINAL_LOVE_EVENT, VAR_BUGGED_ANN_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
 mary_const_alias(VAR_DAYS_SINCE_HARVEST_GODDESS_FINAL_LOVE_EVENT, VAR_BUGGED_HARVEST_GODDESS_FINAL_PLAYER_EVENT_TIMER_READS_RIVAL_TIMER);
 #elif defined(MARY_MFOMT)
+mary_const_alias(VAR_UNKNOWN_SLOT_283, VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED);
 mary_const_alias(VAR_UNKNOWN_SLOT_086, VAR_STU_AND_MAY_SCHEDULES_DISABLED);
 mary_const_alias(VAR_UNKNOWN_SLOT_584, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_61);
 mary_const_alias(VAR_UNKNOWN_SLOT_585, VAR_GAMECUBE_LINK_RESERVED_DIALOGUE_PENDING_62);
@@ -10867,7 +10913,7 @@ typedef enum MaryHarvestSpriteInteractionCategory
  * Categories 9-11 are the shared accessory, cosmetic, and perfume groups.
  * Category 12 is present in the contiguous physical value domain but is never
  * produced or consumed by any of the four complete retail script sets, so it
- * remains explicitly unknown instead of borrowing a neighboring meaning.
+ * remains an explicit unused value instead of borrowing a neighboring meaning.
  * Category 13 is reserved for a character-specific event item (for example
  * Cliff's photograph or Ellen's stocking-event yarn), so its name remains
  * intentionally generic. Category 14 is selected only by the Spring or
@@ -10880,7 +10926,7 @@ typedef enum MaryHarvestSpriteInteractionCategory
  * 是否消耗手持物。类别 0 是婚恋候选额外使用的最高偏好档；1～5 是通用五档
  * 礼物偏好；6 跳过礼物处理；7、8 分别选择正面和负面的动物回应；9～11 分别
  * 表示饰品、化妆品和香水。类别 12 位于连续物理取值域中，但四套完整零售脚本
- * 均未产生或消费该值，因此显式保留为未知项，不套用相邻类别的含义。类别 13
+ * 均未产生或消费该值，因此显式保留为未使用项，不套用相邻类别的含义。类别 13
  * 专用于人物各自的事件物品（例如 Cliff 的
  * 照片或 Ellen 织袜事件所需的毛线），因此有意保留通用名称；类别 14 只由春季
  * 或冬季感恩节礼物交换路径设置。FoMT 与 MFoMT 共用该物理域，但具体物品归类
@@ -10899,7 +10945,7 @@ typedef enum MaryNpcHeldItemInteractionCategory
     NPC_INTERACTION_ACCESSORY = 9,
     NPC_INTERACTION_COSMETIC = 10,
     NPC_INTERACTION_PERFUME = 11,
-    NPC_INTERACTION_UNKNOWN_12 = 12,
+    NPC_INTERACTION_UNUSED_12 = 12,
     NPC_INTERACTION_CHARACTER_EVENT_ITEM = 13,
     NPC_INTERACTION_THANKSGIVING_GIFT = 14,
 } MaryNpcHeldItemInteractionCategory;
@@ -12940,21 +12986,23 @@ mary_var_type(VAR_HARVEST_FESTIVAL_CONTRIBUTED_INGREDIENT_ACCEPTED, MaryBool);
  * identified stocking-event state. This is not FarmHouse::has_stocking:
  * AddStocking accesses the FarmHouse object at farm +0x1F4 and changes its
  * packed member near +0x1F7, physically separate from +0x217C. No vanilla
- * script writes 275, so this proves a boolean prerequisite but not whether it
- * belongs to the stocking event or to another mutually exclusive event. No
+ * script writes 275. Its only proven effect is therefore named conservatively:
+ * when set it blocks yarn from selecting the stocking-specific response. This
+ * does not identify its producer or broader event ownership. No
  * vanilla script writes slot 276 or identifies the meaning of its values, so
  * its two-bit width must not be treated as proof of an event lifecycle. Both
- * physical names therefore remain, and slot 276 has no Mary-C value type.
+ * physical name therefore remains for slot 276, which has no Mary-C value type.
  *
  * FoMT 原生访问器把槽 275 存在农场存档 +0x217C 的 bit 7，把槽 276 存在相邻
  * +0x217D 的两比特标量字段。Ellen 的送礼脚本除了检查已经明确命名的
  * 织袜子事件状态外，还要求 275 为零，毛线才能进入织袜子响应。它并不是
  * FarmHouse::has_stocking：AddStocking 访问的是 farm +0x1F4 的 FarmHouse 对象，
  * 改写其约 +0x1F7 的打包成员，与 +0x217C 物理分离。FoMT-US/JP 原版脚本均不写入 275，
- * 因此只能证明它是布尔前置条件，不能证明它属于织袜子事件还是另一个互斥事件。
+ * 因而只按已证实的效果命名：该位为真时会阻止毛线选择织袜专用响应；这仍不能
+ * 证明其生产者或更广泛的事件归属。
  * 原版脚本不写入槽 276，也不能说明各数值的含义，因此两位宽度不能作为事件
- * 生命周期的证据。两项均继续保留物理槽名称，且槽 276 不绑定 Mary-C 值类型。 */
-mary_var_type(VAR_UNKNOWN_SLOT_275, MaryBool);
+ * 生命周期的证据。槽 276 继续保留物理名称，且不绑定 Mary-C 值类型。 */
+mary_var_type(VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED, MaryBool);
 /* FoMT slot 343 is exactly save byte 0x218E bit 5 in both regional ROMs.
  * Its getter extracts one bit and its setter masks the input with 1 while
  * preserving every other bit. The only non-accessor native user of the same
@@ -12983,15 +13031,17 @@ mary_var_type(VAR_UNKNOWN_SLOT_423, MaryBool);
  * uses it as the same clear/non-clear prerequisite seen at FoMT slot 275.
  * No vanilla script writes it. Slot 284 is the adjacent, independently proven
  * two-bit scalar field, but no producer or value semantics are known. These
- * are the verified MFoMT counterparts of FoMT slots 275/276, but their event
- * identities remain unknown; slot 284 deliberately has no Mary-C value type.
+ * are the verified MFoMT counterparts of FoMT slots 275/276. Slot 283 uses the
+ * same conservative blocking-behavior name without claiming a producer or
+ * broader event identity; slot 284 deliberately has no Mary-C value type.
  *
  * 两个 MFoMT 地区版均将槽 283 存在字节 0x2195 的位 5：读取提取单个位，写入
  * 先与 1 相与。Ellen 的毛线送礼分支将其用作与 FoMT 槽 275 相同的清零／非清零
  * 前置条件。原版脚本没有写入它。槽 284 是相邻且已独立证实的两比特标量字段，
  * 但尚无生产者或数值语义证据。这是 FoMT 槽 275/276 的已验证 MFoMT 对应布局，
- * 但事件身份仍然未知；槽 284 有意不绑定 Mary-C 值类型。 */
-mary_var_type(VAR_UNKNOWN_SLOT_283, MaryBool);
+ * 槽 283 使用相同的保守阻止行为名称，但不声称其生产者或更广泛的事件身份；
+ * 槽 284 有意不绑定 Mary-C 值类型。 */
+mary_var_type(VAR_ELLEN_STOCKING_YARN_SPECIAL_RESPONSE_BLOCKED, MaryBool);
 /* MFoMT slots 86, 94, 96, and 115 are single-bit fields in both regional
  * ROMs. No vanilla event script reads or writes them. Slot 86 is read by two
  * native schedule selectors; when set, each selector returns the null schedule

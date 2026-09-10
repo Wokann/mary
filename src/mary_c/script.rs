@@ -581,6 +581,9 @@ impl P {
             if self.end() {
                 return self.err("unterminated block");
             }
+            if crate::ast::stmt_sequence_terminates(&out) {
+                return self.err("unreachable statement after return or break");
+            }
             out.push(self.stmt()?);
         }
         Ok(out)
@@ -796,7 +799,7 @@ impl P {
                 return self.err("expected case/default label");
             };
             let body = self.case_body()?;
-            let terminating = matches!(body.last(), Some(Stmt::Break | Stmt::Exit));
+            let terminating = crate::ast::stmt_sequence_terminates(&body);
             cases.push(match kind {
                 Some(v) if terminating => SwitchCase::Case(v, body),
                 Some(v) => SwitchCase::Fallthrough(v, body),
@@ -816,6 +819,9 @@ impl P {
             && !self.is_word("mary_implicit_default")
             && !self.is_word("mary_dead_jump")
         {
+            if crate::ast::stmt_sequence_terminates(&body) {
+                return self.err("unreachable statement after return or break");
+            }
             body.push(self.stmt()?);
         }
         Ok(body)
@@ -1209,6 +1215,32 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("loop break is not supported"));
+    }
+
+    #[test]
+    fn rejects_unreachable_statements_after_structured_control_transfer() {
+        let scope = ConstScope::new();
+        for source in [
+            "mary_script(1) void X(void){return;int x=0;}",
+            "mary_script(1) void X(void){switch(0){case 0:break;int x=0;default:return;}}",
+            "mary_script(1) void X(void){if(1){return;}else{return;}int x=0;}",
+        ] {
+            let error = parse_scripts(source, &Options::default(), &scope).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("unreachable statement after return or break"),
+                "unexpected error for {source}: {error}"
+            );
+        }
+
+        // A one-sided return still leaves the false path reachable.
+        parse_scripts(
+            "mary_script(1) void X(void){if(1){return;}int x=0;}",
+            &Options::default(),
+            &scope,
+        )
+        .unwrap();
     }
 
     #[test]

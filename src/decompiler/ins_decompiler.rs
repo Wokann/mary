@@ -7,7 +7,9 @@ use super::DecompileToken;
 
 use crate::ir::SwitchId;
 use crate::{
-    ast::{AssignOperation, Expr, Invoke, Stmt, SwitchCase, SwitchLayout},
+    ast::{
+        stmt_sequence_terminates, AssignOperation, Expr, Invoke, Stmt, SwitchCase, SwitchLayout,
+    },
     ir::{CallId, CallableShape, CaseEnum, Ins, JumpId, VarId},
 };
 
@@ -438,8 +440,35 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
         match self.back() {
             [.., Case(case_switch_id, _), Stmts(_)] | [.., Case(case_switch_id, _)] => {
                 let case_switch_id = *case_switch_id;
-                let switch_case = self.reduce_switch_case(true, false);
-                self.append_switch_case(case_switch_id, switch_case, jump_id);
+                let split_at = if jump_id.is_none() {
+                    match self.back().last() {
+                        Some(Stmts(stmts)) => (0..stmts.len())
+                            .find(|index| stmt_sequence_terminates(&stmts[..=*index]))
+                            .filter(|index| index + 1 < stmts.len()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(split_at) = split_at {
+                    let mut stmts = match self.state.stack.pop() {
+                        Some(Stmts(stmts)) => stmts,
+                        _ => unreachable!(),
+                    };
+                    let implicit_default = stmts.split_off(split_at + 1);
+                    self.state.stack.push(Stmts(stmts));
+                    let switch_case = self.reduce_switch_case(false, false);
+                    self.append_switch_case(case_switch_id, switch_case, None);
+                    self.append_switch_case(
+                        case_switch_id,
+                        SwitchCase::ImplicitDefault(implicit_default),
+                        None,
+                    );
+                    self.state.input = &self.state.input[1..];
+                } else {
+                    let switch_case = self.reduce_switch_case(true, false);
+                    self.append_switch_case(case_switch_id, switch_case, jump_id);
+                }
 
                 Ok(())
             }
@@ -457,7 +486,16 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     Some(Stmts(stmts)) => stmts,
                     _ => unreachable!(),
                 };
-                self.append_switch_case(case_switch_id, SwitchCase::DeadJump(stmts), jump_id);
+                let switch_case = if jump_id.is_none() && stmt_sequence_terminates(&stmts) {
+                    // A terminating implicit default has no trailing JMP. At
+                    // the compact switch tail that byte pattern would be
+                    // indistinguishable from a dead body if the missing jump
+                    // were ignored, but DeadJump would add one on recompile.
+                    SwitchCase::ImplicitDefault(stmts)
+                } else {
+                    SwitchCase::DeadJump(stmts)
+                };
+                self.append_switch_case(case_switch_id, switch_case, jump_id);
                 self.state.input = &self.state.input[1..];
                 Ok(())
             }
@@ -1104,6 +1142,23 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                     );
                 }
 
+                // A terminating implicit-default body has no trailing jump.
+                // Without recognizing that physical form here it is later
+                // mistaken for a dead-jump body, whose emitter adds a jump
+                // and breaks byte-for-byte round trips.
+                let terminating_implicit_default = matches!(
+                    self.back(),
+                    [.., check_expr, DecompileToken::Jump(_), DecompileToken::Stmts(stmts)]
+                        if self.is_expr(check_expr) && stmt_sequence_terminates(stmts)
+                );
+                if terminating_implicit_default {
+                    let stmts = match self.state.stack.pop() {
+                        Some(DecompileToken::Stmts(stmts)) => stmts,
+                        _ => unreachable!(),
+                    };
+                    self.append_switch_case(switch_id, SwitchCase::ImplicitDefault(stmts), None);
+                }
+
                 let interleaved_default = match self.back() {
                     [.., DecompileToken::SwitchCases(existing_id, _), DecompileToken::Stmts(_), DecompileToken::Jump(break_id)]
                         if *existing_id == switch_id =>
@@ -1123,6 +1178,19 @@ impl<'a, 'b> InsDecompiler<'a, 'b> {
                         SwitchCase::ImplicitDefault(stmts),
                         Some(break_id),
                     );
+                }
+
+                let terminating_interleaved_default = matches!(
+                    self.back(),
+                    [.., DecompileToken::SwitchCases(existing_id, _), DecompileToken::Stmts(stmts)]
+                        if *existing_id == switch_id && stmt_sequence_terminates(stmts)
+                );
+                if terminating_interleaved_default {
+                    let stmts = match self.state.stack.pop() {
+                        Some(DecompileToken::Stmts(stmts)) => stmts,
+                        _ => unreachable!(),
+                    };
+                    self.append_switch_case(switch_id, SwitchCase::ImplicitDefault(stmts), None);
                 }
 
                 if matches!(

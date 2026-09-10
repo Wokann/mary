@@ -70,6 +70,295 @@ mary_script(77) void UnfamiliarStress(void)
 }
 
 #[test]
+fn switch_case_with_two_terminating_if_else_branches_does_not_fall_through() {
+    let source = r#"
+mary_script(78) void TerminatingCase(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            if (F(1))
+            {
+                break;
+            }
+            else
+            {
+                return;
+            }
+        case 1:
+            P(1);
+            break;
+        default:
+            return;
+    }
+    P(2);
+}
+"#;
+    let table = table();
+    let first = parse_scripts(source, &Options::default(), &table.scope).unwrap();
+    let bytes = encode_script(&first.scripts[0].2);
+    let raised = decompile_script(&first.scripts[0].2, &table.scope).unwrap();
+    assert!(
+        !matches!(raised.as_slice(), [mary::ast::Stmt::Ir(_)]),
+        "terminating case fell back to low-level IR"
+    );
+    let printed = format_script(78, "TerminatingCase", &raised).unwrap();
+    let second = parse_scripts(&printed, &Options::default(), &table.scope).unwrap();
+    assert_eq!(bytes, encode_script(&second.scripts[0].2), "{printed}");
+}
+
+#[test]
+fn statement_after_an_all_return_switch_is_handled_losslessly() {
+    let source = r#"
+mary_script(79) void AllReturnSwitch(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            return;
+        case 1:
+            if (F(1))
+            {
+                return;
+            }
+            else
+            {
+                return;
+            }
+        default:
+            return;
+    }
+    P(2);
+}
+"#;
+    let table = table();
+    let first = parse_scripts(source, &Options::default(), &table.scope).unwrap();
+    let bytes = encode_script(&first.scripts[0].2);
+    let raised = decompile_script(&first.scripts[0].2, &table.scope).unwrap();
+    assert!(
+        !matches!(raised.as_slice(), [mary::ast::Stmt::Ir(_)]),
+        "all-return switch fell back to low-level IR"
+    );
+    let printed = format_script(79, "AllReturnSwitch", &raised).unwrap();
+    let second = parse_scripts(&printed, &Options::default(), &table.scope).unwrap();
+    assert_eq!(bytes, encode_script(&second.scripts[0].2), "{printed}");
+}
+
+#[test]
+fn implicit_compact_and_unmatched_switch_exits_remain_distinct() {
+    let cases = [
+        (
+            80,
+            "ImplicitReturnSwitch",
+            r#"
+mary_script(80) void ImplicitReturnSwitch(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            return;
+        mary_implicit_default:
+            return;
+    }
+    P(2);
+}
+"#,
+        ),
+        (
+            81,
+            "CompactImplicitReturnSwitch",
+            r#"
+mary_script(81) void CompactImplicitReturnSwitch(void)
+{
+    mary_switch_compact (F(0))
+    {
+        case 0:
+            return;
+        mary_implicit_default:
+            return;
+    }
+    P(3);
+}
+"#,
+        ),
+        (
+            82,
+            "UnmatchedSwitchExit",
+            r#"
+mary_script(82) void UnmatchedSwitchExit(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            return;
+        case 1:
+            return;
+    }
+    P(4);
+}
+"#,
+        ),
+        (
+            83,
+            "LeadingImplicitReturnSwitch",
+            r#"
+mary_script(83) void LeadingImplicitReturnSwitch(void)
+{
+    switch (F(0))
+    {
+        mary_implicit_default:
+            return;
+        case 0:
+            P(5);
+            break;
+    }
+}
+"#,
+        ),
+        (
+            84,
+            "InterleavedImplicitReturnSwitch",
+            r#"
+mary_script(84) void InterleavedImplicitReturnSwitch(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            P(6);
+            break;
+        mary_implicit_default:
+            if (F(8))
+            {
+                return;
+            }
+            else
+            {
+                return;
+            }
+        case 1:
+            P(7);
+            break;
+    }
+}
+"#,
+        ),
+        (
+            85,
+            "CompactLeadingImplicitReturnSwitch",
+            r#"
+mary_script(85) void CompactLeadingImplicitReturnSwitch(void)
+{
+    mary_switch_compact (F(0))
+    {
+        mary_implicit_default:
+            return;
+        case 0:
+            P(9);
+            break;
+    }
+}
+"#,
+        ),
+        (
+            86,
+            "CompactInterleavedImplicitReturnSwitch",
+            r#"
+mary_script(86) void CompactInterleavedImplicitReturnSwitch(void)
+{
+    mary_switch_compact (F(0))
+    {
+        case 0:
+            P(10);
+            break;
+        mary_implicit_default:
+            if (F(11))
+            {
+                return;
+            }
+            else
+            {
+                return;
+            }
+        case 1:
+            P(12);
+            break;
+    }
+}
+"#,
+        ),
+    ];
+    let table = table();
+    for (id, name, source) in cases {
+        let first = parse_scripts(source, &Options::default(), &table.scope).unwrap();
+        let bytes = encode_script(&first.scripts[0].2);
+        let raised = decompile_script(&first.scripts[0].2, &table.scope).unwrap();
+        assert!(
+            !matches!(raised.as_slice(), [mary::ast::Stmt::Ir(_)]),
+            "{name} fell back to low-level IR"
+        );
+        let printed = format_script(id, name, &raised).unwrap();
+        // A standard-layout implicit default at the physical tail is bytewise
+        // equivalent to the layout's mandatory dead jump and canonicalizes
+        // to compact + mary_dead_jump. All other placements, and especially
+        // compact input, retain the explicit implicit-default identity.
+        if id != 80 && name.contains("Implicit") {
+            assert!(printed.contains("mary_implicit_default:"), "{printed}");
+            assert!(!printed.contains("mary_dead_jump:"), "{printed}");
+        }
+        let second = parse_scripts(&printed, &Options::default(), &table.scope).unwrap();
+        assert_eq!(bytes, encode_script(&second.scripts[0].2), "{printed}");
+    }
+}
+
+#[test]
+fn nested_standard_and_compact_switch_exits_are_lossless() {
+    let source = r#"
+mary_script(87) void NestedSwitchExitMatrix(void)
+{
+    switch (F(0))
+    {
+        case 0:
+            mary_switch_compact (F(1))
+            {
+                case 1:
+                    if (F(2))
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        return;
+                    }
+                mary_implicit_default:
+                    return;
+            }
+            P(13);
+            break;
+        case 1:
+            P(14);
+            break;
+        default:
+            return;
+    }
+    P(15);
+}
+"#;
+    let table = table();
+    let first = parse_scripts(source, &Options::default(), &table.scope).unwrap();
+    let bytes = encode_script(&first.scripts[0].2);
+    let raised = decompile_script(&first.scripts[0].2, &table.scope).unwrap();
+    assert!(
+        !matches!(raised.as_slice(), [mary::ast::Stmt::Ir(_)]),
+        "nested switch matrix fell back to low-level IR"
+    );
+    let printed = format_script(87, "NestedSwitchExitMatrix", &raised).unwrap();
+    assert!(printed.contains("mary_switch_compact"), "{printed}");
+    assert!(printed.contains("mary_implicit_default:"), "{printed}");
+    let second = parse_scripts(&printed, &Options::default(), &table.scope).unwrap();
+    assert_eq!(bytes, encode_script(&second.scripts[0].2), "{printed}");
+}
+
+#[test]
 fn invalid_constructs_report_the_real_problem() {
     let table = table();
     let cases = [
