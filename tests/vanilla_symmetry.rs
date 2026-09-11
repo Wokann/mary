@@ -19,37 +19,37 @@ mod tests {
     const CASES: [RomCase; 6] = [
         RomCase {
             name: "fomt-jp",
-            rom_path: "rom/fomtjp.gba",
+            rom_path: "rom/fomt_jp.gba",
             variant: FomtVariant::FomtJp,
             slots: 1329,
         },
         RomCase {
             name: "fomt-us",
-            rom_path: "rom/fomt.gba",
+            rom_path: "rom/fomt_us.gba",
             variant: FomtVariant::FomtUs,
             slots: 1329,
         },
         RomCase {
             name: "fomt-eu",
-            rom_path: "rom/fomteu.gba",
+            rom_path: "rom/fomt_eu.gba",
             variant: FomtVariant::FomtEu,
             slots: 1329,
         },
         RomCase {
             name: "fomt-de",
-            rom_path: "rom/fomtde.gba",
+            rom_path: "rom/fomt_de.gba",
             variant: FomtVariant::FomtDe,
             slots: 1329,
         },
         RomCase {
             name: "mfomt-jp",
-            rom_path: "rom/mfomtjp.gba",
+            rom_path: "rom/mfomt_jp.gba",
             variant: FomtVariant::MfomtJp,
             slots: 1416,
         },
         RomCase {
             name: "mfomt-us",
-            rom_path: "rom/mfomt.gba",
+            rom_path: "rom/mfomt_us.gba",
             variant: FomtVariant::MfomtUs,
             slots: 1416,
         },

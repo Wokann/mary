@@ -384,12 +384,12 @@ cargo clippy --all-targets -- -D warnings
 For ROM-backed tests, place the files at:
 
 ```text
-rom/fomtjp.gba
-rom/fomt.gba
-rom/fomteu.gba
-rom/fomtde.gba
-rom/mfomtjp.gba
-rom/mfomt.gba
+rom/fomt_jp.gba
+rom/fomt_us.gba
+rom/fomt_eu.gba
+rom/fomt_de.gba
+rom/mfomt_jp.gba
+rom/mfomt_us.gba
 ```
 
 Then run:

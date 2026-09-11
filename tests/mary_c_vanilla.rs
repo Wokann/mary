@@ -32,25 +32,25 @@ struct RomCase {
 const CASES: &[RomCase] = &[
     RomCase {
         name: "fomt-us",
-        rom: "rom/fomt.gba",
+        rom: "rom/fomt_us.gba",
         target: "MARY_FOMT_US",
         slots: 1329,
     },
     RomCase {
         name: "mfomt-us",
-        rom: "rom/mfomt.gba",
+        rom: "rom/mfomt_us.gba",
         target: "MARY_MFOMT_US",
         slots: 1416,
     },
     RomCase {
         name: "fomt-jp",
-        rom: "rom/fomtjp.gba",
+        rom: "rom/fomt_jp.gba",
         target: "MARY_FOMT_JP",
         slots: 1329,
     },
     RomCase {
         name: "mfomt-jp",
-        rom: "rom/mfomtjp.gba",
+        rom: "rom/mfomt_jp.gba",
         target: "MARY_MFOMT_JP",
         slots: 1416,
     },
@@ -59,13 +59,13 @@ const CASES: &[RomCase] = &[
 const FOMT_LOCALIZATION_CASES: &[RomCase] = &[
     RomCase {
         name: "fomt-eu",
-        rom: "rom/fomteu.gba",
+        rom: "rom/fomt_eu.gba",
         target: "MARY_FOMT_EU",
         slots: 1329,
     },
     RomCase {
         name: "fomt-de",
-        rom: "rom/fomtde.gba",
+        rom: "rom/fomt_de.gba",
         target: "MARY_FOMT_DE",
         slots: 1329,
     },
@@ -249,10 +249,10 @@ fn native_camera_pan_and_wait_callables_keep_physical_slots_on_all_targets() {
 #[test]
 fn native_new_record_audio_slots_exist_only_in_mfomt() {
     const TABLES: [(&str, usize, bool); 4] = [
-        ("rom/fomt.gba", 0x13ABF0, false),
-        ("rom/fomtjp.gba", 0x13BD34, false),
-        ("rom/mfomt.gba", 0x144FF4, true),
-        ("rom/mfomtjp.gba", 0x146A64, true),
+        ("rom/fomt_us.gba", 0x13ABF0, false),
+        ("rom/fomt_jp.gba", 0x13BD34, false),
+        ("rom/mfomt_us.gba", 0x144FF4, true),
+        ("rom/mfomt_jp.gba", 0x146A64, true),
     ];
 
     for (path, table_offset, is_mfomt) in TABLES {
@@ -276,10 +276,10 @@ fn native_new_record_audio_slots_exist_only_in_mfomt() {
 #[test]
 fn native_sickle_audio_family_uses_one_program_on_all_targets() {
     const TABLES: [(&str, usize); 4] = [
-        ("rom/fomt.gba", 0x13ABF0),
-        ("rom/fomtjp.gba", 0x13BD34),
-        ("rom/mfomt.gba", 0x144FF4),
-        ("rom/mfomtjp.gba", 0x146A64),
+        ("rom/fomt_us.gba", 0x13ABF0),
+        ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/mfomt_us.gba", 0x144FF4),
+        ("rom/mfomt_jp.gba", 0x146A64),
     ];
 
     for (path, table_offset) in TABLES {
@@ -328,10 +328,10 @@ fn native_sickle_audio_family_uses_one_program_on_all_targets() {
 #[test]
 fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
     const TABLES: [(&str, usize); 4] = [
-        ("rom/fomt.gba", 0x0E9605),
-        ("rom/fomtjp.gba", 0x0E8AA5),
-        ("rom/mfomt.gba", 0x0F1B49),
-        ("rom/mfomtjp.gba", 0x0F16C5),
+        ("rom/fomt_us.gba", 0x0E9605),
+        ("rom/fomt_jp.gba", 0x0E8AA5),
+        ("rom/mfomt_us.gba", 0x0F1B49),
+        ("rom/mfomt_jp.gba", 0x0F16C5),
     ];
     const EXPECTED: [u8; 15] = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
 
@@ -355,10 +355,10 @@ fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
 #[test]
 fn native_audio_slots_28_through_31_are_identical_short_sequences() {
     const TABLES: [(&str, usize); 4] = [
-        ("rom/fomt.gba", 0x13ABF0),
-        ("rom/fomtjp.gba", 0x13BD34),
-        ("rom/mfomt.gba", 0x144FF4),
-        ("rom/mfomtjp.gba", 0x146A64),
+        ("rom/fomt_us.gba", 0x13ABF0),
+        ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/mfomt_us.gba", 0x144FF4),
+        ("rom/mfomt_jp.gba", 0x146A64),
     ];
     const TRACK: [u8; 16] = [
         0xBC, 0x00, 0xBB, 0x4B, 0xBD, 0x7F, 0xBE, 0x7F, 0xC0, 0x40, 0xEF, 0x45, 0x50, 0xB0, 0xB1,
@@ -399,10 +399,10 @@ fn native_audio_slots_28_through_31_are_identical_short_sequences() {
 #[test]
 fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
     const TABLES: [(&str, usize); 4] = [
-        ("rom/fomt.gba", 0x13ABF0),
-        ("rom/fomtjp.gba", 0x13BD34),
-        ("rom/mfomt.gba", 0x144FF4),
-        ("rom/mfomtjp.gba", 0x146A64),
+        ("rom/fomt_us.gba", 0x13ABF0),
+        ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/mfomt_us.gba", 0x144FF4),
+        ("rom/mfomt_jp.gba", 0x146A64),
     ];
     const TRACKS: [(usize, usize, &[u8]); 8] = [
         (
@@ -711,10 +711,10 @@ fn native_audio_187_is_the_shared_minigame_time_up_cue_on_all_targets() {
 #[test]
 fn native_audio_slots_176_and_183_preserve_real_target_variants() {
     const TABLES: [(&str, usize); 4] = [
-        ("rom/fomt.gba", 0x13ABF0),
-        ("rom/fomtjp.gba", 0x13BD34),
-        ("rom/mfomt.gba", 0x144FF4),
-        ("rom/mfomtjp.gba", 0x146A64),
+        ("rom/fomt_us.gba", 0x13ABF0),
+        ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/mfomt_us.gba", 0x144FF4),
+        ("rom/mfomt_jp.gba", 0x146A64),
     ];
 
     fn tracks(rom: &[u8], table_offset: usize, slot: usize) -> Vec<Vec<u8>> {
@@ -1199,20 +1199,20 @@ fn native_animation_tables_are_complete_and_region_identical_within_each_game() 
     for (game, us_path, us_table, us_pool, jp_path, jp_table, jp_pool, last_id) in [
         (
             "FoMT",
-            "rom/fomt.gba",
+            "rom/fomt_us.gba",
             0x58BA2C,
             0x663208,
-            "rom/fomtjp.gba",
+            "rom/fomt_jp.gba",
             0x311B88,
             0x3E9364,
             2551,
         ),
         (
             "MFoMT",
-            "rom/mfomt.gba",
+            "rom/mfomt_us.gba",
             0x522C4C,
             0x6036B8,
-            "rom/mfomtjp.gba",
+            "rom/mfomt_jp.gba",
             0x52455C,
             0x604FC8,
             2635,
@@ -15830,10 +15830,10 @@ fn native_talk_portrait_slots_forward_id_under_ui_gate_and_clear_independently()
 #[test]
 fn native_display_option_rows_map_buttons_clock_face_and_name_to_bits_zero_through_three() {
     let layouts = [
-        ("fomt-us", "rom/fomt.gba", 0x4904, 0x2210, 0xE86D4, 0xE87A4),
+        ("fomt-us", "rom/fomt_us.gba", 0x4904, 0x2210, 0xE86D4, 0xE87A4),
         (
             "mfomt-us",
-            "rom/mfomt.gba",
+            "rom/mfomt_us.gba",
             0x4918,
             0x224C,
             0xF0C14,
@@ -15841,7 +15841,7 @@ fn native_display_option_rows_map_buttons_clock_face_and_name_to_bits_zero_throu
         ),
         (
             "fomt-jp",
-            "rom/fomtjp.gba",
+            "rom/fomt_jp.gba",
             0x491C,
             0x2210,
             0xE7AF4,
@@ -15849,7 +15849,7 @@ fn native_display_option_rows_map_buttons_clock_face_and_name_to_bits_zero_throu
         ),
         (
             "mfomt-jp",
-            "rom/mfomtjp.gba",
+            "rom/mfomt_jp.gba",
             0x4930,
             0x224C,
             0xF0714,
