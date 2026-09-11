@@ -242,7 +242,7 @@ MARY_MFOMT_JP  MARY_MFOMT_US
 FoMT 使用 `goodies/fomt_callables.mary.h`、
 `goodies/fomt_constants.mary.h` 和
 `goodies/fomt_scripts_text.mary.sym`；MFoMT 使用相应的 `mfomt_*` 文件。
-`.mary.sym` 只提供反编译命名，不参与回编。
+`.mary.sym` 在反编译及链接打包时提供名称，但不会编译进虚拟机字节码。
 
 完整反编译会按物理指针表的每个槽位生成一个 `.mary.c`，同时生成常量、函数和
 脚本表三份本地头文件。空指针会生成明确的占位文件，并在脚本表中保持 `NULL`，
@@ -358,6 +358,69 @@ mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
 
 使用 `mary decompile --help`、`mary import --help` 和
 `mary compile --help` 查看全部选项。
+
+## 为反编译工程生成链接输入
+
+`bundle` 会编译完整的 Mary-C 源码目录，并把脚本、指针表和 RIFF 内各条 STR
+文本公开为汇编／链接符号。所选 `.mary.sym` 的顺序必须与生成的脚本表及每个
+RIFF 的文本表严格一致；不一致会直接报错，避免名称静默绑定到错误地址。
+
+生成一个连续且按四字节对齐的 RIFF 整块：
+
+```console
+mary bundle decompiled_text/fomt_jp -o build/data/scripts --layout packed \
+  --symbols goodies/fomt_scripts_text.mary.sym \
+  --library goodies/fomt_callables.mary.h \
+  --script-table decompiled_text/fomt_jp/fomt_scripts.mary.h \
+  --charmap charmap.txt -D MARY_FOMT_JP
+```
+
+输出内容为：
+
+```text
+scripts.bin       按脚本槽顺序连续排列的全部非空 RIFF
+scripts.s         绑定到 scripts.bin 偏移的脚本及 STR 文本符号
+script_table.s    有序 GBA 指针；空槽写成 .word 0
+scripts.d         所有参与编译的 Mary-C 输入文件的 Make 依赖
+```
+
+如果希望每个 RIFF 独立保存，把 `--layout packed` 改为 `--layout split`。此时
+生成 `riff/<脚本名>.riff`；`scripts.s` 仍会按槽位顺序包含这些文件，并向链接器
+提供一个连续 section。
+
+两个汇编文件可由常规 ARM 汇编器处理：
+
+```console
+arm-none-eabi-as build/data/scripts/scripts.s -o build/data/scripts/scripts.o
+arm-none-eabi-as build/data/scripts/script_table.s -o build/data/scripts/script_table.o
+```
+
+它们分别提供 `.rodata.mary_scripts` 和 `.rodata.mary_script_table`。在反编译
+工程的链接脚本中，把这两个输入 section 放到目标 ROM 文件偏移即可。
+`scripts.o` 会把每个脚本和文本符号绑定到真实 RIFF／STR 字节地址；
+`script_table.o` 保留针对脚本符号的重定位，由链接器写入最终指针。
+
+`scripts.d` 只参与 Make 的依赖判断，不会交给汇编器、链接器或写入 ROM。
+工程 Makefile 应 include 它，使任何 `.mary.c`、被包含的 `.mary.h`、`.mary.sym`
+或码表发生变化时重新运行 `mary bundle`：
+
+```make
+MARY_SOURCES := $(wildcard data/scripts/*.mary.c)
+
+-include build/data/scripts/scripts.d
+
+build/data/scripts/scripts.s \
+build/data/scripts/script_table.s \
+build/data/scripts/scripts.bin: $(MARY_SOURCES)
+	mary bundle data/scripts -o build/data/scripts --layout packed \
+	  --symbols data/scripts/fomt_scripts_text.mary.sym \
+	  --library data/scripts/fomt_callables.mary.h \
+	  --script-table data/scripts/fomt_scripts.mary.h \
+	  --charmap data/scripts/charmap.txt -D MARY_FOMT_JP
+```
+
+这里保留通配依赖是有意的：生成的 `.d` 能追踪已有输入文件，而通配列表还能让
+Make 发现刚刚新增的 `.mary.c`。全部选项可通过 `mary bundle --help` 查看。
 
 ## 字符码表
 

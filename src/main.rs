@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use thiserror::Error;
 
 use mary::{
@@ -70,6 +70,9 @@ enum Error {
 
     #[error("IO Error: {0}")]
     Io(#[from] io::Error),
+
+    #[error("Formatting error: {0}")]
+    Format(#[from] std::fmt::Error),
 
     #[error("CLI Error: {0}")]
     Cli(&'static str),
@@ -244,6 +247,47 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Compile a complete Mary-C script directory into linker-ready assembly
+    Bundle {
+        /// Directory containing one .mary.c file per script slot
+        input_source: PathBuf,
+
+        /// Directory that receives scripts.s, script_table.s, and RIFF data
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Store RIFFs in one scripts.bin or as individual files
+        #[arg(long, value_enum, default_value_t = BundleLayout::Packed)]
+        layout: BundleLayout,
+
+        /// Script and text symbol database (.mary.sym)
+        #[arg(long)]
+        symbols: PathBuf,
+
+        /// Ordered callable declarations (.mary.h)
+        #[arg(long)]
+        library: Option<PathBuf>,
+
+        /// Ordered script slot table (.mary.h)
+        #[arg(long)]
+        script_table: Option<PathBuf>,
+
+        /// Byte-to-Unicode map used for localized string literals
+        #[arg(long)]
+        charmap: Option<PathBuf>,
+
+        /// Select a target macro (for example MARY_FOMT_JP)
+        #[arg(short = 'D')]
+        defines: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum BundleLayout {
+    #[default]
+    Packed,
+    Split,
 }
 
 fn load_charmap(
@@ -540,6 +584,26 @@ fn main_error() -> Result<(), Error> {
             defines,
             force,
             dry_run,
+        }),
+
+        Command::Bundle {
+            input_source,
+            output,
+            layout,
+            symbols,
+            library,
+            script_table,
+            charmap,
+            defines,
+        } => bundle_mary_c(BundleRequest {
+            input_source,
+            output,
+            layout,
+            symbols,
+            library,
+            script_table,
+            charmap,
+            defines,
         }),
 
         Command::Decompile {
@@ -1439,8 +1503,11 @@ struct ImportRequest {
 
 struct CompiledImport {
     target: String,
+    options: mary::mary_c::Options,
     source_slot_count: usize,
+    slot_names: Vec<Option<String>>,
     compiled: BTreeMap<usize, Vec<u8>>,
+    dependencies: Vec<PathBuf>,
 }
 
 fn import_mary_c_into_rom(request: ImportRequest) -> Result<(), Error> {
@@ -1708,14 +1775,20 @@ fn compile_import_sources(
     let constants = included(headers.constants).unwrap_or_else(|| base.join(headers.constants));
 
     let constant_scope =
-        mary::mary_c::parse_constant_header(&fs::read_to_string(constants)?, &options)?;
+        mary::mary_c::parse_constant_header(&fs::read_to_string(&constants)?, &options)?;
     let callables = mary::mary_c::parse_callable_table_with_scope(
-        &fs::read_to_string(library)?,
+        &fs::read_to_string(&library)?,
         &options,
         &constant_scope,
     )?;
-    let table = mary::mary_c::parse_script_table(&fs::read_to_string(script_table)?, &options)?;
+    let table = mary::mary_c::parse_script_table(&fs::read_to_string(&script_table)?, &options)?;
+    let charmap_dependency = charmap_path.clone();
     let charmap = load_charmap(charmap_path, Some(&options))?;
+    let mut dependencies = paths.clone();
+    dependencies.extend([library.clone(), script_table.clone(), constants.clone()]);
+    if let Some(path) = charmap_dependency {
+        dependencies.push(path);
+    }
     let mut compiled = BTreeMap::new();
 
     for path in paths {
@@ -1750,11 +1823,281 @@ fn compile_import_sources(
         }
     }
 
+    let slot_names = table
+        .slots()
+        .iter()
+        .map(|slot| match slot {
+            mary::mary_c::ScriptSlot::Empty => None,
+            mary::mary_c::ScriptSlot::Script(name) => Some(name.clone()),
+        })
+        .collect();
     Ok(CompiledImport {
         target,
+        options,
         source_slot_count: table.slots().len(),
+        slot_names,
         compiled,
+        dependencies,
     })
+}
+
+struct BundleRequest {
+    input_source: PathBuf,
+    output: PathBuf,
+    layout: BundleLayout,
+    symbols: PathBuf,
+    library: Option<PathBuf>,
+    script_table: Option<PathBuf>,
+    charmap: Option<PathBuf>,
+    defines: Vec<String>,
+}
+
+fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
+    use std::fmt::Write as _;
+
+    if !request.input_source.is_dir() {
+        return Err(Error::Cli("bundle input must be a directory"));
+    }
+    let compiled = compile_import_sources(
+        &request.input_source,
+        request.library.as_deref(),
+        request.script_table.as_deref(),
+        request.charmap,
+        request.defines,
+    )?;
+    let symbols = mary::mary_c::parse_text_name_table(
+        &fs::read_to_string(&request.symbols)?,
+        &compiled.options,
+    )?;
+    let symbol_table = symbols.script_table()?;
+    if symbol_table.slots().len() != compiled.source_slot_count {
+        return Err(Error::MarySymbolMismatch(format!(
+            "symbol table has {} slots but script table has {}",
+            symbol_table.slots().len(),
+            compiled.source_slot_count
+        )));
+    }
+
+    for (id, expected) in compiled.slot_names.iter().enumerate() {
+        let actual = symbols.script_name(id);
+        if actual != expected.as_deref() {
+            return Err(Error::MarySymbolMismatch(format!(
+                "script slot {id} is {:?} in the script table but {:?} in the symbol table",
+                expected, actual
+            )));
+        }
+        if expected.is_some() != compiled.compiled.contains_key(&id) {
+            return Err(Error::MarySymbolMismatch(format!(
+                "script slot {id} is {} but {} compiled source",
+                if expected.is_some() { "named" } else { "NULL" },
+                if compiled.compiled.contains_key(&id) {
+                    "has"
+                } else {
+                    "has no"
+                }
+            )));
+        }
+    }
+
+    fs::create_dir_all(&request.output)?;
+    let mut scripts_asm =
+        String::from(".section .rodata.mary_scripts, \"a\", %progbits\n.balign 4\n\n");
+    let mut packed = Vec::new();
+    let split_directory = request.output.join("riff");
+    if matches!(request.layout, BundleLayout::Split) {
+        fs::create_dir_all(&split_directory)?;
+    }
+
+    if matches!(request.layout, BundleLayout::Packed) {
+        writeln!(scripts_asm, ".global gMaryScripts")?;
+        writeln!(scripts_asm, ".type gMaryScripts, %object")?;
+        writeln!(scripts_asm, "gMaryScripts:")?;
+        writeln!(
+            scripts_asm,
+            "    .incbin \"{}\"",
+            assembler_path(&request.output.join("scripts.bin"))
+        )?;
+        writeln!(scripts_asm, ".global gMaryScriptsEnd")?;
+        writeln!(scripts_asm, "gMaryScriptsEnd:")?;
+        writeln!(
+            scripts_asm,
+            ".size gMaryScripts, gMaryScriptsEnd - gMaryScripts\n"
+        )?;
+    }
+
+    for (id, script_name) in compiled.slot_names.iter().enumerate() {
+        let Some(script_name) = script_name else {
+            continue;
+        };
+        let riff = &compiled.compiled[&id];
+        let text_offsets = riff_text_offsets(riff).map_err(|message| {
+            Error::MarySymbolMismatch(format!("script slot {id} ({script_name}): {message}"))
+        })?;
+        let text_names = symbols.names(id, text_offsets.len());
+        if symbols.text_count(id) != text_offsets.len() {
+            return Err(Error::MarySymbolMismatch(format!(
+                "script slot {id} ({script_name}) has {} STR entries but {} text symbols",
+                text_offsets.len(),
+                symbols.text_count(id)
+            )));
+        }
+
+        let script_offset = packed.len();
+        match request.layout {
+            BundleLayout::Packed => {
+                writeln!(scripts_asm, ".global {script_name}")?;
+                writeln!(scripts_asm, ".type {script_name}, %object")?;
+                writeln!(
+                    scripts_asm,
+                    ".set {script_name}, gMaryScripts + 0x{script_offset:X}"
+                )?;
+                writeln!(scripts_asm, ".size {script_name}, 0x{:X}", riff.len())?;
+                packed.extend_from_slice(riff);
+                packed.resize(packed.len().div_ceil(4) * 4, 0);
+            }
+            BundleLayout::Split => {
+                let riff_path = split_directory.join(format!("{script_name}.riff"));
+                fs::write(&riff_path, riff)?;
+                writeln!(scripts_asm, ".balign 4")?;
+                writeln!(scripts_asm, ".global {script_name}")?;
+                writeln!(scripts_asm, ".type {script_name}, %object")?;
+                writeln!(scripts_asm, "{script_name}:")?;
+                writeln!(
+                    scripts_asm,
+                    "    .incbin \"{}\"",
+                    assembler_path(&riff_path)
+                )?;
+                writeln!(scripts_asm, ".size {script_name}, 0x{:X}", riff.len())?;
+            }
+        }
+        for (name, offset) in text_names.into_iter().zip(text_offsets) {
+            let name = name.expect("text symbol count checked above");
+            writeln!(scripts_asm, ".global {name}")?;
+            writeln!(scripts_asm, ".type {name}, %object")?;
+            writeln!(scripts_asm, ".set {name}, {script_name} + 0x{offset:X}")?;
+        }
+        writeln!(scripts_asm)?;
+    }
+
+    if matches!(request.layout, BundleLayout::Packed) {
+        fs::write(request.output.join("scripts.bin"), &packed)?;
+    }
+    fs::write(request.output.join("scripts.s"), scripts_asm)?;
+
+    let mut table_asm = String::from(
+        ".section .rodata.mary_script_table, \"a\", %progbits\n.balign 4\n\n.global gMaryScriptTable\n.type gMaryScriptTable, %object\ngMaryScriptTable:\n",
+    );
+    for slot in &compiled.slot_names {
+        match slot {
+            Some(name) => writeln!(table_asm, "    .word {name}")?,
+            None => writeln!(table_asm, "    .word 0")?,
+        }
+    }
+    table_asm.push_str(
+        "gMaryScriptTableEnd:\n.size gMaryScriptTable, gMaryScriptTableEnd - gMaryScriptTable\n",
+    );
+    fs::write(request.output.join("script_table.s"), table_asm)?;
+
+    let mut targets = vec![
+        request.output.join("scripts.s"),
+        request.output.join("script_table.s"),
+        request.output.join("scripts.d"),
+    ];
+    match request.layout {
+        BundleLayout::Packed => targets.push(request.output.join("scripts.bin")),
+        BundleLayout::Split => targets.extend(
+            compiled
+                .slot_names
+                .iter()
+                .flatten()
+                .map(|name| split_directory.join(format!("{name}.riff"))),
+        ),
+    }
+    let mut dependencies = compiled.dependencies;
+    dependencies.push(request.symbols);
+    dependencies.sort();
+    dependencies.dedup();
+    let targets = targets
+        .iter()
+        .map(|path| makefile_path(path))
+        .collect::<Vec<_>>()
+        .join(" \\\n    ");
+    let dependencies = dependencies
+        .iter()
+        .map(|path| makefile_path(path))
+        .collect::<Vec<_>>()
+        .join(" \\\n    ");
+    fs::write(
+        request.output.join("scripts.d"),
+        format!("{targets}: \\\n    {dependencies}\n"),
+    )?;
+
+    println!(
+        "Bundled {} script slots for {} into {} ({:?} RIFF layout)",
+        compiled.source_slot_count,
+        compiled.target,
+        request.output.display(),
+        request.layout
+    );
+    Ok(())
+}
+
+fn assembler_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .replace('"', "\\\"")
+}
+
+fn makefile_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .replace('$', "$$")
+        .replace('#', "\\#")
+        .replace(':', "\\:")
+        .replace(' ', "\\ ")
+}
+
+fn riff_text_offsets(riff: &[u8]) -> Result<Vec<usize>, &'static str> {
+    if riff.len() < 12 || &riff[..4] != b"RIFF" || &riff[8..12] != b"SCR " {
+        return Err("invalid RIFF/SCR header");
+    }
+    let read_u32 = |at: usize| {
+        riff.get(at..at + 4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .map(|value| value as usize)
+    };
+    let mut at: usize = 12;
+    while at.checked_add(8).is_some_and(|end| end <= riff.len()) {
+        let length = read_u32(at + 4).ok_or("truncated RIFF chunk header")?;
+        let payload = at + 8;
+        let end = payload
+            .checked_add(length)
+            .filter(|end| *end <= riff.len())
+            .ok_or("RIFF chunk extends beyond the script")?;
+        if &riff[at..at + 4] == b"STR " {
+            let count = read_u32(payload).ok_or("truncated STR count")?;
+            let data = payload
+                .checked_add(4 + count.checked_mul(4).ok_or("STR table overflow")?)
+                .filter(|data| *data <= end)
+                .ok_or("truncated STR offset table")?;
+            let mut offsets = Vec::with_capacity(count);
+            for id in 0..count {
+                let relative = read_u32(payload + 4 + id * 4).ok_or("truncated STR offset")?;
+                let offset = data
+                    .checked_add(relative)
+                    .filter(|offset| *offset < end)
+                    .ok_or("STR entry points outside its chunk")?;
+                if !riff[offset..end].contains(&0) {
+                    return Err("STR entry has no terminator");
+                }
+                offsets.push(offset);
+            }
+            return Ok(offsets);
+        }
+        at = end;
+    }
+    Err("RIFF has no STR chunk")
 }
 
 fn confirm_warnings(warnings: &[String], force: bool, dry_run: bool) -> Result<(), Error> {

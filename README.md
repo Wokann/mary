@@ -257,7 +257,8 @@ MARY_MFOMT_JP  MARY_MFOMT_US
 FoMT uses `goodies/fomt_callables.mary.h`,
 `goodies/fomt_constants.mary.h`, and
 `goodies/fomt_scripts_text.mary.sym`; MFoMT uses the corresponding `mfomt_*`
-files. `.mary.sym` is decompiler-only naming metadata.
+files. `.mary.sym` supplies names during decompilation and linker-bundle
+generation; it is never compiled into VM bytecode.
 
 A complete decompile writes one `.mary.c` per physical pointer-table slot and
 three local headers: constants, callables, and the generated script table.
@@ -381,6 +382,74 @@ for structured Mary-C recovery.
 
 Use `mary decompile --help`, `mary import --help`, and `mary compile --help`
 for every option.
+
+## Build linker inputs for a decompilation project
+
+`bundle` compiles a complete Mary-C source directory and exposes its scripts,
+pointer table, and individual STR strings as assembler/linker symbols. The
+selected `.mary.sym` order must exactly match the generated script table and
+each compiled RIFF's text table; mismatches are errors instead of silently
+binding a name to the wrong address.
+
+Generate one contiguous, four-byte-aligned RIFF block:
+
+```console
+mary bundle decompiled_text/fomt_jp -o build/data/scripts --layout packed \
+  --symbols goodies/fomt_scripts_text.mary.sym \
+  --library goodies/fomt_callables.mary.h \
+  --script-table decompiled_text/fomt_jp/fomt_scripts.mary.h \
+  --charmap charmap.txt -D MARY_FOMT_JP
+```
+
+This writes:
+
+```text
+scripts.bin       all non-null RIFFs in script-slot order
+scripts.s         script and STR text symbols bound to offsets in scripts.bin
+script_table.s    ordered GBA pointers, with .word 0 for null slots
+scripts.d         Make dependencies for all participating Mary-C inputs
+```
+
+To keep each RIFF as a separate file, change `--layout packed` to
+`--layout split`. The output then uses `riff/<script-name>.riff`; `scripts.s`
+includes those files in slot order and still presents one contiguous linker
+section.
+
+Assemble the two generated sources normally:
+
+```console
+arm-none-eabi-as build/data/scripts/scripts.s -o build/data/scripts/scripts.o
+arm-none-eabi-as build/data/scripts/script_table.s -o build/data/scripts/script_table.o
+```
+
+They provide `.rodata.mary_scripts` and `.rodata.mary_script_table`. Place the
+two input sections at the desired ROM file offsets in the project's linker
+script. `scripts.o` defines every script and text symbol at its real RIFF/STR
+byte address; `script_table.o` keeps relocations against those script symbols,
+so the linker writes the final pointers.
+
+`scripts.d` participates only in Make's dependency stage—it is not assembled,
+linked, or stored in the ROM. Include it from the project Makefile so editing
+any `.mary.c`, included `.mary.h`, `.mary.sym`, or charmap reruns `mary bundle`:
+
+```make
+MARY_SOURCES := $(wildcard data/scripts/*.mary.c)
+
+-include build/data/scripts/scripts.d
+
+build/data/scripts/scripts.s \
+build/data/scripts/script_table.s \
+build/data/scripts/scripts.bin: $(MARY_SOURCES)
+	mary bundle data/scripts -o build/data/scripts --layout packed \
+	  --symbols data/scripts/fomt_scripts_text.mary.sym \
+	  --library data/scripts/fomt_callables.mary.h \
+	  --script-table data/scripts/fomt_scripts.mary.h \
+	  --charmap data/scripts/charmap.txt -D MARY_FOMT_JP
+```
+
+The wildcard is intentional: the generated dependency file tracks existing
+inputs, while the wildcard also lets Make notice a newly added `.mary.c` file.
+Use `mary bundle --help` for all bundle options.
 
 ## Character map
 
