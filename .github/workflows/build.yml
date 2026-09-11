@@ -44,10 +44,11 @@ jobs:
             family: linux
           - artifact: mary-windows-x86-mingw.exe
             os: windows-latest
-            toolchain: stable-x86_64-pc-windows-gnu
+            toolchain: stable-i686-pc-windows-gnu
             target: i686-pc-windows-gnu
             executable: mary.exe
             family: windows
+            force_non_host: true
           - artifact: mary-windows-x86_64-mingw.exe
             os: windows-latest
             toolchain: stable-x86_64-pc-windows-gnu
@@ -72,7 +73,11 @@ jobs:
       - name: Install Rust target
         shell: bash
         run: |
-          rustup toolchain install "${{ matrix.toolchain }}" --profile minimal
+          if [[ "${{ matrix.force_non_host }}" == "true" ]]; then
+            rustup toolchain install "${{ matrix.toolchain }}" --profile minimal --force-non-host
+          else
+            rustup toolchain install "${{ matrix.toolchain }}" --profile minimal
+          fi
           rustup target add --toolchain "${{ matrix.toolchain }}" "${{ matrix.target }}"
       - name: Install musl linker
         if: matrix.family == 'linux'
