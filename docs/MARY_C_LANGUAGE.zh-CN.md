@@ -795,6 +795,33 @@ mary compile OUTPUT/EventScript_0867.mary.c --mary-c --charmap charmap.txt -o Ev
 
 不使用 `--binary` 时输出适合 C 工程引用的数据定义。这是输出容器选择，不表示 `.mary.c` 能由普通 C 编译器直接编译。
 
+### 导入 ROM 副本
+
+```console
+mary import ROM EventScript.mary.c --script-id ID --charmap charmap.txt -o OUTPUT.gba
+mary import ROM OUTPUT_DIRECTORY --charmap charmap.txt -o OUTPUT.gba
+```
+
+第一种形式在原分配区替换单个槽位；RIFF 可以使用原有的零值对齐填充，但不能
+越过下一条脚本，未使用的原分配区会全部清零。第二种形式编译目录内提供的
+文件；已有 ID 缺少文件时保留原 RIFF 字节，新增而未提供源码的槽位保持
+`NULL`，其余脚本按四字节零填充规则重新紧凑排列。未指定新地址时，结果必须
+容纳在原连续脚本区内，整体末尾未使用的原范围也会全部清零。
+
+脚本块迁移且指针表扩容时使用：
+
+```console
+mary import ROM OUTPUT_DIRECTORY --address SCRIPT_ADDRESS \
+  --relocate-pointer-table TABLE_ADDRESS --charmap charmap.txt -o OUTPUT.gba
+```
+
+地址可使用文件偏移或 GBA 地址，必须四字节对齐、位于 ROM 内，且不能互相
+重叠，也不能覆盖原生指针引用或 Mary 元数据。目标区存在非 `00`/`FF` 字节时，
+必须交互确认或显式使用 `--force`；`--dry-run` 只校验而不写文件。迁移后的表
+通过写在废弃原生表中的带校验元数据自动发现；`--pointer-table` 与
+`--pointer-count` 是手动恢复入口。Mary 会修补三处已经验证的原生表引用；
+原生 `ScriptEngine::LoadById` 直接按 ID 索引表，不存在另一处硬编码槽数上限。
+
 ### 同时查看 IR
 
 ```console

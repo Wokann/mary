@@ -718,6 +718,39 @@ mary compile EventScript_0867.mary.c --mary-c --charmap charmap.txt -o EventScri
 
 Omit `--binary` to emit the C data definition; this chooses the output container and does not make `.mary.c` valid input to an ordinary C compiler.
 
+### Import into a ROM copy
+
+```console
+mary import ROM EventScript.mary.c --script-id ID --charmap charmap.txt -o OUTPUT.gba
+mary import ROM OUTPUT_DIRECTORY --charmap charmap.txt -o OUTPUT.gba
+```
+
+The first form replaces one slot in its original allocation; the RIFF may use
+the original zero alignment padding but may not reach the following script.
+Any unused remainder of that allocation is cleared to zero.
+The second form recompiles supplied files, preserves original RIFF bytes for
+existing IDs whose files are absent, leaves newly added unsupplied slots
+`NULL`, and repacks all slots with zero-filled four-byte alignment. Without a
+destination override, the packed result must fit the original contiguous
+script area, whose unused tail is also cleared to zero.
+
+Relocate the packed scripts and an expanded table with:
+
+```console
+mary import ROM OUTPUT_DIRECTORY --address SCRIPT_ADDRESS \
+  --relocate-pointer-table TABLE_ADDRESS --charmap charmap.txt -o OUTPUT.gba
+```
+
+Both file offsets and GBA addresses are accepted. They must be four-byte
+aligned, remain inside the ROM, and not overlap each other, native pointer
+references, or Mary metadata. Non-`00`/`FF` destination bytes require an
+interactive confirmation or `--force`; `--dry-run` validates without writing.
+The relocated table is rediscovered through checked metadata stored in the
+abandoned native table. `--pointer-table` and `--pointer-count` provide a
+manual recovery path. Mary patches the three verified native table references;
+the native `ScriptEngine::LoadById` indexes the table directly and imposes no
+separate hard-coded slot-count limit.
+
 ### Print IR beside Mary-C
 
 ```console

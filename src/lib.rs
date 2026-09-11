@@ -8,4 +8,5 @@ pub mod ir;
 pub mod low_level;
 pub mod mary_c;
 pub mod pretty_print;
+pub mod rom_import;
 pub mod utility;

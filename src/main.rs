@@ -1,7 +1,9 @@
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
-    io::{self, stdin, stdout, BufWriter, Write},
-    path::PathBuf,
+    io::{self, stdin, stdout, BufWriter, IsTerminal, Write},
+    ops::Range,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -16,6 +18,7 @@ use mary::{
     decompiler::DecompileError,
     ir::{IntValue, Script},
     pretty_print::{PrettyStmts, PrettyStringLit},
+    rom_import::ImportError,
 };
 
 #[derive(Debug, Error)]
@@ -62,11 +65,17 @@ enum Error {
     #[error("Decompile error: {0}")]
     DecompileFailed(#[from] DecompileError),
 
+    #[error("ROM import error: {0}")]
+    RomImport(#[from] ImportError),
+
     #[error("IO Error: {0}")]
     Io(#[from] io::Error),
 
     #[error("CLI Error: {0}")]
     Cli(&'static str),
+
+    #[error("CLI Error: {0}")]
+    CliMessage(String),
 
     #[error("Character map error: {0}")]
     CharmapError(#[from] CharmapError),
@@ -166,9 +175,74 @@ enum Command {
         #[arg(long = "symbols", visible_alias = "text-names", requires = "mary_c")]
         text_names: Option<PathBuf>,
 
+        /// Manually select the script pointer-table address
+        #[arg(long, value_parser = parse_cli_offset, requires = "pointer_count")]
+        pointer_table: Option<usize>,
+
+        /// Slot count of a manually selected pointer table
+        #[arg(long, requires = "pointer_table")]
+        pointer_count: Option<usize>,
+
         /// Select a target macro (for example MARY_FOMT_JP)
         #[arg(short = 'D', requires = "mary_c")]
         defines: Vec<String>,
+    },
+
+    /// Compile Mary-C source and import it into a ROM copy
+    Import {
+        /// Source ROM to read; it is never modified directly
+        input_rom: PathBuf,
+
+        /// One .mary.c file or a complete decompiled script directory
+        input_source: PathBuf,
+
+        /// Output ROM path; must differ from the input ROM
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Import one source file into this script ID
+        #[arg(long)]
+        script_id: Option<usize>,
+
+        /// Relocate the single script or packed script block to this address
+        #[arg(long, value_parser = parse_cli_offset)]
+        address: Option<usize>,
+
+        /// Manually select the current script pointer-table address
+        #[arg(long, value_parser = parse_cli_offset, requires = "pointer_count")]
+        pointer_table: Option<usize>,
+
+        /// Slot count of a manually selected current pointer table
+        #[arg(long, requires = "pointer_table")]
+        pointer_count: Option<usize>,
+
+        /// Relocate and rewrite the pointer table at this address
+        #[arg(long, value_parser = parse_cli_offset)]
+        relocate_pointer_table: Option<usize>,
+
+        /// Ordered callable declarations (.mary.h)
+        #[arg(long)]
+        library: Option<PathBuf>,
+
+        /// Ordered script slot table (.mary.h)
+        #[arg(long)]
+        script_table: Option<PathBuf>,
+
+        /// Byte-to-Unicode map used for localized string literals
+        #[arg(long)]
+        charmap: Option<PathBuf>,
+
+        /// Select a target macro (for example MARY_FOMT_JP)
+        #[arg(short = 'D')]
+        defines: Vec<String>,
+
+        /// Overwrite a relocated destination that contains bytes other than 00/FF
+        #[arg(long)]
+        force: bool,
+
+        /// Validate and print the write plan without creating the output ROM
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -436,6 +510,38 @@ fn main_error() -> Result<(), Error> {
             }
         }
 
+        Command::Import {
+            input_rom,
+            input_source,
+            output,
+            script_id,
+            address,
+            pointer_table,
+            pointer_count,
+            relocate_pointer_table,
+            library,
+            script_table,
+            charmap,
+            defines,
+            force,
+            dry_run,
+        } => import_mary_c_into_rom(ImportRequest {
+            input_rom,
+            input_source,
+            output,
+            script_id,
+            address,
+            pointer_table,
+            pointer_count,
+            relocate_pointer_table,
+            library,
+            script_table,
+            charmap,
+            defines,
+            force,
+            dry_run,
+        }),
+
         Command::Decompile {
             input_binary,
             input_library,
@@ -448,6 +554,8 @@ fn main_error() -> Result<(), Error> {
             mary_c,
             script_table,
             text_names,
+            pointer_table,
+            pointer_count,
             defines,
         } => {
             use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
@@ -473,6 +581,22 @@ fn main_error() -> Result<(), Error> {
                     });
                 }
             }
+            if pointer_table.is_some() != pointer_count.is_some() {
+                return Err(Error::Cli(
+                    "--pointer-table and --pointer-count must be specified together",
+                ));
+            }
+            if offset.is_some() && pointer_table.is_some() {
+                return Err(Error::Cli(
+                    "--pointer-table cannot be combined with --offset",
+                ));
+            }
+            let pointer_table = match pointer_table.zip(pointer_count) {
+                Some((address, count)) => {
+                    Some((mary::rom_import::normalize_rom_offset(address)?, count))
+                }
+                None => None,
+            };
             let mary_headers = mary_target.map(mary_header_names);
             let mut script_table_include = script_table
                 .as_ref()
@@ -540,6 +664,7 @@ fn main_error() -> Result<(), Error> {
                     text_names.as_ref(),
                     mary_target,
                     named_scripts,
+                    pointer_table,
                 )?;
                 return Ok(());
             }
@@ -549,7 +674,12 @@ fn main_error() -> Result<(), Error> {
 
             let script = match (script_id, offset) {
                 (Some(script_id), None) => {
-                    let script_table = rom_info::get_script_table(&rom)?;
+                    let script_table = match pointer_table {
+                        Some((offset, count)) => {
+                            rom_info::get_script_table_at(&rom, offset, count)?
+                        }
+                        None => rom_info::get_script_table(&rom)?,
+                    };
 
                     event_script_id = script_id;
                     event_script_name = named_scripts
@@ -769,6 +899,7 @@ fn decompile_all_scripts(
     text_names: Option<&mary::mary_c::ScriptSymbols>,
     mary_target: Option<&str>,
     named_scripts: Option<&mary::mary_c::ScriptTable>,
+    pointer_table: Option<(usize, usize)>,
 ) -> Result<(), Error> {
     use mary::{compiler::parse_string, decompiler::decompile_script, utility::rom_info};
 
@@ -814,7 +945,10 @@ fn decompile_all_scripts(
         input_library.to_string_lossy()
     };
 
-    let entries = rom_info::get_script_table(rom)?;
+    let entries = match pointer_table {
+        Some((offset, count)) => rom_info::get_script_table_at(rom, offset, count)?,
+        None => rom_info::get_script_table(rom)?,
+    };
     if let Some(scripts) = named_scripts {
         if scripts.slots().len() != entries.len() {
             return Err(Error::MarySymbolMismatch(format!(
@@ -1286,6 +1420,492 @@ fn extract_mary_c_includes(source: &mut String) -> Result<Vec<PathBuf>, Error> {
     Ok(includes)
 }
 
+struct ImportRequest {
+    input_rom: PathBuf,
+    input_source: PathBuf,
+    output: PathBuf,
+    script_id: Option<usize>,
+    address: Option<usize>,
+    pointer_table: Option<usize>,
+    pointer_count: Option<usize>,
+    relocate_pointer_table: Option<usize>,
+    library: Option<PathBuf>,
+    script_table: Option<PathBuf>,
+    charmap: Option<PathBuf>,
+    defines: Vec<String>,
+    force: bool,
+    dry_run: bool,
+}
+
+struct CompiledImport {
+    target: String,
+    source_slot_count: usize,
+    compiled: BTreeMap<usize, Vec<u8>>,
+}
+
+fn import_mary_c_into_rom(request: ImportRequest) -> Result<(), Error> {
+    use mary::rom_import::{
+        range_occupancy, resolve_script_layout, write_packed_scripts, write_single_script_at,
+        write_single_script_in_place, Occupancy, PackedScripts,
+    };
+
+    let source_is_dir = request.input_source.is_dir();
+    if source_is_dir == request.script_id.is_some() {
+        return Err(Error::Cli(
+            "import requires a directory without --script-id, or one .mary.c file with --script-id",
+        ));
+    }
+    if !source_is_dir && !request.input_source.is_file() {
+        return Err(Error::Cli("import source does not exist"));
+    }
+    if request.pointer_table.is_some() != request.pointer_count.is_some() {
+        return Err(Error::Cli(
+            "--pointer-table and --pointer-count must be specified together",
+        ));
+    }
+
+    let input_canonical = fs::canonicalize(&request.input_rom)?;
+    if request.output.exists() && fs::canonicalize(&request.output)? == input_canonical {
+        return Err(Error::Cli(
+            "the output ROM must differ from the input ROM; write a separate copy",
+        ));
+    }
+
+    let compiled = compile_import_sources(
+        &request.input_source,
+        request.library.as_deref(),
+        request.script_table.as_deref(),
+        request.charmap,
+        request.defines,
+    )?;
+    let mut rom = fs::read(&request.input_rom)?;
+    let detected =
+        mary::utility::rom_info::identify_rom(&rom).ok_or(ImportError::UnsupportedRom)?;
+    let expected = mary_target_variant(&compiled.target).ok_or_else(|| {
+        Error::CliMessage(format!("unsupported Mary-C target {}", compiled.target))
+    })?;
+    if expected != detected {
+        return Err(Error::MaryTargetMismatch {
+            selected: compiled.target,
+            detected,
+        });
+    }
+
+    let manual_table = match request.pointer_table.zip(request.pointer_count) {
+        Some((address, count)) => Some((normalize_aligned_import_address(address)?, count)),
+        None => None,
+    };
+    let layout = resolve_script_layout(&rom, manual_table)?;
+    let requested_address = request
+        .address
+        .map(normalize_aligned_import_address)
+        .transpose()?;
+    let relocated_table = request
+        .relocate_pointer_table
+        .map(normalize_aligned_import_address)
+        .transpose()?;
+
+    let mut warnings = Vec::new();
+    if let Some(id) = request.script_id {
+        if relocated_table.is_some() {
+            return Err(Error::Cli(
+                "single-script import does not relocate the pointer table; use a complete directory when changing its size",
+            ));
+        }
+        let riff = compiled.compiled.get(&id).ok_or_else(|| {
+            Error::CliMessage(format!(
+                "the input file does not define requested script ID {id}"
+            ))
+        })?;
+        if compiled.compiled.len() != 1 {
+            return Err(Error::Cli(
+                "single-script import source must define exactly one script",
+            ));
+        }
+
+        let written = if let Some(destination) = requested_address {
+            let mut planned_rom = rom.clone();
+            let written = write_single_script_at(&mut planned_rom, &layout, id, riff, destination)?;
+            if let Occupancy::ContainsData { offset, byte } =
+                range_occupancy(&rom, written.clone())?
+            {
+                warnings.push(format!(
+                    "script destination {} contains byte {byte:02X} at {offset:#010X}",
+                    display_range(&written)
+                ));
+            }
+            confirm_warnings(&warnings, request.force, request.dry_run)?;
+            rom = planned_rom;
+            written
+        } else {
+            write_single_script_in_place(&mut rom, &layout, id, riff)?
+        };
+        println!(
+            "Script {id} write: {} (RIFF {} bytes, allocation {} bytes)",
+            display_range(&written),
+            riff.len(),
+            written.len()
+        );
+    } else {
+        let merged_slot_count = compiled.source_slot_count.max(layout.slot_count);
+        let mut merged_slots = Vec::with_capacity(merged_slot_count);
+        for id in 0..merged_slot_count {
+            if let Some(riff) = compiled.compiled.get(&id) {
+                merged_slots.push(Some(riff.clone()));
+            } else if let Some(Some(location)) = layout.scripts.get(id) {
+                merged_slots.push(Some(
+                    rom[location.offset..location.offset + location.riff_len].to_vec(),
+                ));
+            } else {
+                merged_slots.push(None);
+            }
+        }
+
+        if merged_slots.len() != layout.slot_count
+            && (requested_address.is_none() || relocated_table.is_none())
+        {
+            return Err(Error::CliMessage(format!(
+                "script count changed from {} to {}; both --address and --relocate-pointer-table are required",
+                layout.slot_count,
+                merged_slots.len()
+            )));
+        }
+        if relocated_table == Some(layout.pointer_table_offset)
+            && merged_slots.len() != layout.slot_count
+        {
+            return Err(Error::Cli(
+                "an expanded pointer table must use a new address, not the current table address",
+            ));
+        }
+
+        let packed = PackedScripts::from_slots(&merged_slots)?;
+        let destination = match requested_address {
+            Some(destination) => destination,
+            None => {
+                let area = layout
+                    .script_area
+                    .clone()
+                    .ok_or(ImportError::NonContiguousScriptArea)?;
+                if packed.bytes.len() > area.len() {
+                    return Err(ImportError::ScriptAreaTooLarge {
+                        needed: packed.bytes.len(),
+                        available: area.len(),
+                        start: area.start,
+                        end: area.end,
+                    }
+                    .into());
+                }
+                area.start
+            }
+        };
+
+        let mut planned_rom = rom.clone();
+        let (data_range, table_range) = write_packed_scripts(
+            &mut planned_rom,
+            &layout,
+            &packed,
+            destination,
+            relocated_table,
+        )?;
+        if requested_address.is_some() {
+            if let Occupancy::ContainsData { offset, byte } =
+                range_occupancy(&rom, data_range.clone())?
+            {
+                warnings.push(format!(
+                    "packed script destination {} contains byte {byte:02X} at {offset:#010X}",
+                    display_range(&data_range)
+                ));
+            }
+        }
+        if relocated_table.is_some() {
+            if let Occupancy::ContainsData { offset, byte } =
+                range_occupancy(&rom, table_range.clone())?
+            {
+                warnings.push(format!(
+                    "new pointer-table destination {} contains byte {byte:02X} at {offset:#010X}",
+                    display_range(&table_range)
+                ));
+            }
+        }
+        confirm_warnings(&warnings, request.force, request.dry_run)?;
+        rom = planned_rom;
+        println!(
+            "Packed scripts: {} slots, {}",
+            merged_slots.len(),
+            display_range(&data_range)
+        );
+        println!("Pointer table: {}", display_range(&table_range));
+    }
+
+    if request.dry_run {
+        println!("Dry run complete; no output ROM was written.");
+        return Ok(());
+    }
+    if request.output.exists() {
+        confirm_question(
+            &format!(
+                "Output ROM '{}' already exists. Overwrite it?",
+                request.output.display()
+            ),
+            request.force,
+        )?;
+    }
+    write_rom_atomically(&request.output, &rom)?;
+    println!("Wrote ROM copy: {}", request.output.display());
+    Ok(())
+}
+
+fn compile_import_sources(
+    input: &Path,
+    library_override: Option<&Path>,
+    script_table_override: Option<&Path>,
+    charmap_path: Option<PathBuf>,
+    defines: Vec<String>,
+) -> Result<CompiledImport, Error> {
+    let mut paths = if input.is_dir() {
+        fs::read_dir(input)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.to_string_lossy().ends_with(".mary.c"))
+            .collect::<Vec<_>>()
+    } else {
+        vec![input.to_path_buf()]
+    };
+    paths.sort();
+    let first_path = paths
+        .first()
+        .ok_or(Error::Cli("the import directory contains no .mary.c files"))?;
+    let first_source = fs::read_to_string(first_path)?;
+    let options = mary_c_options_from_source(defines, &first_source)?;
+    let target = selected_mary_target(&options)
+        .ok_or(Error::Cli("Mary-C import requires exactly one target"))?
+        .to_owned();
+    let headers = mary_header_names(&target);
+    let base = first_path.parent().unwrap_or_else(|| Path::new(""));
+
+    let mut first_without_includes = first_source.clone();
+    let includes = extract_mary_c_includes(&mut first_without_includes)?;
+    let included = |name: &str| {
+        includes
+            .iter()
+            .map(|path| {
+                if path.is_absolute() {
+                    path.clone()
+                } else {
+                    base.join(path)
+                }
+            })
+            .find(|path| path.file_name().is_some_and(|file| file == name))
+    };
+    let library = library_override
+        .map(PathBuf::from)
+        .or_else(|| included(headers.callables))
+        .unwrap_or_else(|| base.join(headers.callables));
+    let script_table = script_table_override
+        .map(PathBuf::from)
+        .or_else(|| included(headers.scripts))
+        .unwrap_or_else(|| base.join(headers.scripts));
+    let constants = included(headers.constants).unwrap_or_else(|| base.join(headers.constants));
+
+    let constant_scope =
+        mary::mary_c::parse_constant_header(&fs::read_to_string(constants)?, &options)?;
+    let callables = mary::mary_c::parse_callable_table_with_scope(
+        &fs::read_to_string(library)?,
+        &options,
+        &constant_scope,
+    )?;
+    let table = mary::mary_c::parse_script_table(&fs::read_to_string(script_table)?, &options)?;
+    let charmap = load_charmap(charmap_path, Some(&options))?;
+    let mut compiled = BTreeMap::new();
+
+    for path in paths {
+        let mut source = fs::read_to_string(&path)?;
+        let source_options = mary_c_options_from_source(Vec::new(), &source)?;
+        if selected_mary_target(&source_options) != Some(target.as_str()) {
+            return Err(Error::CliMessage(format!(
+                "{} selects a different Mary-C target",
+                path.display()
+            )));
+        }
+        extract_mary_c_includes(&mut source)?;
+        let parsed = match charmap.as_deref() {
+            Some(charmap) => mary::mary_c::parse_named_scripts_with_charmap(
+                &source,
+                &options,
+                &callables.scope,
+                &table,
+                charmap,
+            )?,
+            None => mary::mary_c::parse_named_scripts(&source, &options, &callables.scope, &table)?,
+        };
+        for (id, name, script) in parsed.scripts {
+            let id = usize::try_from(id)
+                .map_err(|_| Error::CliMessage(format!("script '{name}' has a negative ID")))?;
+            let riff = bytecode::try_encode_script(&script)?;
+            if compiled.insert(id, riff).is_some() {
+                return Err(Error::CliMessage(format!(
+                    "script ID {id} is defined by more than one input file"
+                )));
+            }
+        }
+    }
+
+    Ok(CompiledImport {
+        target,
+        source_slot_count: table.slots().len(),
+        compiled,
+    })
+}
+
+fn confirm_warnings(warnings: &[String], force: bool, dry_run: bool) -> Result<(), Error> {
+    if warnings.is_empty() {
+        return Ok(());
+    }
+    for warning in warnings {
+        eprintln!("Warning: {warning}");
+    }
+    if dry_run {
+        return Ok(());
+    }
+    confirm_question(
+        "The requested destination may contain other data. Continue and overwrite it?",
+        force,
+    )
+}
+
+fn confirm_question(question: &str, force: bool) -> Result<(), Error> {
+    if force {
+        return Ok(());
+    }
+    if !stdin().is_terminal() {
+        return Err(Error::Cli(
+            "confirmation is required but stdin is not interactive; rerun with --force to overwrite",
+        ));
+    }
+    eprint!("{question} [y/N] ");
+    io::stderr().flush()?;
+    let mut answer = String::new();
+    stdin().read_line(&mut answer)?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        Err(Error::Cli("ROM import cancelled"))
+    }
+}
+
+fn write_rom_atomically(output: &Path, rom: &[u8]) -> Result<(), Error> {
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("output.gba");
+    let mut temporary = None;
+    for attempt in 0..1000 {
+        let candidate = output.with_file_name(format!(
+            ".{file_name}.mary-import.{}.{attempt}.tmp",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                let write_result = file.write_all(rom).and_then(|()| file.sync_all());
+                drop(file);
+                if let Err(error) = write_result {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(error.into());
+                }
+                temporary = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let temporary = temporary.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique temporary ROM output file",
+        )
+    })?;
+    if let Err(error) = replace_file_atomically(&temporary, output) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(temporary: &Path, output: &Path) -> io::Result<()> {
+    fs::rename(temporary, output)
+}
+
+#[cfg(windows)]
+fn replace_file_atomically(temporary: &Path, output: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    if !output.exists() {
+        return fs::rename(temporary, output);
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn ReplaceFileW(
+            replaced: *const u16,
+            replacement: *const u16,
+            backup: *const u16,
+            flags: u32,
+            exclude: *mut std::ffi::c_void,
+            reserved: *mut std::ffi::c_void,
+        ) -> i32;
+    }
+
+    let replaced = output
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replacement = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        ReplaceFileW(
+            replaced.as_ptr(),
+            replacement.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn display_range(range: &Range<usize>) -> String {
+    format!(
+        "file {:#010X}..{:#010X} / GBA {:#010X}..{:#010X}",
+        range.start,
+        range.end,
+        range.start + mary::rom_import::GBA_ROM_BASE,
+        range.end + mary::rom_import::GBA_ROM_BASE
+    )
+}
+
+fn normalize_aligned_import_address(address: usize) -> Result<usize, ImportError> {
+    let offset = mary::rom_import::normalize_rom_offset(address)?;
+    if !offset.is_multiple_of(4) {
+        return Err(ImportError::AddressNotAligned { address });
+    }
+    Ok(offset)
+}
+
 fn main() -> Result<(), ()> {
     match main_error() {
         Ok(_) => Ok(()),
@@ -1299,7 +1919,10 @@ fn main() -> Result<(), ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mary_target_variant, print_empty_single_mary_c_slot, write_ir_as_comment};
+    use super::{
+        mary_target_variant, print_empty_single_mary_c_slot, write_ir_as_comment,
+        write_rom_atomically,
+    };
     use mary::{charmap::Charmap, ir::Script, utility::rom_info::FomtVariant};
     use std::{fs, path::PathBuf};
 
@@ -1371,5 +1994,20 @@ mod tests {
 
         assert!(output.contains("Script strings (IR):\n    0: \"あ{Press}\""));
         assert!(!output.contains("\\x82\\xA0\\x05"));
+    }
+
+    #[test]
+    fn atomic_rom_output_replaces_an_existing_copy_without_leaving_a_temporary() {
+        let output_dir = PathBuf::from("test_failures")
+            .join(format!("atomic_rom_output_{}", std::process::id()));
+        fs::create_dir_all(&output_dir).unwrap();
+        let output = output_dir.join("output.gba");
+        fs::write(&output, b"old").unwrap();
+
+        write_rom_atomically(&output, b"new ROM bytes").unwrap();
+
+        assert_eq!(fs::read(&output).unwrap(), b"new ROM bytes");
+        assert_eq!(fs::read_dir(&output_dir).unwrap().count(), 1);
+        fs::remove_dir_all(output_dir).unwrap();
     }
 }

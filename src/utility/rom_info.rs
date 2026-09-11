@@ -30,11 +30,48 @@ pub enum FomtVariant {
     MfomtUs,
 }
 
-fn read_u32(from: &[u8]) -> usize {
-    (from[0] as usize)
-        | ((from[1] as usize) << 8)
-        | ((from[2] as usize) << 16)
-        | ((from[3] as usize) << 24)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeScriptLayout {
+    pub pointer_table_offset: usize,
+    pub slot_count: usize,
+    pub pointer_reference_offsets: [usize; 3],
+}
+
+impl FomtVariant {
+    pub fn native_script_layout(self) -> NativeScriptLayout {
+        match self {
+            Self::FomtJp => NativeScriptLayout {
+                pointer_table_offset: 0x0F8230,
+                slot_count: 1329,
+                pointer_reference_offsets: [0x03F510, 0x0DF4D4, 0x0DFCE0],
+            },
+            Self::FomtUs => NativeScriptLayout {
+                pointer_table_offset: 0x0F89D4,
+                slot_count: 1329,
+                pointer_reference_offsets: [0x03F89C, 0x0DFD20, 0x0E0534],
+            },
+            Self::FomtEu => NativeScriptLayout {
+                pointer_table_offset: 0x0F8A20,
+                slot_count: 1329,
+                pointer_reference_offsets: [0x03F8B0, 0x0DFD6C, 0x0E0580],
+            },
+            Self::FomtDe => NativeScriptLayout {
+                pointer_table_offset: 0x0F8EBC,
+                slot_count: 1329,
+                pointer_reference_offsets: [0x03F794, 0x0DFC84, 0x0E0498],
+            },
+            Self::MfomtJp => NativeScriptLayout {
+                pointer_table_offset: 0x10145C,
+                slot_count: 1416,
+                pointer_reference_offsets: [0x03F7E4, 0x0E7D64, 0x0E8578],
+            },
+            Self::MfomtUs => NativeScriptLayout {
+                pointer_table_offset: 0x1014BC,
+                slot_count: 1416,
+                pointer_reference_offsets: [0x03FA88, 0x0E8254, 0x0E8A68],
+            },
+        }
+    }
 }
 
 pub fn identify_rom(rom: &[u8]) -> Option<FomtVariant> {
@@ -50,60 +87,36 @@ pub fn identify_rom(rom: &[u8]) -> Option<FomtVariant> {
 }
 
 pub fn get_script_table(rom: &[u8]) -> io::Result<Vec<ScriptTableEntry<'_>>> {
-    let variant = identify_rom(rom).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "ROM header does not match a supported FoMT/MFoMT variant",
-        )
-    })?;
+    get_script_table_with_override(rom, None)
+}
 
-    let (addr, table_slot_count) = match variant {
-        FomtVariant::FomtJp => (0x080F8230, 1329),
-        FomtVariant::FomtUs => (0x080F89D4, 1329),
-        FomtVariant::FomtEu => (0x080F8A20, 1329),
-        FomtVariant::FomtDe => (0x080F8EBC, 1329),
-        FomtVariant::MfomtJp => (0x0810145C, 1416),
-        FomtVariant::MfomtUs => (0x081014BC, 1416),
-    };
+pub fn get_script_table_at(
+    rom: &[u8],
+    table_offset: usize,
+    slot_count: usize,
+) -> io::Result<Vec<ScriptTableEntry<'_>>> {
+    get_script_table_with_override(rom, Some((table_offset, slot_count)))
+}
 
-    let mut result = vec![];
-    let table_offset = addr & 0x01FFFFFF;
-    let table_size = table_slot_count * 4;
-    let table_bytes = rom
-        .get(table_offset..table_offset + table_size)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated script table"))?;
-
-    for i in 0..table_slot_count {
-        let script_addr = read_u32(&table_bytes[i * 4..]);
-        if script_addr == 0 {
-            result.push(ScriptTableEntry::Empty { id: i });
-            continue;
-        }
-
-        let script_offs = script_addr & 0x01FFFFFF;
-
-        if script_offs + 8 >= rom.len() {
-            break;
-        }
-
-        let riff_unbound = &rom[script_offs..];
-        if &riff_unbound[..4] != b"RIFF" {
-            break;
-        }
-        let riff_len = read_u32(&riff_unbound[4..8]);
-
-        if script_offs + riff_len >= rom.len() {
-            break;
-        }
-
-        result.push(ScriptTableEntry::Script {
-            id: i,
-            data: &riff_unbound[0..riff_len],
-            backing: riff_unbound,
-        });
-    }
-
-    Ok(result)
+fn get_script_table_with_override(
+    rom: &[u8],
+    manual_table: Option<(usize, usize)>,
+) -> io::Result<Vec<ScriptTableEntry<'_>>> {
+    let layout = crate::rom_import::resolve_script_layout(rom, manual_table)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(layout
+        .scripts
+        .into_iter()
+        .enumerate()
+        .map(|(id, location)| match location {
+            Some(location) => ScriptTableEntry::Script {
+                id,
+                data: &rom[location.offset..location.offset + location.riff_len],
+                backing: &rom[location.offset..],
+            },
+            None => ScriptTableEntry::Empty { id },
+        })
+        .collect())
 }
 
 /// Compatibility view for consumers that operate only on RIFF bodies. Use

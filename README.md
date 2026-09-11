@@ -2,129 +2,190 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`mary` is a script compiler and decompiler for the Japanese, US, European English, and German GBA releases of *Harvest Moon: Friends of Mineral Town* (FoMT), plus the Japanese and US releases of *Harvest Moon: More Friends of Mineral Town* (MFoMT).
+`mary` decompiles, recompiles, and safely imports event scripts for:
+
+- *Harvest Moon: Friends of Mineral Town*: JP, US, European English, and German
+- *Harvest Moon: More Friends of Mineral Town*: JP and US
+
+Mary-C is the canonical source format. Its `.mary.c` and `.mary.h` suffixes
+enable C highlighting, but the files must be compiled by `mary`, not a normal C
+compiler. C-compatible constructs keep C semantics; VM or physical-byte forms
+use an explicit `mary_` prefix.
 
 ```text
-RIFF bytecode in ROM
-        ↓ decompile
-Editable structured source (UTF-8)
-        ↓ compile
-Byte-exact RIFF/HEX
+ROM pointer table and RIFF scripts
+              ↓ decompile
+Named UTF-8 Mary-C source and local headers
+              ↓ edit / import
+Validated ROM copy with rebuilt RIFFs and pointers
 ```
 
-All 8,142 valid vanilla scripts from the six supported ROMs pass the strict source round trip: decode, structured decompile, print source, parse source, compile, encode, and compare byte-for-byte with the original RIFF. None currently requires low-level `ir` or retains `jump next`.
+All 8,142 non-null scripts in the six vanilla ROMs pass strict
+ROM → Mary-C → RIFF byte-for-byte round trips. This proves the tested vanilla
+corpus; handwritten source must still obey the documented language and VM
+limits.
 
-| Version | Valid scripts | Structured source | Byte-exact round trip |
-| --- | ---: | ---: | ---: |
-| FoMT JP | 1,328 | 1,328/1,328 | 1,328/1,328 |
-| FoMT US | 1,328 | 1,328/1,328 | 1,328/1,328 |
-| FoMT EU | 1,328 | 1,328/1,328 | 1,328/1,328 |
-| FoMT DE | 1,328 | 1,328/1,328 | 1,328/1,328 |
-| MFoMT JP | 1,415 | 1,415/1,415 | 1,415/1,415 |
-| MFoMT US | 1,415 | 1,415/1,415 | 1,415/1,415 |
+| Target | Non-null scripts | Strict round trip |
+| --- | ---: | ---: |
+| FoMT JP | 1,328 | 1,328/1,328 |
+| FoMT US | 1,328 | 1,328/1,328 |
+| FoMT EU | 1,328 | 1,328/1,328 |
+| FoMT DE | 1,328 | 1,328/1,328 |
+| MFoMT JP | 1,415 | 1,415/1,415 |
+| MFoMT US | 1,415 | 1,415/1,415 |
 
-> This 100% figure describes the six tested vanilla corpora. Arbitrary handwritten programs must still use structures supported by the VM and pass compiler validation.
+See the [Mary-C language reference](docs/MARY_C_LANGUAGE.md)
+([简体中文](docs/MARY_C_LANGUAGE.zh-CN.md)) for the exact C subset, Mary-only
+syntax, callable/constant tables, text layout, and RIFF structure.
 
 ## Build
-
-Install the Rust toolchain, then run:
 
 ```console
 cargo build --release
 ```
 
-The release executable is written to `target/release/mary.exe`.
+The executable is `target/release/mary.exe`.
 
-## Mary-C workflow
+## Targets and generated files
 
-Mary-C is the canonical C-shaped frontend. Files use `.mary.c` and `.mary.h`, so editors provide C highlighting while the names still make it clear that Mary extensions require this compiler. See the [Mary-C language reference](docs/MARY_C_LANGUAGE.md) ([简体中文](docs/MARY_C_LANGUAGE.zh-CN.md)).
+Select exactly one target when decompiling:
 
-Decompile all scripts from a Japanese FoMT ROM:
-
-```console
-mary decompile rom/fomtjp.gba goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP --charmap charmap.txt -o decompiled_text/fomt_jp
+```text
+MARY_FOMT_JP  MARY_FOMT_US  MARY_FOMT_EU  MARY_FOMT_DE
+MARY_MFOMT_JP  MARY_MFOMT_US
 ```
 
-The output directory contains one `.mary.c` per pointer-table slot, including an explicit `NULL` placeholder with no fabricated script body for every empty pointer, plus local `fomt_constants.mary.h`, `fomt_callables.mary.h`, and `fomt_scripts.mary.h`. The `.mary.sym` database is decompiler-only and is never copied or included. Null slots also remain `NULL` in the generated script table. A single-script Mary-C decompile written to a file also copies the fixed constants and callable headers beside that file; when script symbols or a script table are supplied, it generates the local script-table header as well.
+FoMT uses `goodies/fomt_callables.mary.h`,
+`goodies/fomt_constants.mary.h`, and
+`goodies/fomt_scripts_text.mary.sym`; MFoMT uses the corresponding `mfomt_*`
+files. `.mary.sym` is decompiler-only naming metadata.
 
-Each generated source explicitly selects its ROM target:
+A complete decompile writes one `.mary.c` per physical pointer-table slot and
+three local headers: constants, callables, and the generated script table.
+Null pointers get explicit placeholder files and remain `NULL` in that table,
+so later IDs never shift. Each generated source contains its target `#define`
+and includes all three headers.
+
+## Decompile
+
+Complete FoMT-JP example:
+
+```console
+mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c \
+  --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP \
+  --charmap charmap.txt -o OUTPUT_DIRECTORY
+```
+
+One script ID:
+
+```console
+mary decompile ROM goodies/fomt_callables.mary.h --script-id ID --mary-c \
+  --symbols goodies/fomt_scripts_text.mary.sym -D MARY_FOMT_JP \
+  --charmap charmap.txt -o OUTPUT.mary.c
+```
+
+An arbitrary RIFF file offset does not require a recognized ROM header:
+
+```console
+mary decompile BINARY goodies/fomt_callables.mary.h --offset OFFSET --mary-c \
+  -D MARY_FOMT_JP --charmap charmap.txt -o OUTPUT.mary.c
+```
+
+`OFFSET` may be decimal or `0x`-prefixed hexadecimal and cannot be combined
+with `--script-id`. For a relocated table that cannot be found from Mary
+metadata, provide both manual recovery values:
+
+```console
+mary decompile ROM CALLABLES --all --mary-c -D TARGET --charmap charmap.txt \
+  --pointer-table TABLE_ADDRESS --pointer-count SLOT_COUNT -o OUTPUT_DIRECTORY
+```
+
+## Edit and import into a ROM copy
+
+The input ROM is always read-only and `-o` must name a different file.
+
+Replace one script in its original allocation:
+
+```console
+mary import ROM INPUT.mary.c --script-id ID --charmap charmap.txt -o OUTPUT.gba
+```
+
+The rebuilt RIFF including alignment may not cross the next script. If it is
+shorter, the whole unused remainder of its old allocation is cleared to `00`.
+
+Rebuild a complete or partial source directory at the original address:
+
+```console
+mary import ROM SOURCE_DIRECTORY --charmap charmap.txt -o OUTPUT.gba
+```
+
+Provided `.mary.c` files are compiled. An existing ROM ID omitted from the
+directory keeps its original RIFF bytes; a newly added slot without source
+remains `NULL`. Scripts are packed with four-byte zero alignment and must fit
+the original contiguous area. Its unused old tail is cleared to `00`.
+
+Relocate a script or packed directory:
+
+```console
+mary import ROM SOURCE --address SCRIPT_ADDRESS --charmap charmap.txt -o OUTPUT.gba
+```
+
+For one script, also pass `--script-id`. Addresses may be file offsets or
+`0x08xxxxxx` GBA addresses and must be four-byte aligned. Mary checks the whole
+destination. Non-`00`/`FF` data requires interactive confirmation or `--force`
+in non-interactive use. `--dry-run` validates the complete plan without output.
+
+### Expand or relocate the pointer table
+
+If the generated script table gains slots, relocate both data and table:
+
+```console
+mary import ROM SOURCE_DIRECTORY --address SCRIPT_ADDRESS \
+  --relocate-pointer-table TABLE_ADDRESS --charmap charmap.txt -o OUTPUT.gba
+```
+
+For example, these entries add a null ID 1416 followed by a real ID 1417. A
+null slot never terminates later indexing:
 
 ```c
-#define MARY_FOMT_JP
-#include "fomt_callables.mary.h"
-#include "fomt_scripts.mary.h"
+    /* 0x0588 */ NULL,
+    /* 0x0589 */ EventScript_ExpansionProbe,
 ```
 
-This makes an extracted script independently compilable after copying it together with the two headers:
+The named script must be defined by a `.mary.c` file. Mary writes the enlarged
+table, patches the three verified native table references, and stores checked
+discovery metadata in the abandoned original table. Later commands reuse the
+relocated table automatically; damaged or unavailable metadata can be bypassed
+with `--pointer-table` and `--pointer-count`.
 
-```console
-mary compile decompiled_text/fomt_jp/EventScript_0867.mary.c --mary-c --charmap charmap.txt --binary -o EventScript_0867.riff
-```
+Script data, tables, native references, and metadata cannot overlap. Output is
+installed atomically through a unique temporary file only after compilation,
+boundary checks, occupancy checks, and any confirmation all succeed.
 
-Available targets, in canonical order, are `MARY_FOMT_JP`, `MARY_FOMT_US`, `MARY_FOMT_EU`, `MARY_FOMT_DE`, `MARY_MFOMT_JP`, and `MARY_MFOMT_US`. FoMT uses the `fomt_*` tables and MFoMT uses the `mfomt_*` tables. The parser derives `REGION_JP`, `REGION_US`, `REGION_EU`, or `REGION_DE` from the selected target; the different FoMT/MFoMT physical ID layouts remain separated by file.
+## Compile without importing
 
-For `--all` and `--script-id`, the selected target must match the ROM title and game code in the header. `--offset` remains available for an arbitrary binary containing a RIFF and therefore does not require a recognized ROM header.
-
-## Command-line usage
-
-### Decompile every script
-
-```console
-mary decompile ROM goodies/fomt_callables.mary.h --all --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT_DIRECTORY
-```
-
-For MFoMT, use `goodies/mfomt_callables.mary.h` and `goodies/mfomt_scripts_text.mary.sym`; generated headers are correspondingly named `mfomt_*.mary.h`.
-
-`--all` writes one `.mary.c` per pointer-table slot. Named scripts use their semantic symbol; null pointers become explicit placeholders, so later IDs never shift.
-
-### Decompile one script
-
-```console
-mary decompile ROM goodies/fomt_callables.mary.h --script-id ID --mary-c --symbols goodies/fomt_scripts_text.mary.sym -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
-```
-
-An arbitrary RIFF offset can also be decoded:
-
-```console
-mary decompile BINARY goodies/fomt_callables.mary.h --offset OFFSET --mary-c -D TARGET --charmap charmap.txt -o OUTPUT.mary.c
-```
-
-`--script-id` and `--offset` are mutually exclusive.
-`--offset` accepts either decimal or `0x`-prefixed hexadecimal file offsets. An offset beyond the input is diagnosed instead of panicking.
-
-### Compile source
-
-Generate C data definitions:
-
-```console
-mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
-```
-
-Generate one binary RIFF directly:
+Raw RIFF:
 
 ```console
 mary compile INPUT.mary.c --mary-c --binary --charmap charmap.txt -o OUTPUT.riff
 ```
 
-Binary mode accepts exactly one script. Omitting `--binary` emits a C data definition for embedding; that output choice does not make `.mary.c` ordinary C. Mary-C reads supported local `#include` files itself, so no external `cpp` pass is needed.
+C byte-array definition:
 
 ```console
-mary compile INPUT.mary.c --mary-c --print-ir --charmap charmap.txt -o OUTPUT.c
+mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
 ```
 
-`--print-ir` appends stack-VM IR audit comments to textual decompiler output or C byte-array definitions; those comments do not participate in recompilation. A `--binary` result is a raw RIFF byte stream and cannot contain comments, so do not combine the two options.
+`--print-ir` may append non-compiling VM audit comments to textual decompiler
+or C-array output. It cannot accompany raw binary output and never substitutes
+for structured Mary-C recovery.
 
-Use `mary compile --help` and `mary decompile --help` for all options.
+Use `mary decompile --help`, `mary import --help`, and `mary compile --help`
+for every option.
 
 ## Character map
 
-All ordinary text—including US English and Japanese Shift-JIS text—is converted through the replaceable UTF-8 `charmap.txt` file.
-
-```text
-HEX=text or control token
-```
-
-Examples:
+All localized text is encoded and decoded through UTF-8 `charmap.txt`:
 
 ```text
 05={Press}
@@ -133,90 +194,23 @@ Examples:
 0C=\p
 8140=　
 FF21={Player}
-FF22={Horse}
 ```
 
-Rules:
-
-- The left side is a byte sequence in file order. `8140` means bytes `81 40`; it is never endian-swapped. Numeric ROM pointers and RIFF fields remain little-endian integers.
-- Encoding and decoding use longest matching. Multi-byte entries such as `FF21={Player}` stay intact.
-- Control names, byte prefixes, and lengths come exclusively from the loaded map. The parser does not hardcode byte prefixes such as `FF` as controls.
-- If several byte sequences map to the same text, the first entry is the canonical encoding for handwritten source. Ambiguous original bytes are printed as `\xNN` so round trips cannot silently select another encoding.
-- Unmapped bytes are also printed as `\xNN`. This syntax bypasses the map and writes one raw byte.
-- `\"` and `\\` are source-level escapes required to place a quote or backslash inside a string. Their ROM bytes still come from the map.
-- `HEX=` reserves an unassigned code point and is skipped when the map is loaded. This differs from an entry such as `20= `, whose mapped text is an actual space.
-
-Blank lines and full-line comments beginning with `#` are allowed:
-
-```text
-# Message controls
-0C=\p
-```
-
-Inline comments are not supported. `23=#` remains a valid mapping because the line does not begin with `#`.
-
-## Generated text layout
-
-Every string constant starts on the line after `=`. To match the game's display behavior, generated source splits after `\n` or `\p` and keeps fragments aligned. `\r` only returns the game's horizontal cursor to the start of the line and does not cause a layout break by itself; neither does `{Press}` or any other control:
-
-```c
-const MESSAGE_12 =
-    "あんたも男なんだから、\r\n"
-    "気前がいいところをみせてよ。{Press}"
-const MESSAGE_13 =
-    "わ…わかったよ。{Press}"
-```
-
-This uses C-style adjacent string concatenation. Physical line breaks and indentation outside the quotes add no ROM bytes; the compiler merges the fragments into one string.
-
-## RIFF, CODE, JUMP, and STR
-
-Each script is a `RIFF`/`SCR ` container that normally holds a `CODE` chunk, an optional `JUMP` chunk, and a `STR ` chunk. Lengths, counts, offsets, and instruction operands are read as little-endian integers.
-
-- `CODE`: data is bounded by the chunk length and its internal code length is validated. Branch targets are byte offsets within CODE.
-- `JUMP`: the decoder reads the switch-table count and each table offset, then resolves every case/default table through that offset. It does not assume tables are physically contiguous in ID order.
-- `STR `: the decoder reads the string count and offset table. Every text ID resolves as “string-pool start + that ID's offset”; physical appearance order is not guessed.
-
-Some modified ROMs may retain the original STR/RIFF declared lengths, place text beyond the RIFF, and point STR offsets at that relocated text. ROM-mode decompilation keeps a backing view from the current RIFF to the remainder of the ROM, so these external strings remain addressable; CODE and JUMP stay bounded by their own chunk lengths.
-
-Compilation produces a standard self-contained RIFF: strings are written consecutively in text-ID order, and the STR offsets and chunk lengths are rebuilt. A modified ROM that uses external strings can therefore be decoded and normalized, but its rebuilt RIFF is not guaranteed to reproduce the modified ROM's unusual physical layout byte-for-byte. The six supported vanilla ROMs continue to pass strict byte-exact round-trip tests.
-
-## ROM pointer tables
-
-| Version | ROM address | File offset | Slots |
-| --- | ---: | ---: | --- |
-| FoMT JP | `0x080F8230` | `0x0F8230` | null ID 0, then 1,328 scripts |
-| FoMT US | `0x080F89D4` | `0x0F89D4` | null ID 0, then 1,328 scripts |
-| FoMT EU | `0x080F8A20` | `0x0F8A20` | null ID 0, then 1,328 scripts |
-| FoMT DE | `0x080F8EBC` | `0x0F8EBC` | null ID 0, then 1,328 scripts |
-| MFoMT JP | `0x0810145C` | `0x10145C` | null ID 0, then 1,415 scripts |
-| MFoMT US | `0x081014BC` | `0x1014BC` | null ID 0, then 1,415 scripts |
-
-Table length is determined from pointer validity and RIFF data, not by dropping null entries. Empty slots are retained.
-
-## Callables, constants, and script syntax
-
-The family-specific [FoMT callable table](goodies/fomt_callables.mary.h) and [MFoMT callable table](goodies/mfomt_callables.mary.h) define their independent physical ID sequences and document each verified native function's return value, parameter types, and purpose in English and Chinese. The matching constants files hold fixed domains; generated family script-table order defines script slots. Symbols and raw integers compile to identical VM bytes.
-
-The [Mary-C language reference](docs/MARY_C_LANGUAGE.md) is authoritative for the supported C subset, recommended rewrites for unsupported syntax, and the lossless `mary_nodisc`, `mary_switch_compact`, `mary_implicit_default`, `mary_dead_jump`, and `mary_break_switch` forms. The printer rejects residual low-level `ir` or `jump next` rather than reporting false high-level success.
+Hexadecimal keys are byte sequences in file order, not little-endian integers.
+Encoding and decoding use longest matching; controls and lengths come from the
+map. Unmapped or physically ambiguous bytes become `\xNN`; `HEX=` reserves an
+unmapped code. Blank lines and full-line `#` comments are accepted, but inline
+comments are not. Generated strings split for readability after `\n` or `\p`;
+`\r`, `{Press}`, and other controls do not split source lines by themselves.
 
 ## Verification
 
-`tests/` contains Rust integration tests and a manual verification helper:
-
-- `structured_stress.rs` constructs nested switches, loops, conditionals, breaks, and stack-heavy expressions. Each case performs three compile/decompile/print/recompile rounds and compares the resulting bytes; pairwise and three-level control-flow matrices are included.
-- `mary_c_vanilla.rs` performs a strict `RIFF -> Mary-C text -> RIFF` byte round trip on all six ROMs and also verifies script names, text names, and symbolic cross-script calls.
-- `vanilla_symmetry.rs` reads every pointer-table slot from all six vanilla ROMs. Each version gets both a direct decode/encode test and a printed high-level source round trip; RIFF bytes must match exactly, with no residual low-level `ir` or `jump next`.
-- `common/mod.rs` provides recursive AST inspection shared by the integration tests and is not an independently executed test.
-- `decompile_all_roms.bat` manually decompiles all six ROMs for inspection and is not run by `cargo test`.
-
-Run ordinary tests that do not require ROMs with:
-
 ```console
 cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
 ```
 
-Before running the complete ROM suite, place the six files at these fixed paths:
+For ROM-backed tests, place the files at:
 
 ```text
 rom/fomtjp.gba
@@ -227,36 +221,19 @@ rom/mfomtjp.gba
 rom/mfomt.gba
 ```
 
-The ROM and decompiled-output directories are ignored by Git. Mary-C tests read the tracked FoMT and MFoMT table families directly; no environment variables are required. Run:
+Then run:
 
 ```console
 cargo test --all-targets --features test_with_roms
 ```
 
-To run only the strict six-ROM Mary-C suite and show per-version statistics:
-
-```console
-cargo test --features test_with_roms --test mary_c_vanilla -- --nocapture
-```
-
-The original structured-DSL symmetry regression can be run separately:
-
-```console
-cargo test --features test_with_roms --test vanilla_symmetry -- --nocapture
-```
-
-On failure, original and rebuilt RIFF files are stored under the ignored `test_failures/<variant>/` directory. Success means byte-for-byte equality for every regenerated RIFF—not merely successful parsing.
-
-On Windows, generate decompiled source for all six ROMs from the repository root with:
-
-```console
-tests\decompile_all_roms.bat
-```
-
-The helper builds the current code and writes `decompiled_text/fomt_jp`, `fomt_us`, `fomt_eu`, `fomt_de`, `mfomt_jp`, and `mfomt_us`. It is intended for inspecting decompiled output and does not replace the strict round-trip suite.
+ROMs are ignored by Git. `decompiled_text/` is generated workspace output and
+is not committed. Failures go to ignored `test_failures/`. On Windows, the
+tracked `tests\decompile_all_roms.bat` rebuilds the debug executable and
+regenerates all six output directories for inspection.
 
 ## Related projects
 
-- [StanHash/mary_old](https://github.com/StanHash/mary_old) — earlier C++ implementation.
-- [StanHash/FOMT-DOC](https://github.com/StanHash/FOMT-DOC) — FoMT event-script research.
-- [StanHash/fomt](https://github.com/StanHash/fomt) — FoMT decompilation project.
+- [StanHash/mary_old](https://github.com/StanHash/mary_old) — earlier C++ implementation
+- [StanHash/FOMT-DOC](https://github.com/StanHash/FOMT-DOC) — FoMT event-script research
+- [StanHash/fomt](https://github.com/StanHash/fomt) — FoMT decompilation project
