@@ -35,13 +35,132 @@ ROM → Mary-C → RIFF 逐字节往返测试。这证明的是六套原版测�
 准确的 C 子集、Mary 专用语法、函数/常量表、文本排版和 RIFF 结构请阅读
 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.zh-CN.md)（[English](docs/MARY_C_LANGUAGE.md)）。
 
+## 安装
+
+普通用户可从 GitHub Actions 构建产物或 Release 下载对应平台的可执行文件并直接
+运行。发布的程序无需安装 Rust、Cargo、MinGW 或其他第三方运行库。
+
+### 从空白 Windows 环境构建
+
+从 [Rust 官方安装页面](https://www.rust-lang.org/tools/install) 下载并运行
+`rustup-init.exe`。它不是图形界面安装向导，而是交互式控制台安装程序。本项目
+同时支持两套 Windows 工具链：
+
+- **MSVC：**接受默认安装；如有需要，让安装器补充 Microsoft C++ Build Tools
+  和 Windows SDK。
+- **MinGW：**选择 **Customize installation（自定义安装）**，并设置：
+
+```text
+Default host triple: x86_64-pc-windows-gnu
+Default toolchain: stable
+Profile: minimal
+Modify PATH variable: yes
+```
+
+32 位 Windows 将 host triple 改为 `i686-pc-windows-gnu`。安装完成后关闭并重新
+打开终端。较新的 Windows 10/11 也可用 WinGet 代替手动下载安装程序：
+
+```console
+winget install --exact --id Rustlang.Rustup
+rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+rustup default stable-x86_64-pc-windows-gnu
+```
+
+普通构建默认跟随已安装工具链的 ABI 和宿主架构：64 位宿主生成 Win64，32 位宿主
+生成 Win32：
+
+```console
+cargo build --locked --release
+```
+
+Makefile 提供四种明确的 Windows 组合：
+
+```console
+make windows-x86-mingw
+make windows-x86_64-mingw
+make windows-x86-msvc
+make windows-x86_64-msvc
+```
+
+MinGW 目标使用 Rust 官方 GNU 工具链；对当前纯 Rust 项目，不要求安装 MSYS2 或
+Visual Studio。MSVC 目标需要 Microsoft C++ Build Tools 和 Windows SDK。程序
+统一生成在 `target/目标名/release`。
+
+Win32 表示 i686 架构，并不代表兼容 Windows XP。当前 Rust Windows 目标要求
+Windows 10 或更新版本；若要支持 XP，必须另行冻结一套历史 Rust 工具链及依赖。
+
+### 从空白 Linux 环境构建
+
+安装宿主工具、rustup，以及与本机架构相同的 MUSL 目标：
+
+```console
+sudo apt-get update
+sudo apt-get install --yes curl build-essential musl-tools
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+. "$HOME/.cargo/env"
+
+# ARM64 机器改用 aarch64-unknown-linux-musl
+rustup target add x86_64-unknown-linux-musl
+cargo build --locked --release --target x86_64-unknown-linux-musl
+```
+
+程序位于 `target/目标名/release/mary`。在一种 Linux 架构上交叉构建另一种架构
+还需安装相应架构的 MUSL 链接器；本项目的 Actions 直接使用原生 x86_64 和 ARM64
+runner，避免这项额外配置。
+
+### 从空白 macOS 环境构建
+
+安装 Apple 命令行工具和 rustup：
+
+```console
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+. "$HOME/.cargo/env"
+rustup target add x86_64-apple-darwin aarch64-apple-darwin
+make macos-universal
+```
+
+Universal 2 程序生成在 `target/universal-apple-darwin/release/mary`。Xcode 会
+提供 Apple SDK、链接器、GNU Make 和 `lipo`。
+
 ## 构建
 
 ```console
 cargo build --release
 ```
 
-程序生成在 `target/release/mary.exe`。
+`cargo` 是基础构建命令；GNU Make 只是下列目标使用的可选便捷入口。
+
+也可以使用 GNU Make 调用相同的本地构建入口：
+
+```console
+make release
+make test
+make lint
+```
+
+当系统已经具备 `rustup` 和 Make 后，`make setup` 会安装 stable 编译器、
+`rustfmt` 与 Clippy；`make setup-windows`、`make setup-linux`、
+`make setup-macos` 会添加对应平台的 Rust targets。这些配置目标无法反过来安装
+操作系统包管理器、Apple SDK 或原生链接器；相关前置依赖仍按上面的首次安装步骤
+准备。
+
+架构目标包括 `linux-x86_64`、`linux-aarch64`、上述四种明确的 Windows
+MinGW/MSVC 目标、`macos-x86_64` 和 `macos-aarch64`。`windows-x86` 与
+`windows-x86_64` 是对应 MinGW 目标的简写。
+`macos-universal` 会构建两种 macOS 架构并通过 `lipo` 合并，必须在安装了
+Xcode 命令行工具的 macOS 上执行。各目标仍需要对应平台链接器，因此 GitHub
+Actions 会在匹配的原生 runner 上构建，而不假设任意系统都能完成所有跨平台
+链接。
+
+`.github/workflows/build.yml` 会在每次推送和拉取请求中执行测试并上传：
+
+- 静态链接的 Linux x86_64 与 ARM64 可执行文件
+- 分别使用 MinGW 与 MSVC 构建的 Win32 x86、Win64 x86_64 可执行文件
+- 一份 macOS Universal 2 程序，以及 Intel 和 Apple Silicon 单架构程序
+
+这些产物不要求目标电脑额外安装第三方运行库，但 Windows/macOS 版本仍会调用
+操作系统自带的系统库和 API。
 
 ## 目标版本与生成文件
 

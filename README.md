@@ -38,13 +38,142 @@ See the [Mary-C language reference](docs/MARY_C_LANGUAGE.md)
 ([简体中文](docs/MARY_C_LANGUAGE.zh-CN.md)) for the exact C subset, Mary-only
 syntax, callable/constant tables, text layout, and RIFF structure.
 
+## Install
+
+End users should download the executable for their platform from a GitHub
+Actions artifact or a release and run it directly. The distributed executable
+does not require Rust, Cargo, MinGW, or a third-party runtime to be installed.
+
+### Windows from a clean system
+
+Download `rustup-init.exe` from the
+[official Rust installation page](https://www.rust-lang.org/tools/install) and
+run it. It is an interactive console installer, not a graphical wizard. Both
+Windows toolchain families are supported:
+
+- **MSVC:** accept the default installation. If necessary, let the installer
+  add Microsoft C++ Build Tools and the Windows SDK.
+- **MinGW:** select **Customize installation** and set:
+
+```text
+Default host triple: x86_64-pc-windows-gnu
+Default toolchain: stable
+Profile: minimal
+Modify PATH variable: yes
+```
+
+Use `i686-pc-windows-gnu` as the host triple on a 32-bit Windows system. Close
+and reopen the terminal after installation. On recent Windows 10/11 systems,
+WinGet is an optional shortcut instead of downloading the installer manually:
+
+```console
+winget install --exact --id Rustlang.Rustup
+rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+rustup default stable-x86_64-pc-windows-gnu
+```
+
+An ordinary build uses the installed default ABI and host architecture. A
+64-bit host therefore produces Win64 by default, while a 32-bit host produces
+Win32:
+
+```console
+cargo build --locked --release
+```
+
+The Makefile exposes all four Windows combinations explicitly:
+
+```console
+make windows-x86-mingw
+make windows-x86_64-mingw
+make windows-x86-msvc
+make windows-x86_64-msvc
+```
+
+The MinGW targets use Rust's official GNU toolchain and do not require MSYS2 or
+Visual Studio for this pure-Rust project. The MSVC targets require Microsoft
+C++ Build Tools and the Windows SDK. Outputs are under `target/TARGET/release`.
+
+Win32 describes the i686 architecture, not Windows XP compatibility. Current
+Rust Windows targets require Windows 10 or newer; supporting XP would require a
+separate frozen legacy toolchain and dependency set.
+
+### Linux from a clean system
+
+Install the host tools, rustup, and the MUSL target matching the machine:
+
+```console
+sudo apt-get update
+sudo apt-get install --yes curl build-essential musl-tools
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+. "$HOME/.cargo/env"
+
+# Use aarch64-unknown-linux-musl on an ARM64 machine.
+rustup target add x86_64-unknown-linux-musl
+cargo build --locked --release --target x86_64-unknown-linux-musl
+```
+
+The output is in `target/TARGET/release/mary`. Cross-building for the other
+Linux architecture additionally requires that architecture's MUSL linker;
+the supplied Actions workflow avoids that extra setup by using native x86_64
+and ARM64 runners.
+
+### macOS from a clean system
+
+Install Apple's command-line tools and rustup:
+
+```console
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+. "$HOME/.cargo/env"
+rustup target add x86_64-apple-darwin aarch64-apple-darwin
+make macos-universal
+```
+
+This creates the Universal 2 binary at
+`target/universal-apple-darwin/release/mary`. Xcode supplies the Apple SDK,
+linker, GNU Make, and `lipo`.
+
 ## Build
 
 ```console
 cargo build --release
 ```
 
-The executable is `target/release/mary.exe`.
+`cargo` is the fundamental build command. GNU Make is an optional convenience
+frontend used by the targets below.
+
+GNU Make provides the same local entry point:
+
+```console
+make release
+make test
+make lint
+```
+
+After `rustup` and Make exist, `make setup` installs the stable compiler plus
+`rustfmt` and Clippy. `make setup-windows`, `make setup-linux`, and
+`make setup-macos` add the Rust targets for that platform. These setup targets
+cannot install the operating-system package manager, Apple SDK, or native
+linker; those prerequisites are listed above.
+
+Architecture targets are `linux-x86_64`, `linux-aarch64`, the four explicit
+Windows MinGW/MSVC targets above, `macos-x86_64`, and `macos-aarch64`.
+`windows-x86` and `windows-x86_64` are MinGW shorthand targets.
+`macos-universal`
+builds both macOS architectures and combines them with `lipo`; it must run on
+macOS with Xcode command-line tools. A target still needs its platform linker,
+so the GitHub Actions workflow builds each platform on a matching native
+runner rather than assuming every host can cross-link every target.
+
+`.github/workflows/build.yml` tests every push and pull request and uploads:
+
+- statically linked Linux x86_64 and ARM64 executables
+- Win32 x86 and Win64 x86_64 executables built with both MinGW and MSVC
+- one macOS Universal 2 executable plus its Intel and Apple Silicon thin files
+
+These artifacts need no third-party runtime installed on the destination
+system. They may still use operating-system libraries and APIs supplied by
+Windows or macOS.
 
 ## Targets and generated files
 

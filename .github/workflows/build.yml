@@ -1,0 +1,142 @@
+name: Build standalone executables
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add rustfmt clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --all-targets
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  build:
+    name: Build ${{ matrix.artifact }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: mary-linux-x86_64
+            os: ubuntu-latest
+            toolchain: stable
+            target: x86_64-unknown-linux-musl
+            executable: mary
+            family: linux
+          - artifact: mary-linux-aarch64
+            os: ubuntu-24.04-arm
+            toolchain: stable
+            target: aarch64-unknown-linux-musl
+            executable: mary
+            family: linux
+          - artifact: mary-windows-x86-mingw.exe
+            os: windows-latest
+            toolchain: stable-x86_64-pc-windows-gnu
+            target: i686-pc-windows-gnu
+            executable: mary.exe
+            family: windows
+          - artifact: mary-windows-x86_64-mingw.exe
+            os: windows-latest
+            toolchain: stable-x86_64-pc-windows-gnu
+            target: x86_64-pc-windows-gnu
+            executable: mary.exe
+            family: windows
+          - artifact: mary-windows-x86-msvc.exe
+            os: windows-latest
+            toolchain: stable-x86_64-pc-windows-msvc
+            target: i686-pc-windows-msvc
+            executable: mary.exe
+            family: windows
+          - artifact: mary-windows-x86_64-msvc.exe
+            os: windows-latest
+            toolchain: stable-x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-msvc
+            executable: mary.exe
+            family: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust target
+        shell: bash
+        run: |
+          rustup toolchain install "${{ matrix.toolchain }}" --profile minimal
+          rustup target add --toolchain "${{ matrix.toolchain }}" "${{ matrix.target }}"
+      - name: Install musl linker
+        if: matrix.family == 'linux'
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - name: Build release executable
+        shell: bash
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo +${{ matrix.toolchain }} build --locked --release --bin mary --target "${{ matrix.target }}"
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" \
+            "dist/${{ matrix.artifact }}"
+      - name: Verify static Linux executable
+        if: matrix.family == 'linux'
+        shell: bash
+        run: file "dist/${{ matrix.artifact }}" | grep -E 'statically linked|static-pie linked'
+      - name: Smoke test executable
+        shell: bash
+        run: "./dist/${{ matrix.artifact }} --help"
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+
+  build-macos-universal:
+    name: Build mary-macos-universal2
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Build both macOS architectures
+        run: |
+          cargo build --locked --release --bin mary --target x86_64-apple-darwin
+          cargo build --locked --release --bin mary --target aarch64-apple-darwin
+      - name: Create Universal 2 executable
+        run: |
+          mkdir -p dist
+          cp target/x86_64-apple-darwin/release/mary dist/mary-macos-x86_64
+          cp target/aarch64-apple-darwin/release/mary dist/mary-macos-aarch64
+          lipo -create \
+            dist/mary-macos-x86_64 \
+            dist/mary-macos-aarch64 \
+            -output dist/mary-macos-universal2
+          lipo -archs dist/mary-macos-universal2 | grep -q x86_64
+          lipo -archs dist/mary-macos-universal2 | grep -q arm64
+          ./dist/mary-macos-universal2 --help
+      - name: Upload Universal 2 and thin executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: mary-macos-universal2
+          path: |
+            dist/mary-macos-universal2
+            dist/mary-macos-x86_64
+            dist/mary-macos-aarch64
+          if-no-files-found: error
+          retention-days: 14
