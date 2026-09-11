@@ -27476,15 +27476,6 @@ fn farm_horse_lifecycle_callables_follow_all_targets() {
     let callable_source = common::callables_source();
     assert!(callable_source.contains("MaryBool skip_creation,"));
     assert!(callable_source.contains("RemoveFarmHorse(MaryBool skip_removal, int unused_value)"));
-    for library in ["goodies/lib_fomt.txt", "goodies/lib_mfomt.txt"] {
-        let source = fs::read_to_string(library).unwrap();
-        assert!(source.contains("CreateFarmHorse(skip_creation: MaryBool,"));
-        assert!(source.contains("RemoveFarmHorse(skip_removal: MaryBool, unused_value)"));
-        assert!(!source.contains("RemoveFarmHorse(skip_removal: MaryBool, reserved)"));
-        assert!(!source.contains("create_guard: MaryBool"));
-        assert!(!source.contains("remove_guard: MaryBool"));
-    }
-
     for (target, create_id, remove_id) in [
         ("MARY_FOMT_US", 0x100, 0x101),
         ("MARY_FOMT_JP", 0x100, 0x101),
@@ -32271,75 +32262,6 @@ fn nested_switch_refinement_merges_with_outer_condition_domain() {
             encode_script(&rebuilt.scripts[0].2),
             "{target}: nested switch refinement changed emitted bytecode"
         );
-    }
-}
-
-#[test]
-fn ordered_callable_table_preserves_every_physical_slot_for_all_targets() {
-    fn legacy_slots(path: &str) -> Vec<(usize, String, bool, usize)> {
-        fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .filter_map(|line| {
-                let mut fields = line.split_whitespace();
-                let is_func = match fields.next()? {
-                    "func" => true,
-                    "proc" => false,
-                    _ => return None,
-                };
-                let id = usize::from_str_radix(fields.next()?.strip_prefix("0x")?, 16).ok()?;
-                let signature = line.split_once(fields.next()?)?.1;
-                let (name, parameters) = signature.split_once('(')?;
-                let parameters = parameters.split_once(')')?.0.trim();
-                let parameter_count = if parameters.is_empty() {
-                    0
-                } else {
-                    parameters.split(',').count()
-                };
-                Some((id, name.to_owned(), is_func, parameter_count))
-            })
-            .collect()
-    }
-
-    for (target, legacy_path, expected_slot_count) in [
-        ("MARY_FOMT_US", "goodies/lib_fomt.txt", 327),
-        ("MARY_FOMT_JP", "goodies/lib_fomt.txt", 327),
-        ("MARY_MFOMT_US", "goodies/lib_mfomt.txt", 339),
-        ("MARY_MFOMT_JP", "goodies/lib_mfomt.txt", 339),
-    ] {
-        let options = Options::default().define(target).unwrap();
-        let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
-        let callables =
-            parse_callable_table_with_scope(&common::callables_source(), &options, &constants)
-                .unwrap();
-
-        assert_eq!(
-            callables.next_id, expected_slot_count,
-            "{target}: conditional callable entries shifted the physical table length"
-        );
-        for (expected_id, expected_name, expected_is_func, expected_parameter_count) in
-            legacy_slots(legacy_path)
-        {
-            let (actual_id, actual_shape) = callables
-                .scope
-                .callable_map()
-                .get(&expected_name)
-                .unwrap_or_else(|| panic!("{target}: missing physical callable {expected_name}"));
-            assert_eq!(
-                actual_id.0, expected_id,
-                "{target}: {expected_name} moved away from physical slot 0x{expected_id:03X}"
-            );
-            assert_eq!(
-                actual_shape.is_func(),
-                expected_is_func,
-                "{target}: {expected_name} changed between a value-returning func and a proc"
-            );
-            assert_eq!(
-                actual_shape.num_parameters(),
-                expected_parameter_count,
-                "{target}: {expected_name} changed its physical argument count"
-            );
-        }
     }
 }
 

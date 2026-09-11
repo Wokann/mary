@@ -38,6 +38,40 @@ See the [Mary-C language reference](docs/MARY_C_LANGUAGE.md)
 ([简体中文](docs/MARY_C_LANGUAGE.zh-CN.md)) for the exact C subset, Mary-only
 syntax, callable/constant tables, text layout, and RIFF structure.
 
+## Mary-C example
+
+This compact FoMT-JP script shows the generated target declaration, local
+headers, text table, callable names, nested return values, and typed constants:
+
+```c
+#define MARY_FOMT_JP
+#include "fomt_constants.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
+
+mary_text_table
+{
+    const char gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness[] =
+        "…………………{Press}";
+};
+
+void EventScript_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue(void)
+{
+    SetEntityFacing(ENTITY_CLIFF, GetOppositeFacing(GetEntityFacing(ENTITY_PLAYER)));
+    TalkOpen();
+    SetTalkPortrait(TALK_PORTRAIT_CLIFF_AFRAID);
+    SetTalkNameplateCharacter(CHARACTER_CLIFF);
+    TalkMessage(gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness);
+    TalkClose();
+    SetEntityFacing(ENTITY_CLIFF, FACING_DOWN);
+    MarkNpcSpokenTo(CHARACTER_CLIFF);
+}
+```
+
+The text remains UTF-8 in source and is encoded through `charmap.txt` during
+compilation. Symbols such as `ENTITY_CLIFF`, `TALK_PORTRAIT_CLIFF_AFRAID`,
+`CHARACTER_CLIFF`, and `FACING_DOWN` compile to their original numeric values.
+
 ## Install
 
 End users should download the executable for their platform from a GitHub
@@ -87,6 +121,13 @@ make windows-x86-mingw
 make windows-x86_64-mingw
 make windows-x86-msvc
 make windows-x86_64-msvc
+```
+
+The equivalent generic form accepts an explicit Rust toolchain and target:
+
+```console
+make release TOOLCHAIN=stable-x86_64-pc-windows-gnu TARGET=i686-pc-windows-gnu
+make release TOOLCHAIN=stable-x86_64-pc-windows-msvc TARGET=x86_64-pc-windows-msvc
 ```
 
 The MinGW targets use Rust's official GNU toolchain and do not require MSYS2 or
@@ -150,11 +191,12 @@ make test
 make lint
 ```
 
-After `rustup` and Make exist, `make setup` installs the stable compiler plus
-`rustfmt` and Clippy. `make setup-windows`, `make setup-linux`, and
-`make setup-macos` add the Rust targets for that platform. These setup targets
-cannot install the operating-system package manager, Apple SDK, or native
-linker; those prerequisites are listed above.
+After `rustup` and Make exist, `make setup` installs the current default
+toolchain plus `rustfmt` and Clippy. On Windows, `make setup-windows` is the
+MinGW default; use `make setup-windows-msvc` only when MSVC is wanted.
+`make setup-linux` and `make setup-macos` add their platform targets. These
+setup targets cannot install the operating-system package manager, Apple SDK,
+or native linker; those prerequisites are listed above.
 
 Architecture targets are `linux-x86_64`, `linux-aarch64`, the four explicit
 Windows MinGW/MSVC targets above, `macos-x86_64`, and `macos-aarch64`.

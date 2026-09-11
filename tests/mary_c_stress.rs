@@ -491,9 +491,12 @@ fn arbitrary_binary_offset_outside_the_input_is_a_diagnostic_not_a_panic() {
         .args([
             "decompile",
             input.to_str().unwrap(),
-            "goodies/lib_fomt.txt",
+            "goodies/fomt_callables.mary.h",
             "--offset",
             "0x100",
+            "--mary-c",
+            "-D",
+            "MARY_FOMT_US",
         ])
         .output()
         .unwrap();

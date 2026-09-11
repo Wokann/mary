@@ -35,6 +35,40 @@ ROM → Mary-C → RIFF 逐字节往返测试。这证明的是六套原版测�
 准确的 C 子集、Mary 专用语法、函数/常量表、文本排版和 RIFF 结构请阅读
 [Mary-C 语言说明](docs/MARY_C_LANGUAGE.zh-CN.md)（[English](docs/MARY_C_LANGUAGE.md)）。
 
+## Mary-C 示例
+
+下面这份较短的 FoMT 日版实际解包脚本同时展示了目标声明、本地头文件、文本表、
+函数名、嵌套返回值及带类型的常量宏：
+
+```c
+#define MARY_FOMT_JP
+#include "fomt_constants.mary.h"
+#include "fomt_callables.mary.h"
+#include "fomt_scripts.mary.h"
+
+mary_text_table
+{
+    const char gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness[] =
+        "…………………{Press}";
+};
+
+void EventScript_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue(void)
+{
+    SetEntityFacing(ENTITY_CLIFF, GetOppositeFacing(GetEntityFacing(ENTITY_PLAYER)));
+    TalkOpen();
+    SetTalkPortrait(TALK_PORTRAIT_CLIFF_AFRAID);
+    SetTalkNameplateCharacter(CHARACTER_CLIFF);
+    TalkMessage(gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness);
+    TalkClose();
+    SetEntityFacing(ENTITY_CLIFF, FACING_DOWN);
+    MarkNpcSpokenTo(CHARACTER_CLIFF);
+}
+```
+
+源码中的文本保持 UTF-8，编译时由 `charmap.txt` 转换为 ROM 编码。
+`ENTITY_CLIFF`、`TALK_PORTRAIT_CLIFF_AFRAID`、`CHARACTER_CLIFF` 和
+`FACING_DOWN` 等符号最终会编译为原始数值。
+
 ## 安装
 
 普通用户可从 GitHub Actions 构建产物或 Release 下载对应平台的可执行文件并直接
@@ -80,6 +114,13 @@ make windows-x86-mingw
 make windows-x86_64-mingw
 make windows-x86-msvc
 make windows-x86_64-msvc
+```
+
+也可以通过通用入口手动指定 Rust 工具链和编译目标：
+
+```console
+make release TOOLCHAIN=stable-x86_64-pc-windows-gnu TARGET=i686-pc-windows-gnu
+make release TOOLCHAIN=stable-x86_64-pc-windows-msvc TARGET=x86_64-pc-windows-msvc
 ```
 
 MinGW 目标使用 Rust 官方 GNU 工具链；对当前纯 Rust 项目，不要求安装 MSYS2 或
@@ -139,8 +180,9 @@ make test
 make lint
 ```
 
-当系统已经具备 `rustup` 和 Make 后，`make setup` 会安装 stable 编译器、
-`rustfmt` 与 Clippy；`make setup-windows`、`make setup-linux`、
+当系统已经具备 `rustup` 和 Make 后，`make setup` 会安装当前默认工具链、
+`rustfmt` 与 Clippy。Windows 下 `make setup-windows` 默认配置 MinGW；只有明确
+需要 MSVC 时才调用 `make setup-windows-msvc`。`make setup-linux` 与
 `make setup-macos` 会添加对应平台的 Rust targets。这些配置目标无法反过来安装
 操作系统包管理器、Apple SDK 或原生链接器；相关前置依赖仍按上面的首次安装步骤
 准备。

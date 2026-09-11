@@ -1,6 +1,4 @@
-CARGO ?= cargo
 RUSTUP ?= rustup
-TOOLCHAIN ?= stable
 ifeq ($(PROCESSOR_ARCHITECTURE),x86)
 WINDOWS_MINGW_TOOLCHAIN ?= stable-i686-pc-windows-gnu
 WINDOWS_MSVC_TOOLCHAIN ?= stable-i686-pc-windows-msvc
@@ -8,13 +6,19 @@ else
 WINDOWS_MINGW_TOOLCHAIN ?= stable-x86_64-pc-windows-gnu
 WINDOWS_MSVC_TOOLCHAIN ?= stable-x86_64-pc-windows-msvc
 endif
+ifeq ($(OS),Windows_NT)
+TOOLCHAIN ?= $(WINDOWS_MINGW_TOOLCHAIN)
+else
+TOOLCHAIN ?= stable
+endif
 TARGET ?=
 
 TARGET_FLAG := $(if $(TARGET),--target $(TARGET),)
 RUSTUP_CARGO := $(RUSTUP) run $(TOOLCHAIN) cargo
 
 .PHONY: all setup build release debug check test fmt lint
-.PHONY: setup-windows setup-linux setup-macos
+.PHONY: setup-windows setup-windows-mingw setup-windows-msvc
+.PHONY: setup-linux setup-macos
 .PHONY: linux-x86_64 linux-aarch64 windows-x86 windows-x86_64
 .PHONY: windows-x86-mingw windows-x86_64-mingw
 .PHONY: windows-x86-msvc windows-x86_64-msvc
@@ -26,9 +30,13 @@ setup:
 	$(RUSTUP) toolchain install $(TOOLCHAIN) --profile minimal
 	$(RUSTUP) component add --toolchain $(TOOLCHAIN) rustfmt clippy
 
-setup-windows:
+setup-windows: setup-windows-mingw
+
+setup-windows-mingw:
 	$(RUSTUP) toolchain install $(WINDOWS_MINGW_TOOLCHAIN) --profile minimal
 	$(RUSTUP) target add --toolchain $(WINDOWS_MINGW_TOOLCHAIN) i686-pc-windows-gnu x86_64-pc-windows-gnu
+
+setup-windows-msvc:
 	$(RUSTUP) toolchain install $(WINDOWS_MSVC_TOOLCHAIN) --profile minimal
 	$(RUSTUP) target add --toolchain $(WINDOWS_MSVC_TOOLCHAIN) i686-pc-windows-msvc x86_64-pc-windows-msvc
 
@@ -41,22 +49,22 @@ setup-macos: setup
 build: release
 
 release:
-	$(CARGO) build --locked --release --bin mary $(TARGET_FLAG)
+	$(RUSTUP_CARGO) build --locked --release --bin mary $(TARGET_FLAG)
 
 debug:
-	$(CARGO) build --locked --bin mary $(TARGET_FLAG)
+	$(RUSTUP_CARGO) build --locked --bin mary $(TARGET_FLAG)
 
 check:
-	$(CARGO) check --locked --all-targets
+	$(RUSTUP_CARGO) check --locked --all-targets
 
 test:
-	$(CARGO) test --locked --all-targets
+	$(RUSTUP_CARGO) test --locked --all-targets
 
 fmt:
-	$(CARGO) fmt --all -- --check
+	$(RUSTUP_CARGO) fmt --all -- --check
 
 lint:
-	$(CARGO) clippy --locked --all-targets -- -D warnings
+	$(RUSTUP_CARGO) clippy --locked --all-targets -- -D warnings
 
 linux-x86_64:
 	$(RUSTUP) target add --toolchain $(TOOLCHAIN) x86_64-unknown-linux-musl
