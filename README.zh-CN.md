@@ -37,8 +37,8 @@ ROM → Mary-C → RIFF 逐字节往返测试。这证明的是六套原版测�
 
 ## Mary-C 示例
 
-下面这份较短的 FoMT 日版实际解包脚本同时展示了目标声明、本地头文件、文本表、
-函数名、嵌套返回值及带类型的常量宏：
+下面是安在除夕荞麦面节日中的 FoMT 日版实际解包脚本，同时展示目标声明、
+日文文本、控制符、函数名及带类型的常量宏：
 
 ```c
 #define MARY_FOMT_JP
@@ -48,21 +48,47 @@ ROM → Mary-C → RIFF 逐字节往返测试。这证明的是六套原版测�
 
 mary_text_table
 {
-    const char gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness[] =
-        "…………………{Press}";
+    const char gText_FestivalEvent_NewYearsEve_NoodleFestivalDialogue_Ann[] =
+        "おそば食べるの楽しみだね。\r\n"
+        "わたし、好きなんだー。{Press}";
 };
 
-void EventScript_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue(void)
+void EventScript_FestivalEvent_NewYearsEve_NoodleFestivalDialogue_Ann(void)
 {
-    SetEntityFacing(ENTITY_CLIFF, GetOppositeFacing(GetEntityFacing(ENTITY_PLAYER)));
+    if (HasMetNpc(CHARACTER_ANN) == FALSE)
+    {
+        MarkNpcSpokenTo(CHARACTER_ANN);
+    }
+    SetEntityFacing(ENTITY_ANN, GetOppositeFacing(GetEntityFacing(ENTITY_PLAYER)));
     TalkOpen();
-    SetTalkPortrait(TALK_PORTRAIT_CLIFF_AFRAID);
-    SetTalkNameplateCharacter(CHARACTER_CLIFF);
-    TalkMessage(gText_RivalEvent_AnnAndCliff_01_BlackHeart_InnHelpOffer_FollowupCliffDialogue_CliffSilentlyReflectsOnAnnsKindness);
+    SetTalkPortrait(TALK_PORTRAIT_ANN_HAPPY);
+    SetTalkNameplateCharacter(CHARACTER_ANN);
+    if (!(VarGet(VAR_KAREN_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED || VarGet(VAR_POPURI_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED || VarGet(VAR_MARY_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED || VarGet(VAR_ELLI_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED || VarGet(VAR_HARVEST_GODDESS_WEDDING_AND_NICKNAME_EVENT_STATE) == EVENT_LIFECYCLE_COMPLETED || VarGet(VAR_ANN_CLIFF_WEDDING_EVENT_STATE) == EVENT_LIFECYCLE_COMPLETED || VarGet(VAR_ANN_CLIFF_RIVAL_MARRIAGE_STATE) == MARRIAGE_STATE_MARRIED))
+    {
+        ShowTalkHeartIndicator(CHARACTER_ANN);
+    }
+    TalkMessage(gText_FestivalEvent_NewYearsEve_NoodleFestivalDialogue_Ann);
+    ClearTalkPortrait();
     TalkClose();
-    SetEntityFacing(ENTITY_CLIFF, FACING_DOWN);
-    MarkNpcSpokenTo(CHARACTER_CLIFF);
+    if (WasNpcSpokenToToday(CHARACTER_ANN) == FALSE)
+    {
+        AddNpcFriendship(CHARACTER_ANN, 5);
+    }
+    MarkNpcSpokenTo(CHARACTER_ANN);
+    SetEntityFacing(ENTITY_ANN, FACING_LEFT);
 }
+```
+
+FoMT 美版输出使用相同的脚本名和文本符号名，仅将对应文本换成本地化后的英文：
+
+```c
+mary_text_table
+{
+    const char gText_FestivalEvent_NewYearsEve_NoodleFestivalDialogue_Ann[] =
+        "It's too bad that New Year\r\n"
+        "Noodles only come once \r\n"
+        "a year!{Press}";
+};
 ```
 
 源码中的文本保持 UTF-8，编译时由 `charmap.txt` 转换为 ROM 编码。
