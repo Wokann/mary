@@ -12238,6 +12238,9 @@ fn clinic_examination_result_values_and_generated_symbols_stay_aligned() {
     }
 
     for directory in ["fomt_us", "fomt_jp", "mfomt_us", "mfomt_jp"] {
+        if !Path::new("decompiled_text").join(directory).is_dir() {
+            continue;
+        }
         let path = Path::new("decompiled_text")
             .join(directory)
             .join("EventScript_ShopEvent_Clinic_ExaminationChoice.mary.c");
@@ -31470,7 +31473,7 @@ fn game_variable_completeness_check_detects_a_removed_target_slot() {
             464,
         ),
     ] {
-        let source = common::constants_for_target(target);
+        let source = common::constants_for_target(target).replace("\r\n", "\n");
         let modified = source.replacen(declaration, "", 1).replacen(
             "mary_var_type(VAR_HARVEST_FESTIVAL_ACTIVE, MaryFestivalActivityPhase);\n",
             "",

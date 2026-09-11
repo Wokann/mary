@@ -71,6 +71,15 @@ const FOMT_LOCALIZATION_CASES: &[RomCase] = &[
     },
 ];
 
+const ALL_CASES: [&RomCase; 6] = [
+    &CASES[2],
+    &CASES[0],
+    &FOMT_LOCALIZATION_CASES[0],
+    &FOMT_LOCALIZATION_CASES[1],
+    &CASES[3],
+    &CASES[1],
+];
+
 fn charmap_for_target(target: &str) -> Charmap {
     let options = Options::default().define(target).unwrap();
     let source = fs::read_to_string("charmap.txt").unwrap();
@@ -248,9 +257,11 @@ fn native_camera_pan_and_wait_callables_keep_physical_slots_on_all_targets() {
 
 #[test]
 fn native_new_record_audio_slots_exist_only_in_mfomt() {
-    const TABLES: [(&str, usize, bool); 4] = [
+    const TABLES: [(&str, usize, bool); 6] = [
         ("rom/fomt_us.gba", 0x13ABF0, false),
         ("rom/fomt_jp.gba", 0x13BD34, false),
+        ("rom/fomt_eu.gba", 0x13AC48, false),
+        ("rom/fomt_de.gba", 0x13CC70, false),
         ("rom/mfomt_us.gba", 0x144FF4, true),
         ("rom/mfomt_jp.gba", 0x146A64, true),
     ];
@@ -275,9 +286,11 @@ fn native_new_record_audio_slots_exist_only_in_mfomt() {
 
 #[test]
 fn native_sickle_audio_family_uses_one_program_on_all_targets() {
-    const TABLES: [(&str, usize); 4] = [
+    const TABLES: [(&str, usize); 6] = [
         ("rom/fomt_us.gba", 0x13ABF0),
         ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/fomt_eu.gba", 0x13AC48),
+        ("rom/fomt_de.gba", 0x13CC70),
         ("rom/mfomt_us.gba", 0x144FF4),
         ("rom/mfomt_jp.gba", 0x146A64),
     ];
@@ -327,9 +340,11 @@ fn native_sickle_audio_family_uses_one_program_on_all_targets() {
 
 #[test]
 fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
-    const TABLES: [(&str, usize); 4] = [
+    const TABLES: [(&str, usize); 6] = [
         ("rom/fomt_us.gba", 0x0E9605),
         ("rom/fomt_jp.gba", 0x0E8AA5),
+        ("rom/fomt_eu.gba", 0x0E9651),
+        ("rom/fomt_de.gba", 0x0E9611),
         ("rom/mfomt_us.gba", 0x0F1B49),
         ("rom/mfomt_jp.gba", 0x0F16C5),
     ];
@@ -354,9 +369,11 @@ fn native_record_player_maps_all_fifteen_albums_to_audio_slots_18_through_32() {
 
 #[test]
 fn native_audio_slots_28_through_31_are_identical_short_sequences() {
-    const TABLES: [(&str, usize); 4] = [
+    const TABLES: [(&str, usize); 6] = [
         ("rom/fomt_us.gba", 0x13ABF0),
         ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/fomt_eu.gba", 0x13AC48),
+        ("rom/fomt_de.gba", 0x13CC70),
         ("rom/mfomt_us.gba", 0x144FF4),
         ("rom/mfomt_jp.gba", 0x146A64),
     ];
@@ -397,10 +414,12 @@ fn native_audio_slots_28_through_31_are_identical_short_sequences() {
 }
 
 #[test]
-fn native_numbered_script_audio_tracks_match_across_all_four_roms() {
-    const TABLES: [(&str, usize); 4] = [
+fn native_numbered_script_audio_tracks_match_across_all_six_roms() {
+    const TABLES: [(&str, usize); 6] = [
         ("rom/fomt_us.gba", 0x13ABF0),
         ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/fomt_eu.gba", 0x13AC48),
+        ("rom/fomt_de.gba", 0x13CC70),
         ("rom/mfomt_us.gba", 0x144FF4),
         ("rom/mfomt_jp.gba", 0x146A64),
     ];
@@ -710,9 +729,11 @@ fn native_audio_187_is_the_shared_minigame_time_up_cue_on_all_targets() {
 
 #[test]
 fn native_audio_slots_176_and_183_preserve_real_target_variants() {
-    const TABLES: [(&str, usize); 4] = [
+    const TABLES: [(&str, usize); 6] = [
         ("rom/fomt_us.gba", 0x13ABF0),
         ("rom/fomt_jp.gba", 0x13BD34),
+        ("rom/fomt_eu.gba", 0x13AC48),
+        ("rom/fomt_de.gba", 0x13CC70),
         ("rom/mfomt_us.gba", 0x144FF4),
         ("rom/mfomt_jp.gba", 0x146A64),
     ];
@@ -751,11 +772,13 @@ fn native_audio_slots_176_and_183_preserve_real_target_variants() {
     });
 
     assert_eq!(roms[0].1, roms[1].1, "FoMT slot 176 differs by region");
-    assert_eq!(roms[2].1, roms[3].1, "MFoMT slot 176 differs by region");
+    assert_eq!(roms[0].1, roms[2].1, "FoMT-EU slot 176 differs");
+    assert_eq!(roms[0].1, roms[3].1, "FoMT-DE slot 176 differs");
+    assert_eq!(roms[4].1, roms[5].1, "MFoMT slot 176 differs by region");
     assert_eq!(roms[0].1.len(), 2);
     for track in 0..2 {
         let fomt = &roms[0].1[track];
-        let mfomt = &roms[2].1[track];
+        let mfomt = &roms[4].1[track];
         assert_eq!(&fomt[..2], &[0xBE, 0x7F]);
         assert_eq!(&mfomt[..2], &[0xBE, 0x64]);
         assert_eq!(
@@ -765,8 +788,10 @@ fn native_audio_slots_176_and_183_preserve_real_target_variants() {
         );
     }
 
-    assert_eq!(roms[0].2, roms[2].2, "slot 183 differs in MFoMT-US");
-    assert_eq!(roms[0].2, roms[3].2, "slot 183 differs in MFoMT-JP");
+    assert_eq!(roms[0].2, roms[2].2, "slot 183 differs in FoMT-EU");
+    assert_eq!(roms[0].2, roms[3].2, "slot 183 differs in FoMT-DE");
+    assert_eq!(roms[0].2, roms[4].2, "slot 183 differs in MFoMT-US");
+    assert_eq!(roms[0].2, roms[5].2, "slot 183 differs in MFoMT-JP");
     let common = &roms[0].2;
     let fomt_jp = &roms[1].2;
     assert_eq!(common.len(), 3);
@@ -1127,10 +1152,12 @@ fn native_shipment_box_deposit_animation_only_dispatches_the_scene_action() {
 fn native_audio_null_slot_topology_matches_neutral_symbols_on_all_targets() {
     let constants_source = common::constants_source();
 
-    for case in CASES {
+    for case in ALL_CASES {
         let table_offset = match case.target {
             "MARY_FOMT_US" => 0x13ABF0,
             "MARY_FOMT_JP" => 0x13BD34,
+            "MARY_FOMT_EU" => 0x13AC48,
+            "MARY_FOMT_DE" => 0x13CC70,
             "MARY_MFOMT_US" => 0x144FF4,
             "MARY_MFOMT_JP" => 0x146A64,
             _ => unreachable!(),
@@ -1340,7 +1367,7 @@ fn assert_statically_typed_arguments_are_symbolic(
 
 #[test]
 fn every_target_exposes_statically_typed_callable_arguments() {
-    for case in CASES {
+    for case in ALL_CASES {
         let options = Options::default().define(case.target).unwrap();
         let constants = parse_constant_header(&common::constants_source(), &options).unwrap();
         let callables =
@@ -2288,7 +2315,7 @@ fn assert_numbered_script_name_matches_slot(name: &str, id: usize) {
 
 #[test]
 fn numbered_script_symbols_are_only_empty_or_terminal_placeholders_in_roms() {
-    for case in CASES {
+    for case in ALL_CASES {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let entries = get_script_table(&rom).unwrap();
         let options = Options::default().define(case.target).unwrap();
@@ -2531,6 +2558,18 @@ fn native_callable_dispatch_tables_have_only_the_audited_shared_handlers() {
             0x153,
             vec![vec![0x122, 0x123], vec![0x142, 0x143, 0x144, 0x145, 0x147]],
         ),
+        (
+            &FOMT_LOCALIZATION_CASES[0],
+            0x3F918,
+            0x147,
+            vec![vec![0x13E, 0x13F, 0x140, 0x141, 0x143]],
+        ),
+        (
+            &FOMT_LOCALIZATION_CASES[1],
+            0x3F7FC,
+            0x147,
+            vec![vec![0x13E, 0x13F, 0x140, 0x141, 0x143]],
+        ),
     ] {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let mut slots_by_handler = HashMap::<u32, Vec<usize>>::new();
@@ -2554,12 +2593,41 @@ fn native_callable_dispatch_tables_have_only_the_audited_shared_handlers() {
 }
 
 #[test]
+fn fomt_localizations_preserve_every_callable_slot_and_handler_order() {
+    let us = fs::read(local_rom_path(CASES[0].rom)).unwrap();
+    let us_table = 0x3F904usize;
+
+    for (case, table, handler_delta) in [
+        (&FOMT_LOCALIZATION_CASES[0], 0x3F918usize, 0x14isize),
+        (&FOMT_LOCALIZATION_CASES[1], 0x3F7FCusize, -0x108isize),
+    ] {
+        let rom = fs::read(local_rom_path(case.rom)).unwrap();
+        for slot in 0..0x147usize {
+            let us_entry = us_table + slot * 4;
+            let entry = table + slot * 4;
+            let us_handler =
+                (u32::from_le_bytes(us[us_entry..us_entry + 4].try_into().unwrap()) & !1) as isize;
+            let handler =
+                (u32::from_le_bytes(rom[entry..entry + 4].try_into().unwrap()) & !1) as isize;
+            assert_eq!(
+                handler - us_handler,
+                handler_delta,
+                "{} callable slot 0x{slot:03X} handler relocation",
+                case.name
+            );
+        }
+    }
+}
+
+#[test]
 fn native_character_birthday_callable_uses_the_verified_physical_handlers() {
     for (case, dispatch_table, slot, expected_handler) in [
         (&CASES[0], 0x3F904usize, 0x07Busize, 0x41B5Cusize),
         (&CASES[1], 0x3FAF0, 0x07E, 0x41DA4),
         (&CASES[2], 0x3F578, 0x07B, 0x417D0),
         (&CASES[3], 0x3F84C, 0x07E, 0x41B00),
+        (&FOMT_LOCALIZATION_CASES[0], 0x3F918, 0x07B, 0x41B70),
+        (&FOMT_LOCALIZATION_CASES[1], 0x3F7FC, 0x07B, 0x41A54),
     ] {
         let rom = fs::read(local_rom_path(case.rom)).unwrap();
         let entry = dispatch_table + slot * 4;
@@ -2612,6 +2680,16 @@ fn native_callable_stack_pop_counts_match_every_public_declaration() {
             &CASES[3],
             0x3F84Cusize,
             &[0x142, 0x143, 0x144, 0x145, 0x147][..],
+        ),
+        (
+            &FOMT_LOCALIZATION_CASES[0],
+            0x3F918usize,
+            &[0x13E, 0x13F, 0x140, 0x141, 0x143][..],
+        ),
+        (
+            &FOMT_LOCALIZATION_CASES[1],
+            0x3F7FCusize,
+            &[0x13E, 0x13F, 0x140, 0x141, 0x143][..],
         ),
     ] {
         let rom = fs::read(case.rom).unwrap();
@@ -15830,7 +15908,14 @@ fn native_talk_portrait_slots_forward_id_under_ui_gate_and_clear_independently()
 #[test]
 fn native_display_option_rows_map_buttons_clock_face_and_name_to_bits_zero_through_three() {
     let layouts = [
-        ("fomt-us", "rom/fomt_us.gba", 0x4904, 0x2210, 0xE86D4, 0xE87A4),
+        (
+            "fomt-us",
+            "rom/fomt_us.gba",
+            0x4904,
+            0x2210,
+            0xE86D4,
+            0xE87A4,
+        ),
         (
             "mfomt-us",
             "rom/mfomt_us.gba",
@@ -18536,16 +18621,8 @@ fn native_can_discard_held_article_checks_presence_kind_and_article_policy() {
 }
 
 #[test]
-fn all_four_roms_mary_c_round_trip() -> Result<(), Box<dyn std::error::Error>> {
-    for case in CASES {
-        verify(case)?;
-    }
-    Ok(())
-}
-
-#[test]
-fn fomt_eu_and_de_mary_c_round_trip() -> Result<(), Box<dyn std::error::Error>> {
-    for case in FOMT_LOCALIZATION_CASES {
+fn all_six_roms_mary_c_round_trip() -> Result<(), Box<dyn std::error::Error>> {
+    for case in ALL_CASES {
         verify(case)?;
     }
     Ok(())
