@@ -17,8 +17,8 @@ pub use pretty::{
     PrettyCStmts,
 };
 pub use script::{
-    parse_named_scripts, parse_named_scripts_with_charmap, parse_scripts, MaryScriptError,
-    ScriptContext,
+    discover_script_names, parse_named_scripts, parse_named_scripts_with_charmap, parse_scripts,
+    MaryScriptError, ScriptContext,
 };
 pub use script_table::{parse_script_table, ScriptSlot, ScriptTable, ScriptTableError};
 pub use table::parse_callable_table_with_scope;

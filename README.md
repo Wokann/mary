@@ -257,8 +257,8 @@ MARY_MFOMT_JP  MARY_MFOMT_US
 FoMT uses `goodies/fomt_callables.mary.h`,
 `goodies/fomt_constants.mary.h`, and
 `goodies/fomt_scripts_text.mary.sym`; MFoMT uses the corresponding `mfomt_*`
-files. `.mary.sym` supplies names during decompilation and linker-bundle
-generation; it is never compiled into VM bytecode.
+files. `.mary.sym` is decompiler-only naming metadata and is never a compiler
+or linker-bundle input.
 
 A complete decompile writes one `.mary.c` per physical pointer-table slot and
 three local headers: constants, callables, and the generated script table.
@@ -337,7 +337,18 @@ in non-interactive use. `--dry-run` validates the complete plan without output.
 
 ### Expand or relocate the pointer table
 
-If the generated script table gains slots, relocate both data and table:
+When the maintained script table gains slots, Mary first tries to extend the
+current ROM pointer table in place. If every newly occupied byte is `00` or
+`FF`, the extension is written directly. If the extension contains other data,
+the import stops with the conflicting range and byte; pass `--force` only when
+that overwrite is intentional. Shrinking a table clears its abandoned pointer
+entries to zero. On a later import Mary recognizes an earlier in-place
+extension by scanning contiguous null/blank entries and valid pointers to RIFF
+headers, so those existing pointers are not mistaken for unrelated data.
+
+The packed RIFF block is checked independently. If it no longer fits its old
+area, relocate the script data with `--address`. To relocate the pointer table
+itself as well, use:
 
 ```console
 mary import ROM SOURCE_DIRECTORY --address SCRIPT_ADDRESS \
@@ -386,16 +397,15 @@ for every option.
 ## Build linker inputs for a decompilation project
 
 `bundle` compiles a complete Mary-C source directory and exposes its scripts,
-pointer table, and individual STR strings as assembler/linker symbols. The
-selected `.mary.sym` order must exactly match the generated script table and
-each compiled RIFF's text table; mismatches are errors instead of silently
-binding a name to the wrong address.
+pointer table, and individual STR strings as assembler/linker symbols. Script
+IDs come from the script-table header; text names and physical STR order come
+directly from each source file's `mary_text_table`. The decompiler-only
+`.mary.sym` database does not participate in this path.
 
 Generate one contiguous, four-byte-aligned RIFF block:
 
 ```console
 mary bundle decompiled_text/fomt_jp -o build/data/scripts --layout packed \
-  --symbols goodies/fomt_scripts_text.mary.sym \
   --library goodies/fomt_callables.mary.h \
   --script-table decompiled_text/fomt_jp/fomt_scripts.mary.h \
   --charmap charmap.txt -D MARY_FOMT_JP
@@ -430,7 +440,7 @@ so the linker writes the final pointers.
 
 `scripts.d` participates only in Make's dependency stage—it is not assembled,
 linked, or stored in the ROM. Include it from the project Makefile so editing
-any `.mary.c`, included `.mary.h`, `.mary.sym`, or charmap reruns `mary bundle`:
+any `.mary.c`, included `.mary.h`, or charmap reruns `mary bundle`:
 
 ```make
 MARY_SOURCES := $(wildcard data/scripts/*.mary.c)
@@ -441,14 +451,29 @@ build/data/scripts/scripts.s \
 build/data/scripts/script_table.s \
 build/data/scripts/scripts.bin: $(MARY_SOURCES)
 	mary bundle data/scripts -o build/data/scripts --layout packed \
-	  --symbols data/scripts/fomt_scripts_text.mary.sym \
 	  --library data/scripts/fomt_callables.mary.h \
 	  --script-table data/scripts/fomt_scripts.mary.h \
 	  --charmap data/scripts/charmap.txt -D MARY_FOMT_JP
 ```
 
-The wildcard is intentional: the generated dependency file tracks existing
-inputs, while the wildcard also lets Make notice a newly added `.mary.c` file.
+The script-table header is the sole authority for script IDs. Directory builds
+compile every named slot and preserve each explicit `NULL` exactly as written.
+A `.mary.c` whose script name is absent from the table is ignored and does not
+enter the generated dependency file or linker output. Conversely, every
+non-null table entry must have a source definition; a directory build stops
+before producing output and lists every missing ID and name. Add, remove,
+reorder, or null scripts by editing the table deliberately. A single-script
+import checks only its specified file and does not require the remaining table
+sources to be present.
+
+The wildcard remains useful because it reruns Mary when a file is added, but
+the new file is still ignored until its script name is registered in the table.
+
+Every declaration in `mary_text_table` becomes one STR entry in declaration
+order, even when CODE does not reference it. Equal text declarations remain
+separate physical IDs. Adding or removing declarations therefore dynamically
+rebuilds that RIFF's STR count, offset table, and string pool without editing
+`.mary.sym`.
 Use `mary bundle --help` for all bundle options.
 
 ## Character map

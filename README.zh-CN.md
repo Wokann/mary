@@ -242,7 +242,7 @@ MARY_MFOMT_JP  MARY_MFOMT_US
 FoMT 使用 `goodies/fomt_callables.mary.h`、
 `goodies/fomt_constants.mary.h` 和
 `goodies/fomt_scripts_text.mary.sym`；MFoMT 使用相应的 `mfomt_*` 文件。
-`.mary.sym` 在反编译及链接打包时提供名称，但不会编译进虚拟机字节码。
+`.mary.sym` 只用于反编译命名，既不参与源码编译，也不参与链接打包。
 
 完整反编译会按物理指针表的每个槽位生成一个 `.mary.c`，同时生成常量、函数和
 脚本表三份本地头文件。空指针会生成明确的占位文件，并在脚本表中保持 `NULL`，
@@ -317,7 +317,14 @@ mary import ROM SOURCE --address SCRIPT_ADDRESS --charmap charmap.txt -o OUTPUT.
 
 ### 扩容或迁移指针表
 
-生成脚本表增加槽位后，必须同时迁移整体脚本块和指针表：
+维护的脚本表增加槽位后，Mary 会先尝试在 ROM 当前指针表末尾原地扩容。如果新增
+占用范围全部为 `00` 或 `FF`，就直接写入；如果存在其他数据，导入会报告冲突范围
+和字节并停止。只有明确接受覆盖风险时才添加 `--force`。缩短脚本表时，废弃的旧
+指针项会清零。后续再次导入时，Mary 会扫描连续的空值／空白项和指向有效 RIFF
+头的指针，识别此前的原地扩展长度，不会把已有扩展指针误判为无关数据。
+
+RIFF 脚本整块会单独检查；如果已经无法放回原脚本区，使用 `--address` 迁移脚本
+数据。如果还希望把指针表本身迁往新位置，则使用：
 
 ```console
 mary import ROM SOURCE_DIRECTORY --address SCRIPT_ADDRESS \
@@ -362,14 +369,13 @@ mary compile INPUT.mary.c --mary-c --charmap charmap.txt -o OUTPUT.c
 ## 为反编译工程生成链接输入
 
 `bundle` 会编译完整的 Mary-C 源码目录，并把脚本、指针表和 RIFF 内各条 STR
-文本公开为汇编／链接符号。所选 `.mary.sym` 的顺序必须与生成的脚本表及每个
-RIFF 的文本表严格一致；不一致会直接报错，避免名称静默绑定到错误地址。
+文本公开为汇编／链接符号。脚本 ID 来自脚本表头文件；文本名称与 STR 物理顺序
+直接来自各源码的 `mary_text_table`。只供反编译使用的 `.mary.sym` 不参与此流程。
 
 生成一个连续且按四字节对齐的 RIFF 整块：
 
 ```console
 mary bundle decompiled_text/fomt_jp -o build/data/scripts --layout packed \
-  --symbols goodies/fomt_scripts_text.mary.sym \
   --library goodies/fomt_callables.mary.h \
   --script-table decompiled_text/fomt_jp/fomt_scripts.mary.h \
   --charmap charmap.txt -D MARY_FOMT_JP
@@ -401,8 +407,8 @@ arm-none-eabi-as build/data/scripts/script_table.s -o build/data/scripts/script_
 `script_table.o` 保留针对脚本符号的重定位，由链接器写入最终指针。
 
 `scripts.d` 只参与 Make 的依赖判断，不会交给汇编器、链接器或写入 ROM。
-工程 Makefile 应 include 它，使任何 `.mary.c`、被包含的 `.mary.h`、`.mary.sym`
-或码表发生变化时重新运行 `mary bundle`：
+工程 Makefile 应 include 它，使任何 `.mary.c`、被包含的 `.mary.h` 或码表发生
+变化时重新运行 `mary bundle`：
 
 ```make
 MARY_SOURCES := $(wildcard data/scripts/*.mary.c)
@@ -413,14 +419,25 @@ build/data/scripts/scripts.s \
 build/data/scripts/script_table.s \
 build/data/scripts/scripts.bin: $(MARY_SOURCES)
 	mary bundle data/scripts -o build/data/scripts --layout packed \
-	  --symbols data/scripts/fomt_scripts_text.mary.sym \
 	  --library data/scripts/fomt_callables.mary.h \
 	  --script-table data/scripts/fomt_scripts.mary.h \
 	  --charmap data/scripts/charmap.txt -D MARY_FOMT_JP
 ```
 
-这里保留通配依赖是有意的：生成的 `.d` 能追踪已有输入文件，而通配列表还能让
-Make 发现刚刚新增的 `.mary.c`。全部选项可通过 `mary bundle --help` 查看。
+脚本表头文件是脚本 ID 的唯一权威来源。目录构建会编译表中每个有名称的槽，并按
+原样保留显式 `NULL`。脚本名没有登记到表中的 `.mary.c` 会被忽略，不进入生成的
+依赖文件和链接输出；反过来，表中每个非空项都必须存在源码定义，否则目录构建会
+在生成输出前停止，并列出全部缺失脚本的 ID 和名称。新增、删除、排序或置空脚本
+必须手动编辑脚本表。单脚本导入只检查指定文件，不要求脚本表中其余源码同时存在。
+
+通配依赖仍有作用：新增文件会触发 Mary 重新检查，但在脚本名登记进脚本表之前，
+该文件依然会被忽略。
+
+`mary_text_table` 中每一条声明都会按声明顺序生成一个 STR 项，即使 CODE 没有
+引用它；内容相同的两条声明也保持两个物理 ID。增删声明会动态重建对应 RIFF 的
+STR 数量、偏移表和字符串池，不需要修改 `.mary.sym`。
+
+全部选项可通过 `mary bundle --help` 查看。
 
 ## 字符码表
 

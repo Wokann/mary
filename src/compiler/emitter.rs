@@ -445,6 +445,17 @@ impl Emit {
             Stmt::Consts(inits) => {
                 for (name, expr) in inits {
                     if let Some(val) = ConstVal::eval_expr(&expr, scope) {
+                        // A declared string is a physical STR-table slot, even when
+                        // CODE never references it. Do not merge equal declarations:
+                        // their order and multiplicity are part of the RIFF format.
+                        let val = match val {
+                            ConstVal::Str(value) => {
+                                let id = self.strings.len() as IntValue;
+                                self.strings.push(value);
+                                ConstVal::Int(id)
+                            }
+                            val => val,
+                        };
                         if scope.define_const(name.clone(), val).is_none() {
                             self.errors.push(NameAlreadyDeclared(name));
                         }

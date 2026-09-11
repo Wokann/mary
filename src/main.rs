@@ -261,10 +261,6 @@ enum Command {
         #[arg(long, value_enum, default_value_t = BundleLayout::Packed)]
         layout: BundleLayout,
 
-        /// Script and text symbol database (.mary.sym)
-        #[arg(long)]
-        symbols: PathBuf,
-
         /// Ordered callable declarations (.mary.h)
         #[arg(long)]
         library: Option<PathBuf>,
@@ -590,7 +586,6 @@ fn main_error() -> Result<(), Error> {
             input_source,
             output,
             layout,
-            symbols,
             library,
             script_table,
             charmap,
@@ -599,7 +594,6 @@ fn main_error() -> Result<(), Error> {
             input_source,
             output,
             layout,
-            symbols,
             library,
             script_table,
             charmap,
@@ -1503,9 +1497,9 @@ struct ImportRequest {
 
 struct CompiledImport {
     target: String,
-    options: mary::mary_c::Options,
     source_slot_count: usize,
     slot_names: Vec<Option<String>>,
+    text_names: BTreeMap<usize, Vec<String>>,
     compiled: BTreeMap<usize, Vec<u8>>,
     dependencies: Vec<PathBuf>,
 }
@@ -1614,31 +1608,30 @@ fn import_mary_c_into_rom(request: ImportRequest) -> Result<(), Error> {
             written.len()
         );
     } else {
-        let merged_slot_count = compiled.source_slot_count.max(layout.slot_count);
+        let merged_slot_count = compiled.source_slot_count;
         let mut merged_slots = Vec::with_capacity(merged_slot_count);
         for id in 0..merged_slot_count {
             if let Some(riff) = compiled.compiled.get(&id) {
                 merged_slots.push(Some(riff.clone()));
-            } else if let Some(Some(location)) = layout.scripts.get(id) {
-                merged_slots.push(Some(
-                    rom[location.offset..location.offset + location.riff_len].to_vec(),
-                ));
             } else {
                 merged_slots.push(None);
             }
         }
 
-        if merged_slots.len() != layout.slot_count
-            && (requested_address.is_none() || relocated_table.is_none())
-        {
-            return Err(Error::CliMessage(format!(
-                "script count changed from {} to {}; both --address and --relocate-pointer-table are required",
-                layout.slot_count,
-                merged_slots.len()
-            )));
+        let mut current_layout = layout.clone();
+        if !layout.metadata_present && relocated_table.is_none() {
+            let inferred = infer_in_place_pointer_count(&rom, &layout)?;
+            if inferred > layout.slot_count {
+                println!(
+                    "Detected an in-place pointer-table extension: {} -> {} slots",
+                    layout.slot_count, inferred
+                );
+                current_layout.slot_count = inferred;
+            }
         }
-        if relocated_table == Some(layout.pointer_table_offset)
-            && merged_slots.len() != layout.slot_count
+
+        if relocated_table == Some(current_layout.pointer_table_offset)
+            && merged_slots.len() != current_layout.slot_count
         {
             return Err(Error::Cli(
                 "an expanded pointer table must use a new address, not the current table address",
@@ -1667,9 +1660,47 @@ fn import_mary_c_into_rom(request: ImportRequest) -> Result<(), Error> {
         };
 
         let mut planned_rom = rom.clone();
+
+        if relocated_table.is_none() && merged_slots.len() > current_layout.slot_count {
+            let extension_start = current_layout
+                .pointer_table_offset
+                .checked_add(
+                    current_layout
+                        .slot_count
+                        .checked_mul(4)
+                        .ok_or(ImportError::TruncatedPointerTable)?,
+                )
+                .ok_or(ImportError::TruncatedPointerTable)?;
+            let extension_end = current_layout
+                .pointer_table_offset
+                .checked_add(
+                    merged_slots
+                        .len()
+                        .checked_mul(4)
+                        .ok_or(ImportError::TruncatedPointerTable)?,
+                )
+                .ok_or(ImportError::TruncatedPointerTable)?;
+            let extension = extension_start..extension_end;
+            if let Some((offset, word)) = pointer_table_extension_conflict(&rom, extension.clone())?
+            {
+                let warning = format!(
+                    "script pointer table grows from {} to {} slots; extension {} contains non-pointer data {word:#010X} at {offset:#010X} and may overwrite following ROM data",
+                    current_layout.slot_count,
+                    merged_slots.len(),
+                    display_range(&extension)
+                );
+                if !request.force && !request.dry_run {
+                    return Err(Error::CliMessage(format!(
+                        "{warning}; rerun with --force to overwrite this range"
+                    )));
+                }
+                warnings.push(warning);
+            }
+        }
+
         let (data_range, table_range) = write_packed_scripts(
             &mut planned_rom,
-            &layout,
+            &current_layout,
             &packed,
             destination,
             relocated_table,
@@ -1729,6 +1760,7 @@ fn compile_import_sources(
     charmap_path: Option<PathBuf>,
     defines: Vec<String>,
 ) -> Result<CompiledImport, Error> {
+    let require_complete_table = input.is_dir();
     let mut paths = if input.is_dir() {
         fs::read_dir(input)?
             .filter_map(Result::ok)
@@ -1784,23 +1816,38 @@ fn compile_import_sources(
     let table = mary::mary_c::parse_script_table(&fs::read_to_string(&script_table)?, &options)?;
     let charmap_dependency = charmap_path.clone();
     let charmap = load_charmap(charmap_path, Some(&options))?;
-    let mut dependencies = paths.clone();
-    dependencies.extend([library.clone(), script_table.clone(), constants.clone()]);
+    let mut dependencies = vec![library.clone(), script_table.clone(), constants.clone()];
     if let Some(path) = charmap_dependency {
         dependencies.push(path);
     }
     let mut compiled = BTreeMap::new();
+    let mut text_names = BTreeMap::new();
 
     for path in paths {
         let mut source = fs::read_to_string(&path)?;
         let source_options = mary_c_options_from_source(Vec::new(), &source)?;
+        extract_mary_c_includes(&mut source)?;
+        let discovered = mary::mary_c::discover_script_names(&source, &source_options)?;
+        let registered = discovered
+            .iter()
+            .filter(|name| table.id(name).is_some())
+            .count();
+        if registered == 0 {
+            continue;
+        }
+        if registered != discovered.len() {
+            return Err(Error::CliMessage(format!(
+                "{} mixes registered and unregistered script definitions; keep one script per .mary.c file",
+                path.display()
+            )));
+        }
         if selected_mary_target(&source_options) != Some(target.as_str()) {
             return Err(Error::CliMessage(format!(
                 "{} selects a different Mary-C target",
                 path.display()
             )));
         }
-        extract_mary_c_includes(&mut source)?;
+        dependencies.push(path.clone());
         let parsed = match charmap.as_deref() {
             Some(charmap) => mary::mary_c::parse_named_scripts_with_charmap(
                 &source,
@@ -1811,9 +1858,23 @@ fn compile_import_sources(
             )?,
             None => mary::mary_c::parse_named_scripts(&source, &options, &callables.scope, &table)?,
         };
+        for (id, names) in parsed.text_names {
+            let id = usize::try_from(id)
+                .map_err(|_| Error::CliMessage("text table has a negative script ID".into()))?;
+            if text_names.insert(id, names).is_some() {
+                return Err(Error::CliMessage(format!(
+                    "script ID {id} has text tables in more than one input file"
+                )));
+            }
+        }
         for (id, name, script) in parsed.scripts {
             let id = usize::try_from(id)
                 .map_err(|_| Error::CliMessage(format!("script '{name}' has a negative ID")))?;
+            if table.name(id) != Some(name.as_str()) {
+                return Err(Error::CliMessage(format!(
+                    "script '{name}' resolves to ID {id}, which does not match its ordered script-table slot"
+                )));
+            }
             let riff = bytecode::try_encode_script(&script)?;
             if compiled.insert(id, riff).is_some() {
                 return Err(Error::CliMessage(format!(
@@ -1823,19 +1884,39 @@ fn compile_import_sources(
         }
     }
 
+    if require_complete_table {
+        let missing = table
+            .slots()
+            .iter()
+            .enumerate()
+            .filter_map(|(id, slot)| match slot {
+                mary::mary_c::ScriptSlot::Script(name) if !compiled.contains_key(&id) => {
+                    Some(format!("0x{id:04X} {name}"))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(Error::CliMessage(format!(
+                "script table entries are missing .mary.c definitions:\n  {}",
+                missing.join("\n  ")
+            )));
+        }
+    }
+
     let slot_names = table
         .slots()
         .iter()
         .map(|slot| match slot {
-            mary::mary_c::ScriptSlot::Empty => None,
             mary::mary_c::ScriptSlot::Script(name) => Some(name.clone()),
+            _ => None,
         })
         .collect();
     Ok(CompiledImport {
         target,
-        options,
         source_slot_count: table.slots().len(),
         slot_names,
+        text_names,
         compiled,
         dependencies,
     })
@@ -1845,7 +1926,6 @@ struct BundleRequest {
     input_source: PathBuf,
     output: PathBuf,
     layout: BundleLayout,
-    symbols: PathBuf,
     library: Option<PathBuf>,
     script_table: Option<PathBuf>,
     charmap: Option<PathBuf>,
@@ -1865,40 +1945,6 @@ fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
         request.charmap,
         request.defines,
     )?;
-    let symbols = mary::mary_c::parse_text_name_table(
-        &fs::read_to_string(&request.symbols)?,
-        &compiled.options,
-    )?;
-    let symbol_table = symbols.script_table()?;
-    if symbol_table.slots().len() != compiled.source_slot_count {
-        return Err(Error::MarySymbolMismatch(format!(
-            "symbol table has {} slots but script table has {}",
-            symbol_table.slots().len(),
-            compiled.source_slot_count
-        )));
-    }
-
-    for (id, expected) in compiled.slot_names.iter().enumerate() {
-        let actual = symbols.script_name(id);
-        if actual != expected.as_deref() {
-            return Err(Error::MarySymbolMismatch(format!(
-                "script slot {id} is {:?} in the script table but {:?} in the symbol table",
-                expected, actual
-            )));
-        }
-        if expected.is_some() != compiled.compiled.contains_key(&id) {
-            return Err(Error::MarySymbolMismatch(format!(
-                "script slot {id} is {} but {} compiled source",
-                if expected.is_some() { "named" } else { "NULL" },
-                if compiled.compiled.contains_key(&id) {
-                    "has"
-                } else {
-                    "has no"
-                }
-            )));
-        }
-    }
-
     fs::create_dir_all(&request.output)?;
     let mut scripts_asm =
         String::from(".section .rodata.mary_scripts, \"a\", %progbits\n.balign 4\n\n");
@@ -1933,12 +1979,16 @@ fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
         let text_offsets = riff_text_offsets(riff).map_err(|message| {
             Error::MarySymbolMismatch(format!("script slot {id} ({script_name}): {message}"))
         })?;
-        let text_names = symbols.names(id, text_offsets.len());
-        if symbols.text_count(id) != text_offsets.len() {
+        let text_names = compiled
+            .text_names
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if text_names.len() != text_offsets.len() {
             return Err(Error::MarySymbolMismatch(format!(
-                "script slot {id} ({script_name}) has {} STR entries but {} text symbols",
+                "script slot {id} ({script_name}) has {} STR entries but {} source text declarations",
                 text_offsets.len(),
-                symbols.text_count(id)
+                text_names.len()
             )));
         }
 
@@ -1970,8 +2020,7 @@ fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
                 writeln!(scripts_asm, ".size {script_name}, 0x{:X}", riff.len())?;
             }
         }
-        for (name, offset) in text_names.into_iter().zip(text_offsets) {
-            let name = name.expect("text symbol count checked above");
+        for (name, offset) in text_names.iter().zip(text_offsets) {
             writeln!(scripts_asm, ".global {name}")?;
             writeln!(scripts_asm, ".type {name}, %object")?;
             writeln!(scripts_asm, ".set {name}, {script_name} + 0x{offset:X}")?;
@@ -2014,7 +2063,6 @@ fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
         ),
     }
     let mut dependencies = compiled.dependencies;
-    dependencies.push(request.symbols);
     dependencies.sort();
     dependencies.dedup();
     let targets = targets
@@ -2114,6 +2162,80 @@ fn confirm_warnings(warnings: &[String], force: bool, dry_run: bool) -> Result<(
         "The requested destination may contain other data. Continue and overwrite it?",
         force,
     )
+}
+
+fn pointer_table_extension_conflict(
+    rom: &[u8],
+    range: Range<usize>,
+) -> Result<Option<(usize, u32)>, ImportError> {
+    if matches!(
+        mary::rom_import::range_occupancy(rom, range.clone())?,
+        mary::rom_import::Occupancy::Free
+    ) {
+        return Ok(None);
+    }
+    for offset in (range.start..range.end).step_by(4) {
+        let bytes = &rom[offset..offset + 4];
+        if bytes.iter().all(|byte| matches!(byte, 0 | 0xFF)) {
+            continue;
+        }
+        let word = u32::from_le_bytes(bytes.try_into().unwrap());
+        if !is_valid_script_pointer_word(rom, word) {
+            return Ok(Some((offset, word)));
+        }
+    }
+    Ok(None)
+}
+
+fn infer_in_place_pointer_count(
+    rom: &[u8],
+    layout: &mary::rom_import::ResolvedScriptLayout,
+) -> Result<usize, ImportError> {
+    let mut cursor = layout
+        .pointer_table_offset
+        .checked_add(
+            layout
+                .slot_count
+                .checked_mul(4)
+                .ok_or(ImportError::TruncatedPointerTable)?,
+        )
+        .ok_or(ImportError::TruncatedPointerTable)?;
+    let mut inferred = layout.slot_count;
+    let mut slot = layout.slot_count;
+    while let Some(bytes) = rom.get(cursor..cursor + 4) {
+        if bytes.iter().all(|byte| matches!(byte, 0 | 0xFF)) {
+            cursor += 4;
+            slot += 1;
+            continue;
+        }
+        let word = u32::from_le_bytes(bytes.try_into().unwrap());
+        if !is_valid_script_pointer_word(rom, word) {
+            break;
+        }
+        inferred = slot + 1;
+        cursor += 4;
+        slot += 1;
+    }
+    Ok(inferred)
+}
+
+fn is_valid_script_pointer_word(rom: &[u8], word: u32) -> bool {
+    mary::rom_import::normalize_rom_offset(word as usize)
+        .ok()
+        .and_then(|script_offset| {
+            rom.get(script_offset..script_offset + 8)
+                .map(|header| (script_offset, header))
+        })
+        .is_some_and(|(script_offset, header)| {
+            if &header[..4] != b"RIFF" {
+                return false;
+            }
+            let length = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+            length >= 12
+                && script_offset
+                    .checked_add(length)
+                    .is_some_and(|end| end <= rom.len())
+        })
 }
 
 fn confirm_question(question: &str, force: bool) -> Result<(), Error> {
@@ -2263,8 +2385,8 @@ fn main() -> Result<(), ()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        mary_target_variant, print_empty_single_mary_c_slot, write_ir_as_comment,
-        write_rom_atomically,
+        infer_in_place_pointer_count, mary_target_variant, pointer_table_extension_conflict,
+        print_empty_single_mary_c_slot, write_ir_as_comment, write_rom_atomically,
     };
     use mary::{charmap::Charmap, ir::Script, utility::rom_info::FomtVariant};
     use std::{fs, path::PathBuf};
@@ -2337,6 +2459,46 @@ mod tests {
 
         assert!(output.contains("Script strings (IR):\n    0: \"あ{Press}\""));
         assert!(!output.contains("\\x82\\xA0\\x05"));
+    }
+
+    #[test]
+    fn pointer_table_growth_accepts_blank_or_existing_entries_but_rejects_other_data() {
+        let mut rom = vec![0u8; 0x100];
+        rom[0x80..0x84].copy_from_slice(b"RIFF");
+        rom[0x84..0x88].copy_from_slice(&12u32.to_le_bytes());
+        let pointer = mary::rom_import::gba_pointer(0x80).unwrap();
+        rom[0x14..0x18].copy_from_slice(&pointer.to_le_bytes());
+
+        assert_eq!(
+            pointer_table_extension_conflict(&rom, 0x10..0x18).unwrap(),
+            None
+        );
+        rom[0x10..0x14].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        assert_eq!(
+            pointer_table_extension_conflict(&rom, 0x10..0x18).unwrap(),
+            Some((0x10, 0x1234_5678))
+        );
+    }
+
+    #[test]
+    fn existing_in_place_extension_count_is_inferred_from_riff_pointers() {
+        let mut rom = vec![0u8; 0x100];
+        rom[0x80..0x84].copy_from_slice(b"RIFF");
+        rom[0x84..0x88].copy_from_slice(&12u32.to_le_bytes());
+        rom[0x14..0x18]
+            .copy_from_slice(&mary::rom_import::gba_pointer(0x80).unwrap().to_le_bytes());
+        rom[0x1C..0x20].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        let layout = mary::rom_import::ResolvedScriptLayout {
+            variant: FomtVariant::FomtJp,
+            native: FomtVariant::FomtJp.native_script_layout(),
+            pointer_table_offset: 0x10,
+            slot_count: 1,
+            script_area: None,
+            scripts: vec![None],
+            metadata_present: false,
+        };
+
+        assert_eq!(infer_in_place_pointer_count(&rom, &layout).unwrap(), 2);
     }
 
     #[test]

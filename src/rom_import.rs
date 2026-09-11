@@ -118,8 +118,6 @@ pub enum ImportError {
         start: usize,
         end: usize,
     },
-    #[error("script count changed from {old} to {new}; relocate the pointer table")]
-    PointerTableRelocationRequired { old: usize, new: usize },
     #[error("ranges overlap: {first_start:#010X}..{first_end:#010X} and {second_start:#010X}..{second_end:#010X}")]
     OverlappingRanges {
         first_start: usize,
@@ -255,13 +253,7 @@ pub fn write_packed_scripts(
             require_aligned(offset)?;
             offset
         }
-        None if new_slot_count == layout.slot_count => layout.pointer_table_offset,
-        None => {
-            return Err(ImportError::PointerTableRelocationRequired {
-                old: layout.slot_count,
-                new: new_slot_count,
-            })
-        }
+        None => layout.pointer_table_offset,
     };
     let table_end = new_slot_count
         .checked_mul(4)
@@ -287,6 +279,10 @@ pub fn write_packed_scripts(
 
     rom[data_range.clone()].copy_from_slice(&packed.bytes);
     write_pointer_table(rom, table_offset, destination, &packed.relative_offsets)?;
+    if table_offset == layout.pointer_table_offset && new_slot_count < layout.slot_count {
+        let old_end = table_offset + layout.slot_count * 4;
+        rom[table_range.end..old_end].fill(0);
+    }
 
     // An in-place whole-table rebuild owns the complete original allocation.
     // Clear its unused tail so bytes from longer old scripts cannot survive.
@@ -760,6 +756,41 @@ mod tests {
                 gba_pointer(table_start).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn pointer_table_can_grow_in_place_and_shrink_clears_old_entries() {
+        let mut rom = synthetic_fomt_jp();
+        let original = resolve_script_layout(&rom, None).unwrap();
+        let mut expanded_slots = vec![None; original.slot_count + 2];
+        expanded_slots[1] = Some(riff(13, 1));
+        expanded_slots[original.slot_count + 1] = Some(riff(14, 2));
+        let expanded = PackedScripts::from_slots(&expanded_slots).unwrap();
+        let data_start = 0x190000;
+
+        let (_, table_range) =
+            write_packed_scripts(&mut rom, &original, &expanded, data_start, None).unwrap();
+        assert_eq!(
+            table_range,
+            original.pointer_table_offset
+                ..original.pointer_table_offset + (original.slot_count + 2) * 4
+        );
+        assert_ne!(
+            &rom[original.pointer_table_offset + (original.slot_count + 1) * 4
+                ..original.pointer_table_offset + (original.slot_count + 2) * 4],
+            &[0, 0, 0, 0]
+        );
+
+        let mut expanded_layout = original.clone();
+        expanded_layout.slot_count += 2;
+        let shrunk_slots = vec![None; original.slot_count];
+        let shrunk = PackedScripts::from_slots(&shrunk_slots).unwrap();
+        write_packed_scripts(&mut rom, &expanded_layout, &shrunk, data_start, None).unwrap();
+        assert_eq!(
+            &rom[original.pointer_table_offset + original.slot_count * 4
+                ..original.pointer_table_offset + (original.slot_count + 2) * 4],
+            &[0; 8]
+        );
     }
 
     #[test]

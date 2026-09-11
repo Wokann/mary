@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -39,6 +39,7 @@ pub enum MaryScriptError {
 #[derive(Debug)]
 pub struct ScriptContext {
     pub scripts: Vec<(IntValue, String, Script)>,
+    pub text_names: BTreeMap<IntValue, Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -230,8 +231,9 @@ fn parse_scripts_inner(
         at: 0,
         controls: Vec::new(),
     };
-    let mut text_constants = parser.text_table_and_declarations()?;
+    let (mut text_constants, declared_text_names) = parser.text_table_and_declarations()?;
     let mut scripts = Vec::new();
+    let mut text_names = BTreeMap::new();
     let mut ids = HashSet::new();
     let mut names = HashSet::new();
     while !parser.end() {
@@ -277,6 +279,7 @@ fn parse_scripts_inner(
             }
             text_constants.append(&mut body);
             body = std::mem::take(&mut text_constants);
+            text_names.insert(id, declared_text_names.clone());
         }
         let semantic_errors = validate_calls(&body, scope);
         if !semantic_errors.is_empty() {
@@ -291,7 +294,34 @@ fn parse_scripts_inner(
         })?;
         scripts.push((id, name, compiled));
     }
-    Ok(ScriptContext { scripts })
+    Ok(ScriptContext {
+        scripts,
+        text_names,
+    })
+}
+
+/// Return script definitions without requiring them to be present in an
+/// existing ordered script table. This is used to append new directory inputs.
+pub fn discover_script_names(
+    source: &str,
+    options: &Options,
+) -> Result<Vec<String>, MaryScriptError> {
+    let source = preprocess(source, options)?;
+    let tokens = lex(&source)?;
+    let mut names = Vec::new();
+    for window in tokens.windows(6) {
+        if let [Tok {
+            k: K::Id(void_1), ..
+        }, Tok { k: K::Id(name), .. }, Tok { k: K::Lp, .. }, Tok {
+            k: K::Id(void_2), ..
+        }, Tok { k: K::Rp, .. }, Tok { k: K::Lb, .. }] = window
+        {
+            if void_1 == "void" && void_2 == "void" {
+                names.push(name.clone());
+            }
+        }
+    }
+    Ok(names)
 }
 
 fn validate_calls(statements: &[Stmt], scope: &ConstScope) -> Vec<CompileError> {
@@ -496,23 +526,25 @@ enum Control {
 }
 
 impl P {
-    fn text_table_and_declarations(&mut self) -> Result<Vec<Stmt>, MaryScriptError> {
+    fn text_table_and_declarations(&mut self) -> Result<(Vec<Stmt>, Vec<String>), MaryScriptError> {
         if !self.eat_word("mary_text_table") {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         self.take(K::Lb)?;
         if self.is_word("const") {
             let mut result = Vec::new();
+            let mut ordered_names = Vec::new();
             let mut names = HashSet::new();
             while !self.eat(&K::Rb) {
                 let (name, value) = self.text_declaration()?;
                 if !names.insert(name.clone()) {
                     return self.err(&format!("text '{name}' is declared more than once"));
                 }
+                ordered_names.push(name.clone());
                 result.push(Stmt::Consts(vec![(name, value)]));
             }
             self.eat(&K::Semi);
-            return Ok(result);
+            return Ok((result, ordered_names));
         }
 
         // Compatibility syntax: an ordered name list followed by declarations.
@@ -533,20 +565,20 @@ impl P {
             }
         }
         let mut result = Vec::new();
-        for name in names {
+        for name in &names {
             let value = declarations
-                .remove(&name)
+                .remove(name)
                 .ok_or_else(|| MaryScriptError::Syntax {
                     line: self.peek().map_or(1, |token| token.line),
                     column: self.peek().map_or(1, |token| token.col),
                     message: format!("text '{name}' has a table slot but no declaration"),
                 })?;
-            result.push(Stmt::Consts(vec![(name, value)]));
+            result.push(Stmt::Consts(vec![(name.clone(), value)]));
         }
         if let Some(name) = declarations.keys().next() {
             return self.err(&format!("text declaration '{name}' has no table slot"));
         }
-        Ok(result)
+        Ok((result, names))
     }
 
     fn text_declaration(&mut self) -> Result<(String, Expr), MaryScriptError> {
