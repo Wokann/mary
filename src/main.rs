@@ -1027,7 +1027,7 @@ fn decompile_all_scripts(
         }
     }
     if mary_c {
-        let mut table = String::from("mary_script_table\n{\n");
+        let mut table = String::from("#if defined(MARY_C)\nmary_script_table\n{\n");
         for entry in &entries {
             match entry {
                 rom_info::ScriptTableEntry::Empty { id, .. } => {
@@ -1045,7 +1045,7 @@ fn decompile_all_scripts(
                 }
             }
         }
-        table.push_str("};\n");
+        table.push_str("};\n#endif\n");
         fs::write(output_dir.join(headers.unwrap().scripts), table)?;
     }
 
@@ -1441,7 +1441,7 @@ fn mary_header_names(target: &str) -> MaryHeaderNames {
 }
 
 fn render_script_table(table: &mary::mary_c::ScriptTable) -> String {
-    let mut source = String::from("mary_script_table\n{\n");
+    let mut source = String::from("#if defined(MARY_C)\nmary_script_table\n{\n");
     for (id, slot) in table.slots().iter().enumerate() {
         match slot {
             mary::mary_c::ScriptSlot::Empty => {
@@ -1452,7 +1452,7 @@ fn render_script_table(table: &mary::mary_c::ScriptTable) -> String {
             }
         }
     }
-    source.push_str("};\n");
+    source.push_str("};\n#endif\n");
     source
 }
 
@@ -2386,9 +2386,15 @@ fn main() -> Result<(), ()> {
 mod tests {
     use super::{
         infer_in_place_pointer_count, mary_target_variant, pointer_table_extension_conflict,
-        print_empty_single_mary_c_slot, write_ir_as_comment, write_rom_atomically,
+        print_empty_single_mary_c_slot, render_script_table, write_ir_as_comment,
+        write_rom_atomically,
     };
-    use mary::{charmap::Charmap, ir::Script, utility::rom_info::FomtVariant};
+    use mary::{
+        charmap::Charmap,
+        ir::Script,
+        mary_c::{ScriptSlot, ScriptTable},
+        utility::rom_info::FomtVariant,
+    };
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -2417,6 +2423,18 @@ mod tests {
         assert!(!source.contains("void EventScript_"));
 
         fs::remove_dir_all(output_dir).unwrap();
+    }
+
+    #[test]
+    fn generated_script_table_is_hidden_from_native_c() {
+        let table = ScriptTable::from_slots(vec![
+            ScriptSlot::Empty,
+            ScriptSlot::Script("EventScript_Test".to_owned()),
+        ])
+        .unwrap();
+        let source = render_script_table(&table);
+        assert!(source.starts_with("#if defined(MARY_C)\nmary_script_table\n"));
+        assert!(source.ends_with("};\n#endif\n"));
     }
 
     #[test]

@@ -26,11 +26,19 @@ pub use table::{parse_callable_table, CallableTable, MaryCError};
 pub use text_names::{parse_text_name_table, ScriptSymbols, TextNameTableError};
 
 /// Options which select a concrete game/version at preprocessing time.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     /// Object-like definitions, as supplied by repeated command line `-D`s.
     /// A definition without an explicit value has value `1`.
     pub defines: std::collections::HashMap<String, String>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        let mut defines = std::collections::HashMap::new();
+        defines.insert("MARY_C".to_owned(), "1".to_owned());
+        Self { defines }
+    }
 }
 
 impl Options {

@@ -22,6 +22,8 @@ EventScript_NNNN.mary.c        单个脚本、脚本内文本表和正文
 
 `.mary.sym` 不会被 `.mary.c` include，也不参与回编。批量反编译会复制固定常量头与 callable 头，并从 ROM 指针槽和所选 `.sym` 名称生成本地 `fomt_scripts.mary.h`，因此脚本表与输出函数名来自同一来源。单脚本反编译写入文件时同样复制固定头；若提供脚本符号表或脚本表，则同时生成本地脚本表头。
 
+`fomt_constants.mary.h` 与 `mfomt_constants.mary.h` 同时也是合法的原生 C 头文件。FoMT 反编译工程 include 后可以直接使用其中的 typedef、枚举及数字符号；仅供 Mary 类型传播使用的声明会在原生 C 编译时展开为空的定参数宏。Mary 编译器内部自动定义 `MARY_C`，callable 头和脚本头只在该条件内公开 Mary 专用的有序表及原型；FoMT 原生构建不定义 `MARY_C`，因此看不到这两类内容，函数表和脚本表仍完全由 Mary 工具链维护。地区常量统一使用双方共享的 `REGION_JP`、`REGION_US`、`REGION_EU` 与 `REGION_DE` 宏。
+
 ## 目标选择
 
 每个 `.mary.c` 必须显式定义且只定义一个目标：

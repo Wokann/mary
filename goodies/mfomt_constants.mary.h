@@ -31,6 +31,18 @@
  * 后续复刻版采用的新名称不会覆盖本项目四套 ROM 的 GBA 版术语。
  */
 
+/* Mary-C consumes these declarations as compile-time type metadata. Native C
+ * compilers erase them while retaining every standard typedef, enum, and
+ * numeric constant in this header. */
+#if !defined(MARY_C)
+#define mary_typed_identity(value_type, wrapper_name)
+#define mary_type_subset(subset_type, superset_type)
+#define mary_var_type(variable_id, value_type)
+#define mary_callable_return_type_when(callable, parameter_index, parameter_value, value_type)
+#define mary_callable_return_type_when_callable(value_callable, discriminator_callable, discriminator_value, value_type)
+#define mary_callable_parameter_type_when(callable, discriminator_parameter_index, discriminator_value, target_parameter_index, value_type)
+#endif
+
 /* Complete physical actor-animation ID domain. The contiguous animation
  * record tables end exactly where each ROM's frame-structure array begins:
  * FoMT-US 0x0858BA2C-0x0858E20C and FoMT-JP
@@ -9872,3 +9884,12 @@ mary_callable_parameter_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_HORSE, 1,
 mary_callable_parameter_type_when(GetAnimalGrowthStage, 0, ANIMAL_KIND_DOG, 1, MaryAnimalIgnoredPetIndexArgument);
 mary_callable_return_type_when(GetContestAnimalIndex, 0, ANIMAL_KIND_CHICKEN, MaryAnimalChickenSlotIndex);
 mary_callable_return_type_when(SelectFestivalAnimal, 0, FESTIVAL_ANIMAL_CHICKEN, MaryAnimalChickenSlotIndex);
+
+#if !defined(MARY_C)
+#undef mary_typed_identity
+#undef mary_type_subset
+#undef mary_var_type
+#undef mary_callable_return_type_when
+#undef mary_callable_return_type_when_callable
+#undef mary_callable_parameter_type_when
+#endif

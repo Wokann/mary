@@ -10,6 +10,7 @@
  *
  * 证据来源说明：当前 `fomt` 源码树代表 FoMT-US；经过验证的本地化差异由
  * 所选目标派生出的对应 REGION_* 宏选择。 */
+#if defined(MARY_C)
 mary_callable_table
 {
     /* VM-internal stack/control slots, not source-level calls. */
@@ -5695,3 +5696,4 @@ int GetEventContextValue(void);
  * 工具。
  */
 void CycleBackwardToNonCursedTool(void);
+#endif

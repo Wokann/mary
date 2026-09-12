@@ -22,6 +22,8 @@ EventScript_NNNN.mary.c        one script, its local text table, and its body
 
 The `.mary.sym` file is never included by generated source and is not required for recompilation. Batch decompilation copies the fixed constants and callable headers and generates a local `fomt_scripts.mary.h` from physical ROM slots and selected symbol names, keeping header and function names synchronized. A single-script decompile written to a file copies the fixed headers as well; when script symbols or a script table are supplied, it also generates the local script-table header.
 
+`fomt_constants.mary.h` and `mfomt_constants.mary.h` are also valid native C headers. Their typedefs, enums, and numeric symbols remain visible when included by the FoMT decompilation project. Mary-only type-propagation declarations erase to empty fixed-arity macros for a native C compiler. Mary defines `MARY_C` internally; under that guard the callable and script headers expose their Mary-only ordered tables and prototypes. Native FoMT builds leave `MARY_C` undefined, so those two headers contribute no declarations and remain owned exclusively by the Mary toolchain. Region-dependent constants use the shared `REGION_JP`, `REGION_US`, `REGION_EU`, and `REGION_DE` macros.
+
 ## Target selection
 
 Every `.mary.c` explicitly selects exactly one target:

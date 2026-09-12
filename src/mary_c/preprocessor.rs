@@ -315,6 +315,14 @@ mod tests {
     }
 
     #[test]
+    fn mary_c_guard_is_enabled_for_every_frontend_parse() {
+        let source = "#if defined(MARY_C)\nmary-only\n#else\nnative-only\n#endif\n";
+        let output = preprocess(source, &Options::default()).unwrap();
+        assert!(output.contains("mary-only"));
+        assert!(!output.contains("native-only"));
+    }
+
+    #[test]
     fn rejects_unbalanced_conditionals() {
         assert!(matches!(
             preprocess("#if defined(X)\n", &Options::default()),

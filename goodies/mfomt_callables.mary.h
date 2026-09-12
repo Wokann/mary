@@ -7,6 +7,7 @@
  *
  * MFoMT 语义由其 ROM 原生处理函数和脚本核验；US/JP 本地化差异仅在本表
  * 内部选择。 */
+#if defined(MARY_C)
 mary_callable_table
 {
     /* VM-internal stack/control slots, not source-level calls. */
@@ -5881,3 +5882,4 @@ MaryItemToolExperienceValue GetToolExperience(MaryItemToolKind tool_kind);
  * 返回值：有效输入下当前仍存在的获奖动物数；马类别受上述原生缺陷影响。
  */
 MaryFestivalWinningAnimalCount CountFestivalWinningAnimals(MaryAnimalKind animal_kind);
+#endif
