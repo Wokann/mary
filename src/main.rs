@@ -269,6 +269,10 @@ enum Command {
         #[arg(long)]
         script_table: Option<PathBuf>,
 
+        /// Constant declarations shared with native C/C++ (.mary.h)
+        #[arg(long)]
+        constants: Option<PathBuf>,
+
         /// Byte-to-Unicode map used for localized string literals
         #[arg(long)]
         charmap: Option<PathBuf>,
@@ -588,6 +592,7 @@ fn main_error() -> Result<(), Error> {
             layout,
             library,
             script_table,
+            constants,
             charmap,
             defines,
         } => bundle_mary_c(BundleRequest {
@@ -596,6 +601,7 @@ fn main_error() -> Result<(), Error> {
             layout,
             library,
             script_table,
+            constants,
             charmap,
             defines,
         }),
@@ -1536,6 +1542,7 @@ fn import_mary_c_into_rom(request: ImportRequest) -> Result<(), Error> {
         &request.input_source,
         request.library.as_deref(),
         request.script_table.as_deref(),
+        None,
         request.charmap,
         request.defines,
     )?;
@@ -1757,6 +1764,7 @@ fn compile_import_sources(
     input: &Path,
     library_override: Option<&Path>,
     script_table_override: Option<&Path>,
+    constants_override: Option<&Path>,
     charmap_path: Option<PathBuf>,
     defines: Vec<String>,
 ) -> Result<CompiledImport, Error> {
@@ -1804,7 +1812,10 @@ fn compile_import_sources(
         .map(PathBuf::from)
         .or_else(|| included(headers.scripts))
         .unwrap_or_else(|| base.join(headers.scripts));
-    let constants = included(headers.constants).unwrap_or_else(|| base.join(headers.constants));
+    let constants = constants_override
+        .map(PathBuf::from)
+        .or_else(|| included(headers.constants))
+        .unwrap_or_else(|| base.join(headers.constants));
 
     let constant_scope =
         mary::mary_c::parse_constant_header(&fs::read_to_string(&constants)?, &options)?;
@@ -1928,6 +1939,7 @@ struct BundleRequest {
     layout: BundleLayout,
     library: Option<PathBuf>,
     script_table: Option<PathBuf>,
+    constants: Option<PathBuf>,
     charmap: Option<PathBuf>,
     defines: Vec<String>,
 }
@@ -1942,6 +1954,7 @@ fn bundle_mary_c(request: BundleRequest) -> Result<(), Error> {
         &request.input_source,
         request.library.as_deref(),
         request.script_table.as_deref(),
+        request.constants.as_deref(),
         request.charmap,
         request.defines,
     )?;
